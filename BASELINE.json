@@ -1,0 +1,10 @@
+{
+  "upstream": "https://github.com/pagefaultgames/pokerogue.git",
+  "commit": "ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9",
+  "upstreamVersion": "1.0.0",
+  "projectStage": "offline-single-player-foundation",
+  "gamePort": 8020,
+  "saveDatabase": "pokerogue-early-local",
+  "saveSchema": 1,
+  "coopAvailable": false
+}

@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>早期版 · 本地存档</title>
+<style>body{margin:0;background:#101729;color:#e9efff;font:16px/1.7 system-ui}main{max-width:780px;margin:8vh auto;padding:28px}h1{font-size:32px}section{border:1px solid #35425e;border-radius:14px;padding:24px;margin:20px 0;background:#18223a}a,button{display:inline-block;color:#fff;background:#435bad;border:0;border-radius:8px;padding:10px 18px;font:inherit;cursor:pointer;margin:4px}small{color:#b8c5df}pre{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.45;cursor:default}</style></head>
+<body><main><small>POKÉROGUE · EARLY FOUNDATION</small><h1>单人基础与本地收藏</h1>
+<p>图鉴、扭蛋与游戏进度保存在此浏览器。当前阶段为单人基础；合作房间尚未开放。</p>
+<a href="/">进入游戏</a><section><h2>本地存档</h2><p id="status" role="status">正在读取…</p><pre id="details"></pre>
+<button id="refresh">刷新存档状态</button><button id="export" disabled>导出完整备份</button>
+<label>选择备份文件 <input id="importFile" type="file" accept=".json,application/json"></label><button id="restore" disabled>恢复所选备份</button>
+<p><small>恢复会替换当前收藏和单人进度，现有数据保留为上一份快照。恢复前请关闭游戏页面，完成后重新进入游戏。游戏内菜单的 Manage Data 也可导入、导出单份 .prsv 存档。键盘：方向键选择，Z 或空格确认，X 返回，M 打开菜单。</small></p></section>
+<p><small>收藏存档使用独立 IndexedDB 数据库，与现有新版分开。换浏览器或访问地址时，可通过存档文件迁移。</small></p></main>
+<script type="module" src="/src/local-save-tools.ts"></script></body></html>

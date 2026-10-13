@@ -5,7 +5,7 @@
 ## 工作目录与起点
 
 - 只在 `E:\pokeregue\pokerogue-early` 开发；远程 `https://github.com/northstreet01/pokerogue-early.git`，分支 `main`。
-- M1 已审查并提交 `13ac6839`，未推送。M2 首批 Pokemon/队伍切片随独立提交交付；接手先查 Git 状态和最新提交，不假定工作区无后续修改。
+- M1 与 M2 各批至 `c50d5cba` 已推送；M3 首批提交号读取最新 Git。接手先查 Git 状态和最新提交，不假定工作区无后续修改。
 - `E:\pokeregue\pokerogue` 是另一份含用户未上传工作的新版目录，不能重置、清理或批量覆盖。需要移植扩展时只读参考并记录来源。
 - 接手先读 `git status --short`、`git log -5 --oneline`；不要假定用户之后没有修改，不做强制拉取、reset 或清理。
 - 发布排除服务器房间数据、恢复凭据、个人备份、环境秘密、node_modules、构建和临时审计输出。不要读取真实房间文件来生成公开测试夹具。
@@ -27,6 +27,8 @@
 正式 `/coop/v1/ws` 已在开发/生产服务挂载，默认无原版适配器，开局返回 `ADAPTER_UNAVAILABLE`。`src/battle-core/coop-contract.mjs` 与类型声明定义正式消息/适配接口；`coop-client.mjs` 从应用后的模型提取并确认。M1 计数器测试仅证明协议；M2 新增原 Pokemon 类的独立双端恢复测试，尚未接入生产原游戏客户端。
 
 ## 下一项可执行任务：M2
+
+当前已进入 M3 首批：原行动排序提取并回接单人，合计 103 项测试、类型检查和构建通过，见 [M3 记录](turn-order-m3-2026-10-13.md)。M2 缺口仍须继续补；下一批从原 Command/EnemyCommand 的受控决策入口及 Move/MoveEffect 规则分离推进，不重复 Modifier 全类登记。下面第四批及更早内容为历史记录。
 
 最新：第四批已补 57 个具体 Modifier 类及八种生成型类型恢复，等待行动 payload v2 保留共享类型引用，101 项测试通过，见 [第四批记录](modifier-checkpoints-m2-2026-10-13.md)。用户已授权提交推送并推进 M3；先做原行动排序切片。M2 Phase/全 RNG/其他停点仍未完成，不能把组件全类型等同于完整检查点验收。后文第三批及之前为历史记录。
 
@@ -61,4 +63,4 @@ npm run build
 
 ## 可直接发送给新窗口的任务
 
-> 在 E:\pokeregue\pokerogue-early 继续开发。先检查工作区并读 SPEC、架构、模块计划、交接及 docs/trainer-checkpoints-m2-2026-10-13.md。M1 已提交 13ac6839；M2 首批 78900705，第二批 271b5570，第三批 Trainer 适配提交号读取 Git。当前 96 项测试、类型检查和构建通过，M2 仍部分完成；下一步优先补 Modifier 全类型及生成型 ModifierType 恢复，再补原 Phase 决策映射及全局 RNG 改接。Trainer 生产导出已有实现，但全配置队伍生成与完整场景绑定未验收。单端原版差分与真实 WS 双端恢复同步推进。保持 Node.js 权威结算、early 原规则、原图鉴与个人收藏，不动另一目录的未上传内容。每批次分别记录接口、状态、运行器、UI 与双机验收。
+> 在 E:\pokeregue\pokerogue-early 继续开发。先检查工作区并读 SPEC、架构、模块计划、交接及 docs/turn-order-m3-2026-10-13.md。M2 全 Modifier 类恢复提交 c50d5cba 已推送，M3 原行动排序首批提交号读取 Git。当前 103 项测试、类型检查和构建通过。M2 尚缺原 Phase 决策映射、全局 RNG 改接及其他安全停点；M3 仅排序切片，继续从 Command/EnemyCommand 受控决策入口和 Move/MoveEffect 规则分离推进。单端原版差分与真实 WS 双端恢复同步推进。保持 Node.js 权威结算、early 原规则、原图鉴与个人收藏，不动另一目录的未上传内容。分别记录接口、状态、运行器、UI 与双机验收，不能将完整 M2/M3 标成完成。

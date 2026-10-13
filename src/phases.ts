@@ -1,3 +1,4 @@
+import { getFieldOrder, getMoveOrder } from './battle-core/turn-order.mjs';
 import i18next from './i18n';
 import BattleScene, { STARTER_FORM_OVERRIDE, STARTER_SPECIES_OVERRIDE, bypassLogin, startingWave } from "./battle-scene";
 import { default as Pokemon, PlayerPokemon, EnemyPokemon, PokemonMove, MoveResult, DamageResult, FieldPosition, HitResult, TurnMove } from "./field/pokemon";
@@ -491,23 +492,16 @@ type PokemonFunc = (pokemon: Pokemon) => void;
 
 export abstract class FieldPhase extends BattlePhase {
   getOrder(): BattlerIndex[] {
-    const playerField = this.scene.getPlayerField().filter(p => p.isActive()) as Pokemon[];
-    const enemyField = this.scene.getEnemyField().filter(p => p.isActive()) as Pokemon[];
-
-    let orderedTargets: Pokemon[] = playerField.concat(enemyField).sort((a: Pokemon, b: Pokemon) => {
-      const aSpeed = a?.getBattleStat(Stat.SPD) || 0;
-      const bSpeed = b?.getBattleStat(Stat.SPD) || 0;
-
-      return aSpeed < bSpeed ? 1 : aSpeed > bSpeed ? -1 : !this.scene.currentBattle.randSeedInt(2) ? -1 : 1;
+    return getFieldOrder(this.scene.getPlayerField(), this.scene.getEnemyField(), {
+      getSpeed: pokemon => pokemon?.getBattleStat(Stat.SPD),
+      randomInt: range => this.scene.currentBattle.randSeedInt(range),
+      isReversed: () => {
+        const speedReversed = new Utils.BooleanHolder(false);
+        this.scene.arena.applyTags(TrickRoomTag, speedReversed);
+        return speedReversed.value;
+      },
+      getIndex: pokemon => pokemon.getFieldIndex() + (!pokemon.isPlayer() ? BattlerIndex.ENEMY : 0)
     });
-
-    const speedReversed = new Utils.BooleanHolder(false);
-    this.scene.arena.applyTags(TrickRoomTag, speedReversed);
-
-    if (speedReversed.value)
-      orderedTargets = orderedTargets.reverse();
-
-    return orderedTargets.map(t => t.getFieldIndex() + (!t.isPlayer() ? BattlerIndex.ENEMY : 0));
   }
 
   executeForAll(func: PokemonFunc): void {
@@ -1784,35 +1778,18 @@ export class TurnStartPhase extends FieldPhase {
     const field = this.scene.getField();
     const order = this.getOrder();
 
-    const moveOrder = order.slice(0);
-
-    moveOrder.sort((a, b) => {
-      const aCommand = this.scene.currentBattle.turnCommands[a];
-      const bCommand = this.scene.currentBattle.turnCommands[b];
-
-      if (aCommand.command !== bCommand.command) {
-        if (aCommand.command === Command.FIGHT)
-          return 1;
-        else if (bCommand.command === Command.FIGHT)
-          return -1;
-      } else if (aCommand.command === Command.FIGHT) {
-        const aMove = allMoves[aCommand.move.move];
-        const bMove = allMoves[bCommand.move.move];
-
+    const moveOrder = getMoveOrder(order, {
+      getCommand: index => this.scene.currentBattle.turnCommands[index],
+      fightCommand: Command.FIGHT,
+      getPriorities: (a, b, aMoveId, bMoveId) => {
+        const aMove = allMoves[aMoveId];
+        const bMove = allMoves[bMoveId];
         const aPriority = new Utils.IntegerHolder(aMove.priority);
         const bPriority = new Utils.IntegerHolder(bMove.priority);
-
-		    applyAbAttrs(IncrementMovePriorityAbAttr, this.scene.getField().find(p => p?.isActive() && p.getBattlerIndex() === a), null, aMove, aPriority);
+        applyAbAttrs(IncrementMovePriorityAbAttr, this.scene.getField().find(p => p?.isActive() && p.getBattlerIndex() === a), null, aMove, aPriority);
         applyAbAttrs(IncrementMovePriorityAbAttr, this.scene.getField().find(p => p?.isActive() && p.getBattlerIndex() === b), null, bMove, bPriority);
-        
-        if (aPriority.value !== bPriority.value)
-          return aPriority.value < bPriority.value ? 1 : -1;
+        return [aPriority.value, bPriority.value];
       }
-      
-      const aIndex = order.indexOf(a);
-      const bIndex = order.indexOf(b);
-
-      return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0;
     });
 
     for (let o of moveOrder) {

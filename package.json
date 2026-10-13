@@ -5,6 +5,9 @@
 	"type": "module",
 	"scripts": {
 		"start": "vite",
+		"coop:catalog": "node scripts/generate-coop-catalog.mjs",
+		"start:server": "node server/start.mjs",
+		"test:coop": "node --test tests/coop*.test.mjs",
 		"typecheck": "tsc --noEmit",
 		"test:local-save": "node --test tests/local-save.test.mjs",
 		"build": "vite build",
@@ -35,7 +38,8 @@
 		"crypto-js": "^4.2.0",
 		"json-stable-stringify": "^1.1.0",
 		"phaser": "^3.70.0",
-		"phaser3-rex-plugins": "^1.1.84"
+		"phaser3-rex-plugins": "^1.1.84",
+		"ws": "8.22.0"
 	},
 	"engines": {
 		"node": ">=18.0.0"

@@ -1,4 +1,4 @@
-import { readLocalSave, sessionSaveKey, restoreLocalSaves } from './system/local-save-store';
+import { readLocalSaveSnapshot, sessionSaveKey, restoreLocalSaves } from './system/local-save-store';
 
 const status = document.getElementById('status');
 const details = document.getElementById('details');
@@ -8,9 +8,9 @@ let snapshot: Record<string, string> = {};
 async function refresh() {
   exportButton.disabled = true;
   try {
-    const keys = ['data', 'data:backup', ...[0, 1, 2].flatMap(slot => [sessionSaveKey(slot), `${sessionSaveKey(slot)}:backup`])];
-    const records = await Promise.all(keys.map(async key => [key, await readLocalSave(key)] as const));
-    snapshot = Object.fromEntries(records.filter(([, value]) => value !== null));
+    const keys = ['data', 'coop-grants', 'coop-experiment-data', 'coop-experiment-grants', 'coop-seats', ...[0, 1, 2].map(sessionSaveKey)].flatMap(key => [key, `${key}:backup`]);
+    const records = await readLocalSaveSnapshot(keys);
+    snapshot = Object.fromEntries(Object.entries(records).filter(([, value]) => value !== null));
     const profile = snapshot.data ? JSON.parse(snapshot.data) : null;
     const slots = [0, 1, 2].map(slot => {
       const data = snapshot[sessionSaveKey(slot)];
@@ -18,7 +18,8 @@ async function refresh() {
     });
     status.textContent = profile ? '本地收藏存档已保存' : '还没有收藏存档，请先进入游戏完成初始设置。';
     details.textContent = [profile ? `待孵化蛋：${profile.eggs?.length ?? 0}\n扭蛋券：${JSON.stringify(profile.voucherCounts ?? {})}\n最近保存：${new Date(profile.timestamp).toLocaleString('zh-CN')}` : '', ...slots,
-      snapshot['data:backup'] ? '上一次收藏快照：已保留' : '上一次收藏快照：暂无'].filter(Boolean).join('\n');
+      snapshot['data:backup'] ? '上一次收藏快照：已保留' : '上一次收藏快照：暂无',
+      snapshot['coop-seats'] ? '备份包含合作席位恢复凭据，请妥善保存。服务器还需保留对应房间文件。' : ''].filter(Boolean).join('\n');
     exportButton.disabled = Object.keys(snapshot).length === 0;
   } catch (error) {
     status.textContent = `读取失败：${error instanceof Error ? error.message : String(error)}`;

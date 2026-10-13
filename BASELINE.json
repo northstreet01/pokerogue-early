@@ -2,9 +2,18 @@
   "upstream": "https://github.com/pagefaultgames/pokerogue.git",
   "commit": "ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9",
   "upstreamVersion": "1.0.0",
-  "projectStage": "offline-single-player-foundation",
+  "projectStage": "authoritative-coop-validation-stage-1",
   "gamePort": 8020,
   "saveDatabase": "pokerogue-early-local",
   "saveSchema": 1,
-  "coopAvailable": false
+  "coopAvailable": true,
+  "coopEntry": "coop.html",
+  "originalGameCoopAvailable": false,
+  "experimentalCollectionIsolated": true,
+  "coopVersion": "early-coop-0.1",
+  "coopSpecies": 10,
+  "coopMoves": 14,
+  "coopWaves": 10,
+  "coopLevelCap": 10,
+  "sharedSoloEngine": false
 }

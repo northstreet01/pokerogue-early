@@ -56,3 +56,18 @@ test('archive restore validates every record before replacing anything and retai
   assert.equal(await saves.readLocalSave('sessionData2'), null);
   assert.equal(await saves.readLocalSave('sessionData2:backup'), '{"wave":3}');
 });
+
+test('backup snapshots keep collection and grant ledger at the same transaction boundary', async () => {
+  await saves.mutateLocalSaves(['snapshot-data','snapshot-ledger'], () => ({
+    'snapshot-data':'{"revision":1}', 'snapshot-ledger':'{"revision":1}'
+  }));
+  const reading = saves.readLocalSaveSnapshot(['snapshot-data','snapshot-ledger']);
+  const writing = saves.mutateLocalSaves(['snapshot-data','snapshot-ledger'], () => ({
+    'snapshot-data':'{"revision":2}', 'snapshot-ledger':'{"revision":2}'
+  }));
+  const result = await reading; await writing;
+  assert.equal(JSON.parse(result['snapshot-data']).revision,JSON.parse(result['snapshot-ledger']).revision);
+  const next = await saves.readLocalSaveSnapshot(['snapshot-data','snapshot-ledger']);
+  assert.equal(JSON.parse(next['snapshot-data']).revision,2);
+  assert.equal(JSON.parse(next['snapshot-ledger']).revision,2);
+});

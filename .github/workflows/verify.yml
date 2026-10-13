@@ -22,5 +22,7 @@ jobs:
         run: npm run typecheck
       - name: Local save regression tests
         run: npm run test:local-save
+      - name: Cooperative battle and socket regression tests
+        run: npm run test:coop
       - name: Build game and save manager
         run: npm run build

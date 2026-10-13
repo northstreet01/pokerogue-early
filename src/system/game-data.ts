@@ -173,6 +173,8 @@ const systemShortKeys = {
 
 export class GameData {
   private scene: BattleScene;
+  private localSystemSnapshot: string | null = null;
+  private localSystemSaveQueue: Promise<void> = Promise.resolve();
 
   public trainerId: integer;
   public secretId: integer;
@@ -258,7 +260,12 @@ export class GameData {
               resolve(true);
             });
         } else {
-          writeLocalSave('data', systemData).then(() => resolve(true), error => {
+          const write = this.localSystemSaveQueue.catch(() => {}).then(async () => {
+            await writeLocalSave('data', systemData, this.localSystemSnapshot);
+            this.localSystemSnapshot = systemData;
+          });
+          this.localSystemSaveQueue = write;
+          write.then(() => resolve(true), error => {
             console.error('Local collection save failed', error);
             resolve(false);
           });
@@ -359,7 +366,10 @@ export class GameData {
             handleSystemData(response);
           });
       } else {
-        readLocalSave('data').then(data => data ? handleSystemData(data) : resolve(false))
+        readLocalSave('data').then(data => {
+          this.localSystemSnapshot = data;
+          return data ? handleSystemData(data) : resolve(false);
+        })
           .catch(error => { console.error('Local collection load failed', error); reject(error); });
       }
     });

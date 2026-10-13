@@ -1,9 +1,13 @@
 # PokéRogue Early — 本地存档与合作开发基础
 
+项目需求、真实进度、原版保留边界及后续验收统一见 [SPEC.md](SPEC.md)。独立合作验证页尚未接入原游戏，实验内容限制不是正式玩法需求。
+
 基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的固定历史提交
 `ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9`，从较早版本逐步开发独立成长、共同战斗的合作游戏。
 
-当前已完成独立单人启动和本地存档接入。合作房间、权威服务器结算、个人独立商店和精灵实例仓库尚未完成。
+当前包含早期单人游戏、本地存档，以及第一阶段合作验证版：建房/加入、各自选 3 只、服务器共同双打、个人奖励商店、捕获收藏和战后保存恢复。新合作暂支持 10 种精灵与 14 个招式，未接入特性/进化或完整原版战斗；单人仍使用旧引擎。
+
+实验页的捕获记录现已隔离到独立收藏副本，不写回正式图鉴；实验内容限制不改变原游戏规则。审查结果见 [代码审查记录](docs/code-review-2026-10-13.md)。
 
 ```sh
 npm ci --ignore-scripts
@@ -11,10 +15,11 @@ npm run start
 ```
 
 游戏入口为 `http://localhost:8020/`，本地存档页面为 `http://localhost:8020/save-tools.html`。
+合作入口为 `http://localhost:8020/coop.html`。双端连接和支持范围见 [COOP.md](COOP.md)。
 收藏、图鉴、扭蛋数据与单人进度保存在独立 IndexedDB 中；设置和教程使用 localStorage。
 存档按浏览器和访问地址隔离，可导入、导出备份。仓库不包含个人存档、node_modules 或构建产物。
 
-验证：`npm run typecheck`、`npm run test:local-save`、`npm run build`。
+验证：`npm run typecheck`、`npm run test:local-save`、`npm run test:coop`、`npm run build`。
 
 - [当前开发记录](LOCAL-FOUNDATION.md)
 - [已确认需求与设计](docs/coop-game-design-2026-10-13.md)

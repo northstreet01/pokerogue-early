@@ -79,7 +79,7 @@ Object.assign(dependencies, {
   '../battle-core/pokemon-state.mjs': { createPokemonStateCodec }
 });
 const pokemon = evaluate(read('field/pokemon.ts'), dependencies);
-export { read, parse, evaluate, pokemon, species, moveCatalog, status, battler, arena, moves };
+export { read, parse, evaluate, pokemon, species, moveCatalog, status, battler, arena, moves, weather, terrain };
 
 export function originalPokemon(id = 100, enemy = false) {
   const p = Object.create((enemy ? pokemon.EnemyPokemon : pokemon.PlayerPokemon).prototype);

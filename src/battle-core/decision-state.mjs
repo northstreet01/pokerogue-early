@@ -1,0 +1,165 @@
+import { copy, canonical, requireContract as check } from './coop-contract.mjs';
+import { RandomDataGenerator, readBattleRandomCheckpoint, shiftSeed } from './random.mjs';
+
+const uint = v => Number.isSafeInteger(v) && v >= 0;
+const exact = (v, names) => check(v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).sort().join(',') === [...names].sort().join(','), 'INVALID_CHECKPOINT');
+export const battleCheckpointFields = Object.freeze(['gameMode','waveIndex','battleType','battleSpec','trainer','enemyLevels','enemyParty','seenEnemyPartyMemberIds','double','started','turn','turnCommands','playerParticipantIds','battleScore','postBattleLoot','escapeAttempts','lastMove','battleSeed','battleSeedState']);
+export const arenaCheckpointFields = Object.freeze(['scene','biomeType','weather','terrain','tags','bgm','ignoreAbilities','lastTimeOfDay','pokemonPool','trainerPool']);
+// Only bgm and the runtime scene reference are excluded from the arena projection.
+const battleScalars = ['waveIndex','battleType','battleSpec','double','started','turn','battleScore','escapeAttempts'];
+const arenaScalars = ['biomeType','ignoreAbilities','lastTimeOfDay','pokemonPool','trainerPool'];
+const sceneFields = ['seed','waveSeed','waveCycleOffset','offsetGym','score'];
+
+/** Room-owned equivalent of the original scene stream. Never swaps global RND. */
+export class SceneRandom {
+  constructor(state) {
+    readBattleRandomCheckpoint({ version: 1, seed: '', turn: 0, state });
+    check(state !== null, 'INVALID_SCENE_RANDOM');
+    this.generator = new RandomDataGenerator(state);
+  }
+  capture() { return this.generator.state(); }
+  integer(range, min = 0) { return range <= 1 ? min : this.generator.integerInRange(min, min + range - 1); }
+  scoped(seed, offset, callback) {
+    check(typeof callback === 'function' && callback.constructor.name !== 'AsyncFunction', 'ASYNC_RANDOM_SCOPE');
+    const scoped = new RandomDataGenerator([shiftSeed(seed, offset)]);
+    const result = callback(scoped);
+    check(!result || typeof result.then !== 'function', 'ASYNC_RANDOM_SCOPE');
+    return result;
+  }
+}
+
+/** Explicit safe-boundary assembly. Trusted component codecs must fail closed
+ * for every trainer/modifier they do not support; no ModifierData constructors. */
+export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGameMode, components }) {
+  const encodeRaw = (kind, value) => {
+    if (value === null) return null;
+    check(components?.[kind]?.capture && components?.[kind]?.restore, 'COMPONENT_UNAVAILABLE');
+    return components[kind].capture(value);
+  };
+  const decodeRaw = (kind, value) => {
+    if (value === null) return null;
+    check(components?.[kind]?.capture && components?.[kind]?.restore, 'COMPONENT_UNAVAILABLE');
+    return components[kind].restore(value);
+  };
+  const optional = (object, key, encode = v => copy(v)) => !Object.hasOwn(object, key) ? { presence: 'absent' } : object[key] === undefined ? { presence: 'undefined' } : { presence: 'value', value: object[key] === null ? null : encode(object[key]) };
+  function restoreOptional(target, key, saved, decode = v => copy(v)) {
+    check(saved && ['absent','undefined','value'].includes(saved.presence), 'INVALID_CHECKPOINT');
+    exact(saved, saved.presence === 'value' ? ['presence','value'] : ['presence']);
+    if (saved.presence !== 'absent') Object.defineProperty(target, key, { value: saved.presence === 'undefined' ? undefined : saved.value === null ? null : decode(saved.value), writable: true, enumerable: true, configurable: true });
+  }
+  function validateDecision(decision, candidate) {
+    exact(decision, ['id','kind','requiredSeats','options']);
+    check(typeof decision.id === 'string' && decision.id.length > 0 && decision.id.length <= 128 && decision.kind === 'wait-actions', 'UNSUPPORTED_STOP');
+    check(Array.isArray(decision.requiredSeats) && decision.requiredSeats.length > 0 && new Set(decision.requiredSeats).size === decision.requiredSeats.length && decision.requiredSeats.every(s => s === 0 || s === 1), 'INVALID_DECISION');
+    exact(decision.options, decision.requiredSeats.map(String));
+    for (const seat of decision.requiredSeats) {
+      const entry = candidate.roster.entries.find(e => e.pokemon.id === candidate.roster.field[seat]);
+      check(entry && entry.owner === seat && entry.pokemon.hp > 0, 'INVALID_DECISION');
+      const options = decision.options[seat];
+      check(Array.isArray(options) && options.length > 0 && options.length <= 10000 && options.every(o => o && typeof o.kind === 'string' && o.pokemonId === entry.pokemon.id), 'INVALID_DECISION');
+      check(new Set(options.map(canonical)).size === options.length, 'INVALID_DECISION');
+    }
+    const living = [0, 1].filter(seat => candidate.roster.entries.some(e => e.pokemon.id === candidate.roster.field[seat] && e.pokemon.hp > 0));
+    check(canonical([...decision.requiredSeats].sort()) === canonical(living), 'INVALID_DECISION');
+  }
+  function capture(context) {
+    const componentTable = [], componentIds = new Map();
+    const encodeComponent = (kind, value) => {
+      if (value === null) return null;
+      if (componentIds.has(value)) { const index = componentIds.get(value); check(componentTable[index].kind === kind, 'COMPONENT_TYPE_MISMATCH'); return index; }
+      const index = componentTable.length; componentIds.set(value, index); componentTable.push({ kind, state: encodeRaw(kind, value) }); return index;
+    };
+    exact(context, ['roster','battle','arena','scene','players','enemyModifiers','sceneRandom','decision','pendingEffects']);
+    check(Array.isArray(context.pendingEffects) && context.pendingEffects.length === 0, 'UNSUPPORTED_PENDING_EFFECTS');
+    const b = context.battle, a = context.arena;
+    for (const model of [b, a]) for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(model))) check('value' in descriptor, 'MODEL_ACCESSOR');
+    check(Object.getPrototypeOf(b) === Battle.prototype && Object.getPrototypeOf(a) === Arena.prototype, 'UNSUPPORTED_MODEL');
+    check(Object.keys(b).every(k => battleCheckpointFields.includes(k)), 'UNKNOWN_BATTLE_FIELD');
+    check(Object.keys(a).every(k => arenaCheckpointFields.includes(k)), 'UNKNOWN_ARENA_FIELD');
+    // No Phase objects or already queued commands at this decision boundary.
+    check(b.turnCommands && Object.values(b.turnCommands).every(v => v === null), 'UNSUPPORTED_COMMAND_QUEUE');
+    const snapshot = { version: 1, components: componentTable, roster: roster.capture(context.roster),
+      battle: { ...Object.fromEntries(battleScalars.map(k => [k, b[k]])), gameMode: b.gameMode.modeId,
+        trainer: optional(b, 'trainer', v => encodeComponent('trainer', v)), enemyLevels: copy(b.enemyLevels),
+        enemyParty: b.enemyParty.map(p => { check(context.roster.entries.some(e => e.pokemon === p && e.owner === null), 'INVALID_ENEMY_REFERENCE'); return p.id; }),
+        seenEnemyPartyMemberIds: [...b.seenEnemyPartyMemberIds], playerParticipantIds: [...b.playerParticipantIds],
+        turnCommands: copy(b.turnCommands), lastMove: optional(b, 'lastMove'),
+        postBattleLoot: b.postBattleLoot.map(v => encodeComponent('modifier', v)), random: b.captureRandomState() },
+      arena: { ...Object.fromEntries(arenaScalars.map(k => [k, optional(a, k)])),
+        weather: optional(a, 'weather', effects.captureWeatherState), terrain: optional(a, 'terrain', effects.captureTerrainState), tags: a.tags.map(effects.captureArenaTagState) },
+      scene: copy(context.scene), sceneRandom: context.sceneRandom.capture(),
+      enemyModifiers: context.enemyModifiers.map(v => encodeComponent('modifier', v)),
+      players: context.players.map(p => { exact(p, ['money','pokeballCounts','modifiers']); return { ...copy({ money: p.money, pokeballCounts: p.pokeballCounts }), modifiers: p.modifiers.map(v => encodeComponent('modifier', v)) }; }),
+      decision: copy(context.decision), pendingEffects: [] };
+    restore(snapshot); return snapshot;
+  }
+  function restore(input) {
+    const s = copy(input);
+    exact(s, ['version','components','roster','battle','arena','scene','sceneRandom','players','enemyModifiers','decision','pendingEffects']);
+    check(Array.isArray(s.components) && s.components.length <= 10000, 'INVALID_COMPONENT');
+    const decoded = new Map();
+    const decodeComponent = (kind, index) => {
+      check(uint(index) && index < s.components.length, 'INVALID_COMPONENT_REFERENCE');
+      const entry = s.components[index]; exact(entry, ['kind','state']); check(entry.kind === kind, 'COMPONENT_TYPE_MISMATCH');
+      if (!decoded.has(index)) decoded.set(index, decodeRaw(kind, entry.state));
+      return decoded.get(index);
+    };
+    check(s.version === 1, 'VERSION_MISMATCH');
+    check(Array.isArray(s.pendingEffects) && s.pendingEffects.length === 0, 'UNSUPPORTED_PENDING_EFFECTS');
+    exact(s.battle, [...battleScalars,'gameMode','trainer','enemyLevels','enemyParty','seenEnemyPartyMemberIds','playerParticipantIds','turnCommands','lastMove','postBattleLoot','random']);
+    exact(s.arena, [...arenaScalars,'weather','terrain','tags']); exact(s.scene, sceneFields);
+    check(typeof s.scene.seed === 'string' && typeof s.scene.waveSeed === 'string' && uint(s.scene.waveCycleOffset) && typeof s.scene.offsetGym === 'boolean' && uint(s.scene.score), 'INVALID_SCENE');
+    const result = { roster: roster.restore(s.roster), battle: Object.create(Battle.prototype), arena: Object.create(Arena.prototype), scene: s.scene, players: [], enemyModifiers: [], sceneRandom: new SceneRandom(s.sceneRandom), decision: s.decision, pendingEffects: [] };
+    const b = result.battle, a = result.arena;
+    for (const k of battleScalars) {
+      check(['double','started'].includes(k) ? typeof s.battle[k] === 'boolean' : uint(s.battle[k]), 'INVALID_BATTLE'); b[k] = s.battle[k];
+    }
+    check(b.waveIndex > 0 && b.battleType <= 2 && b.battleSpec <= 1, 'INVALID_BATTLE');
+    b.gameMode = getGameMode(s.battle.gameMode); check(b.gameMode && b.gameMode.modeId === s.battle.gameMode, 'UNKNOWN_GAME_MODE');
+    const byId = new Map(result.roster.entries.map(e => [e.pokemon.id, e]));
+    check(Array.isArray(s.battle.enemyParty) && new Set(s.battle.enemyParty).size === s.battle.enemyParty.length, 'INVALID_ENEMY_REFERENCE');
+    b.enemyParty = s.battle.enemyParty.map(id => { check(byId.get(id)?.owner === null, 'INVALID_ENEMY_REFERENCE'); return byId.get(id).pokemon; });
+    const enemyIds = result.roster.entries.filter(e => e.owner === null).sort((a,b) => a.index-b.index).map(e => e.pokemon.id);
+    check(canonical(enemyIds) === canonical(s.battle.enemyParty), 'INVALID_ENEMY_REFERENCE');
+    check(Array.isArray(s.battle.enemyLevels) && s.battle.enemyLevels.length === b.enemyParty.length && s.battle.enemyLevels.every(n => uint(n) && n > 0), 'INVALID_BATTLE'); b.enemyLevels = s.battle.enemyLevels;
+    for (const k of ['seenEnemyPartyMemberIds','playerParticipantIds']) {
+      const ids = s.battle[k]; check(Array.isArray(ids) && new Set(ids).size === ids.length, 'INVALID_PARTICIPANT');
+      // Seen-enemy IDs are historical: capture can move that instance to a
+      // player's roster, and a departed instance can be retained as a retired ID.
+      check(ids.every(id => k === 'seenEnemyPartyMemberIds' ? byId.has(id) || result.roster.retiredIds.includes(id) : byId.has(id) && byId.get(id).owner !== null || result.roster.retiredIds.includes(id)), 'INVALID_PARTICIPANT'); b[k] = new Set(ids);
+    }
+    exact(s.battle.turnCommands, ['-1','0','1','2','3']); check(Object.values(s.battle.turnCommands).every(v => v === null), 'UNSUPPORTED_COMMAND_QUEUE'); b.turnCommands = s.battle.turnCommands;
+    restoreOptional(b, 'lastMove', s.battle.lastMove, v => { check(uint(v), 'INVALID_MOVE'); return v; });
+    restoreOptional(b, 'trainer', s.battle.trainer, v => decodeComponent('trainer', v));
+    check(b.battleType !== 1 || b.trainer, 'MISSING_TRAINER');
+    check(Array.isArray(s.battle.postBattleLoot), 'INVALID_LOOT'); b.postBattleLoot = s.battle.postBattleLoot.map(v => decodeComponent('modifier', v));
+    const random = readBattleRandomCheckpoint(s.battle.random); check(random.turn === b.turn, 'RANDOM_TURN_MISMATCH'); b.battleSeed = random.seed; b.restoreRandomState(random);
+    for (const k of arenaScalars) restoreOptional(a, k, s.arena[k]);
+    check(uint(a.biomeType) && Number.isSafeInteger(a.lastTimeOfDay) && a.pokemonPool && a.trainerPool && (a.ignoreAbilities === undefined || typeof a.ignoreAbilities === 'boolean'), 'INVALID_ARENA');
+    restoreOptional(a, 'weather', s.arena.weather, effects.restoreWeatherState); restoreOptional(a, 'terrain', s.arena.terrain, effects.restoreTerrainState);
+    check(Array.isArray(s.arena.tags), 'INVALID_ARENA'); a.tags = s.arena.tags.map(effects.restoreArenaTagState);
+    for (const tag of a.tags) check(tag.sourceId == null || byId.has(tag.sourceId) || result.roster.retiredIds.includes(tag.sourceId), 'UNKNOWN_SOURCE');
+    check(Array.isArray(s.players) && s.players.length === 2, 'INVALID_PLAYERS');
+    result.players = s.players.map((p, seat) => {
+      exact(p, ['money','pokeballCounts','modifiers']); check(uint(p.money), 'INVALID_MONEY'); exact(p.pokeballCounts, ['0','1','2','3','4']);
+      check(Object.values(p.pokeballCounts).every(uint) && Array.isArray(p.modifiers), 'INVALID_INVENTORY');
+      const modifiers = p.modifiers.map(v => decodeComponent('modifier', v));
+      for (const m of modifiers) if (m.pokemonId != null && m.pokemonId !== -1) check(byId.get(m.pokemonId)?.owner === seat, 'INVALID_MODIFIER_OWNER');
+      return { money: p.money, pokeballCounts: p.pokeballCounts, modifiers };
+    });
+    check(Array.isArray(s.enemyModifiers), 'INVALID_INVENTORY'); result.enemyModifiers = s.enemyModifiers.map(v => decodeComponent('modifier', v));
+    for (const m of result.enemyModifiers) if (m.pokemonId != null && m.pokemonId !== -1) check(byId.has(m.pokemonId) && byId.get(m.pokemonId).owner === null, 'INVALID_MODIFIER_OWNER');
+    const owners = new Map();
+    for (const [owner, modifiers] of [result.players[0].modifiers,result.players[1].modifiers,result.enemyModifiers].entries()) for (const modifier of modifiers) {
+      check(!owners.has(modifier) || owners.get(modifier) === owner, 'SHARED_PERSONAL_MODIFIER'); owners.set(modifier, owner);
+    }
+    check(decoded.size === s.components.length, 'UNUSED_COMPONENT');
+    validateDecision(s.decision, result); return result;
+  }
+  return Object.freeze({ capture, restore, validate: input => { restore(input); },
+    validateAction(context, seat, action) {
+      validateDecision(context.decision, context);
+      check(context.decision.requiredSeats.includes(seat) && context.decision.options[seat].some(option => canonical(option) === canonical(action)), 'INVALID_ACTION');
+    }
+  });
+}

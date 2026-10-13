@@ -70,6 +70,16 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
     await adapter.validateCheckpoint(copy(room.checkpoint));
     const ctx = await adapter.restoreCheckpoint(copy(room.checkpoint));
     check((await decision(ctx)).id === room.decisionId, 'INVALID_CHECKPOINT');
+    // Pending inputs are durable coordinator state in the same atomic room file.
+    // Validate them again against the restored decision before acknowledging it.
+    const required = (await decision(ctx)).requiredSeats;
+    check(room.inputs && !Array.isArray(room.inputs), 'INVALID_CHECKPOINT');
+    for (const [seat, action] of Object.entries(room.inputs)) {
+      check(['0','1'].includes(seat) && required.includes(Number(seat)), 'INVALID_CHECKPOINT');
+      const before = canonical(await adapter.captureCheckpoint(ctx));
+      await adapter.validateAction(ctx, Number(seat), copy(action));
+      check(before === canonical(await adapter.captureCheckpoint(ctx)), 'VALIDATOR_MUTATED_STATE');
+    }
     return ctx;
   }
   async function decision(ctx) {

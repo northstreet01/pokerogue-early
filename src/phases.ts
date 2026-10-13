@@ -1,3 +1,4 @@
+import { selectEnemyCommand } from './battle-core/enemy-command.mjs';
 import { getFieldOrder, getMoveOrder } from './battle-core/turn-order.mjs';
 import i18next from './i18n';
 import BattleScene, { STARTER_FORM_OVERRIDE, STARTER_SPECIES_OVERRIDE, bypassLogin, startingWave } from "./battle-scene";
@@ -1697,48 +1698,18 @@ export class EnemyCommandPhase extends FieldPhase {
 
   start() {
     super.start();
-
     const enemyPokemon = this.scene.getEnemyField()[this.fieldIndex];
-
-    const trainer = this.scene.currentBattle.trainer;
-
-    if (trainer && !enemyPokemon.getMoveQueue().length) {
-      const opponents = enemyPokemon.getOpponents();
-
-      const trapTag = enemyPokemon.findTag(t => t instanceof TrappedTag) as TrappedTag;
-      const trapped = new Utils.BooleanHolder(false);
-      opponents.forEach(playerPokemon => applyCheckTrappedAbAttrs(CheckTrappedAbAttr, playerPokemon, trapped));
-      if (enemyPokemon.moveset.find(m => m.moveId === Moves.BATON_PASS && m.isUsable(enemyPokemon)) && (enemyPokemon.summonData.battleStats.reduce((total, stat) => total += stat, 0) >= 0 || trapTag || trapped.value)) {
-        this.scene.currentBattle.turnCommands[this.fieldIndex + BattlerIndex.ENEMY] =
-          { command: Command.FIGHT, move: { move: Moves.BATON_PASS, targets: enemyPokemon.getNextTargets(Moves.BATON_PASS) } };
-
-        return this.end();
-      } else if (!trapTag && !trapped.value) {
-        const partyMemberScores = trainer.getPartyMemberMatchupScores(enemyPokemon.trainerSlot, true);
-
-        if (partyMemberScores.length) {
-          const matchupScores = opponents.map(opp => enemyPokemon.getMatchupScore(opp));
-          const matchupScore = matchupScores.reduce((total, score) => total += score, 0) / matchupScores.length;
-          
-          const sortedPartyMemberScores = trainer.getSortedPartyMemberMatchupScores(partyMemberScores);
-
-          if (sortedPartyMemberScores[0][1] >= matchupScore * (trainer.config.isBoss ? 2 : 3)) {
-            const index = trainer.getNextSummonIndex(enemyPokemon.trainerSlot, partyMemberScores);
-
-            this.scene.currentBattle.turnCommands[this.fieldIndex + BattlerIndex.ENEMY] =
-              { command: Command.POKEMON, cursor: index, args: [ false ] };
-
-            return this.end();
-          }
-        }
+    this.scene.currentBattle.turnCommands[this.fieldIndex + BattlerIndex.ENEMY] = selectEnemyCommand(enemyPokemon, this.scene.currentBattle.trainer, {
+      batonPassMove: Moves.BATON_PASS,
+      fightCommand: Command.FIGHT,
+      switchCommand: Command.POKEMON,
+      findTrapTag: pokemon => pokemon.findTag(t => t instanceof TrappedTag),
+      isAbilityTrapped: opponents => {
+        const trapped = new Utils.BooleanHolder(false);
+        opponents.forEach(playerPokemon => applyCheckTrappedAbAttrs(CheckTrappedAbAttr, playerPokemon, trapped));
+        return trapped.value;
       }
-    }
-
-    const nextMove = enemyPokemon.getNextMove();
-
-    this.scene.currentBattle.turnCommands[this.fieldIndex + BattlerIndex.ENEMY] =
-      { command: Command.FIGHT, move: nextMove };
-
+    });
     this.end();
   }
 }

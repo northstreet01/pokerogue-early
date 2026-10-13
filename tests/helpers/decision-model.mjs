@@ -7,6 +7,7 @@ import { copy, requireContract as check } from '../../src/battle-core/coop-contr
 import { trainerCodec, trainerModule, originalTrainer } from './trainer-model.mjs';
 import { modifierCodec, originalModifier } from './modifier-model.mjs';
 import { getFieldOrder } from '../../src/battle-core/turn-order.mjs';
+import { selectEnemyCommand } from '../../src/battle-core/enemy-command.mjs';
 
 const classes = (file, names) => parse(file).statements.filter(n => ts.isClassDeclaration(n) && names.includes(n.name.text)).map(n => n.getText()).join('\n');
 export const Battle = evaluate(`import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; ${classes('battle.ts', ['Battle'])}`, { random: { nextBattleRandomInt, readBattleRandomCheckpoint } }).default;
@@ -31,6 +32,9 @@ export function initialDecision(seed = 'room-seed') {
     decision: { id: 'decision-1', kind: 'wait-actions', requiredSeats: [0,1], options: { 0:[{kind:'test-continue',pokemonId:100}], 1:[{kind:'test-continue',pokemonId:101}] } }, pendingEffects: [] };
 }
 export function continueDecision(ctx) {
+  // Test provider consumes the room Battle RNG. Full original AI/model binding
+  // remains a runner task; this checks transport/restart of the decision slice.
+  const enemyCommand = selectEnemyCommand({getNextMove: () => ({move:33,targets:[ctx.battle.randSeedInt(2)]})}, null, {fightCommand:0});
   // Protocol test adapter only. The phase suite separately checks the original
   // callback wiring with controlled stat/ability providers, not all abilities.
   const field = ctx.roster.field.map(id => ctx.roster.entries.find(e => e.pokemon.id === id)?.pokemon);
@@ -45,5 +49,5 @@ export function continueDecision(ctx) {
   ctx.players[0].money -= 1; ctx.players[1].pokeballCounts[0] -= 1;
   ctx.battle.turn++; ctx.battle.battleSeedState = null;
   ctx.decision.id = `decision-${ctx.battle.turn}`;
-  return { order, rolls, boosted: boosted.value };
+  return { enemyCommand, order, rolls, boosted: boosted.value };
 }

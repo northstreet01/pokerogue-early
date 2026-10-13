@@ -28,6 +28,8 @@
 
 ## 下一项可执行任务：M2
 
+最新为 M3 第二批：原 EnemyCommand 决策提取与回接，105 项测试通过，见 [第二批记录](enemy-command-m3-2026-10-13.md)。下一步玩家 Command 合法性/目标选择，再推进 Move/MoveEffect；完整 AI 场景绑定和 M2 其他停点仍未完成。后文为历史记录，提交/推送先查 Git。
+
 当前已进入 M3 首批：原行动排序提取并回接单人，合计 103 项测试、类型检查和构建通过，见 [M3 记录](turn-order-m3-2026-10-13.md)。M2 缺口仍须继续补；下一批从原 Command/EnemyCommand 的受控决策入口及 Move/MoveEffect 规则分离推进，不重复 Modifier 全类登记。下面第四批及更早内容为历史记录。
 
 最新：第四批已补 57 个具体 Modifier 类及八种生成型类型恢复，等待行动 payload v2 保留共享类型引用，101 项测试通过，见 [第四批记录](modifier-checkpoints-m2-2026-10-13.md)。用户已授权提交推送并推进 M3；先做原行动排序切片。M2 Phase/全 RNG/其他停点仍未完成，不能把组件全类型等同于完整检查点验收。后文第三批及之前为历史记录。
@@ -63,4 +65,4 @@ npm run build
 
 ## 可直接发送给新窗口的任务
 
-> 在 E:\pokeregue\pokerogue-early 继续开发。先检查工作区并读 SPEC、架构、模块计划、交接及 docs/turn-order-m3-2026-10-13.md。M2 全 Modifier 类恢复提交 c50d5cba 已推送，M3 原行动排序首批提交号读取 Git。当前 103 项测试、类型检查和构建通过。M2 尚缺原 Phase 决策映射、全局 RNG 改接及其他安全停点；M3 仅排序切片，继续从 Command/EnemyCommand 受控决策入口和 Move/MoveEffect 规则分离推进。单端原版差分与真实 WS 双端恢复同步推进。保持 Node.js 权威结算、early 原规则、原图鉴与个人收藏，不动另一目录的未上传内容。分别记录接口、状态、运行器、UI 与双机验收，不能将完整 M2/M3 标成完成。
+> 在 E:\pokeregue\pokerogue-early 继续开发。先检查 Git 状态并读 SPEC、架构、模块计划及 docs/enemy-command-m3-2026-10-13.md。M2 全 Modifier 类恢复 c50d5cba、M3 排序 d105b214 已推送；最新敌方决策批次提交与推送以 Git 为准。当前 105 项测试、类型检查和构建通过。下一步玩家 Command 合法性与目标选择入口，再推进 Move/MoveEffect；完整 AI 场景绑定、M2 其他安全停点与全随机调用仍未完成。保持原规则与收藏语义，单端原版差分和真实 WS 双端恢复同步推进，不修改另一目录未上传内容。

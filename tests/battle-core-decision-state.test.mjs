@@ -6,6 +6,7 @@ import { parse } from './helpers/original-model.mjs';
 import { battleCheckpointFields, arenaCheckpointFields, SceneRandom } from '../src/battle-core/decision-state.mjs';
 import { RandomDataGenerator, withSeedOffset } from '../src/battle-core/random.mjs';
 import { copy } from '../src/battle-core/coop-contract.mjs';
+import { originalModifier } from './helpers/modifier-model.mjs';
 
 test('Battle and Arena manifests account for all declared fields', () => {
   for (const [file, name, expected] of [['battle.ts','Battle',battleCheckpointFields],['field/arena.ts','Arena',arenaCheckpointFields]]) {
@@ -51,5 +52,18 @@ test('registered trainer and loot restore without constructors; absent codec and
   assert.equal(restored.battle.postBattleLoot[0],restored.players[0].modifiers[0]);
   assert.throws(()=>codec.capture(original),/COMPONENT_UNAVAILABLE/);
   original.players[0].modifiers[0].newPrivateField=123;
-  assert.throws(()=>trainerDecisionCodec.capture(original),/INVALID_COMPONENT/);
+  assert.throws(()=>trainerDecisionCodec.capture(original),/INVALID_MODIFIER_FIELD/);
+});
+
+test('decision v2 preserves shared mutable ModifierType identity and rejects forged aliases', () => {
+  const original = initialDecision(), first = original.players[0].modifiers[0], second = originalModifier();
+  second.type = first.type; original.players[0].modifiers.push(second);
+  const saved = codec.capture(original), restored = codec.restore(saved);
+  assert.equal(restored.players[0].modifiers[0].type, restored.players[0].modifiers[1].type);
+  restored.players[0].modifiers[0].type.tier = 3;
+  assert.equal(restored.players[0].modifiers[1].type.tier, 3);
+  const corrupt = copy(saved); corrupt.modifierTypeGroups[0].push(999);
+  assert.throws(() => codec.restore(corrupt), /INVALID_TYPE_ALIAS/);
+  const old = copy(saved); old.version = 1;
+  assert.throws(() => codec.restore(old), /VERSION_MISMATCH/);
 });

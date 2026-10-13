@@ -78,7 +78,7 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
     check(Object.keys(a).every(k => arenaCheckpointFields.includes(k)), 'UNKNOWN_ARENA_FIELD');
     // No Phase objects or already queued commands at this decision boundary.
     check(b.turnCommands && Object.values(b.turnCommands).every(v => v === null), 'UNSUPPORTED_COMMAND_QUEUE');
-    const snapshot = { version: 1, components: componentTable, roster: roster.capture(context.roster),
+    const snapshot = { version: 2, components: componentTable, modifierTypeGroups: [], roster: roster.capture(context.roster),
       battle: { ...Object.fromEntries(battleScalars.map(k => [k, b[k]])), gameMode: b.gameMode.modeId,
         trainer: optional(b, 'trainer', v => encodeComponent('trainer', v)), enemyLevels: copy(b.enemyLevels),
         enemyParty: b.enemyParty.map(p => { check(context.roster.entries.some(e => e.pokemon === p && e.owner === null), 'INVALID_ENEMY_REFERENCE'); return p.id; }),
@@ -91,11 +91,17 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       enemyModifiers: context.enemyModifiers.map(v => encodeComponent('modifier', v)),
       players: context.players.map(p => { exact(p, ['money','pokeballCounts','modifiers']); return { ...copy({ money: p.money, pokeballCounts: p.pokeballCounts }), modifiers: p.modifiers.map(v => encodeComponent('modifier', v)) }; }),
       decision: copy(context.decision), pendingEffects: [] };
+    const typeGroups = new Map();
+    for (const [value, index] of componentIds) if (componentTable[index].kind === 'modifier') {
+      if (!typeGroups.has(value.type)) typeGroups.set(value.type, []);
+      typeGroups.get(value.type).push(index);
+    }
+    snapshot.modifierTypeGroups = [...typeGroups.values()].filter(group => group.length > 1);
     restore(snapshot); return snapshot;
   }
   function restore(input) {
     const s = copy(input);
-    exact(s, ['version','components','roster','battle','arena','scene','sceneRandom','players','enemyModifiers','decision','pendingEffects']);
+    exact(s, ['version','components','modifierTypeGroups','roster','battle','arena','scene','sceneRandom','players','enemyModifiers','decision','pendingEffects']);
     check(Array.isArray(s.components) && s.components.length <= 10000, 'INVALID_COMPONENT');
     const decoded = new Map();
     const decodeComponent = (kind, index) => {
@@ -104,7 +110,7 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       if (!decoded.has(index)) decoded.set(index, decodeRaw(kind, entry.state));
       return decoded.get(index);
     };
-    check(s.version === 1, 'VERSION_MISMATCH');
+    check(s.version === 2, 'VERSION_MISMATCH');
     check(Array.isArray(s.pendingEffects) && s.pendingEffects.length === 0, 'UNSUPPORTED_PENDING_EFFECTS');
     exact(s.battle, [...battleScalars,'gameMode','trainer','enemyLevels','enemyParty','seenEnemyPartyMemberIds','playerParticipantIds','turnCommands','lastMove','postBattleLoot','random']);
     exact(s.arena, [...arenaScalars,'weather','terrain','tags']); exact(s.scene, sceneFields);
@@ -154,6 +160,19 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       check(!owners.has(modifier) || owners.get(modifier) === owner, 'SHARED_PERSONAL_MODIFIER'); owners.set(modifier, owner);
     }
     check(decoded.size === s.components.length, 'UNUSED_COMPONENT');
+    check(Array.isArray(s.modifierTypeGroups), 'INVALID_TYPE_ALIAS');
+    const aliased = new Set();
+    for (const group of s.modifierTypeGroups) {
+      check(Array.isArray(group) && group.length > 1 && typeof components.modifier.captureType === 'function', 'INVALID_TYPE_ALIAS');
+      let sharedType, state;
+      for (const index of group) {
+        check(uint(index) && decoded.has(index) && s.components[index].kind === 'modifier' && !aliased.has(index), 'INVALID_TYPE_ALIAS');
+        aliased.add(index);
+        const modifier = decoded.get(index), current = canonical(components.modifier.captureType(modifier.type));
+        if (state === undefined) { sharedType = modifier.type; state = current; }
+        else { check(current === state, 'INVALID_TYPE_ALIAS'); modifier.type = sharedType; }
+      }
+    }
     validateDecision(s.decision, result); return result;
   }
   return Object.freeze({ capture, restore, validate: input => { restore(input); },

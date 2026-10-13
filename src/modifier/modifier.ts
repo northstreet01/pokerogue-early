@@ -1,4 +1,5 @@
 import * as ModifierTypes from './modifier-type';
+import { createModifierStateCodec } from '../battle-core/modifier-state.mjs';
 import { LearnMovePhase, LevelUpPhase, PokemonHealPhase } from "../phases";
 import BattleScene from "../battle-scene";
 import { getLevelTotalExp } from "../data/exp";
@@ -2068,4 +2069,71 @@ export class EnemyFusionChanceModifier extends EnemyPersistentModifier {
   getMaxStackCount(scene: BattleScene): integer {
     return 10;
   }
+}
+
+// Complete early concrete rule-class registry; renderer ModifierBar is excluded.
+const checkpointModifierConstructors = {
+  AddPokeballModifier,
+  AddVoucherModifier,
+  DoubleBattleChanceBoosterModifier,
+  TempBattleStatBoosterModifier,
+  MapModifier,
+  MegaEvolutionAccessModifier,
+  GigantamaxAccessModifier,
+  TerastallizeAccessModifier,
+  TerastallizeModifier,
+  PokemonBaseStatModifier,
+  AttackTypeBoosterModifier,
+  SurviveDamageModifier,
+  FlinchChanceModifier,
+  TurnHealModifier,
+  HitHealModifier,
+  LevelIncrementBoosterModifier,
+  BerryModifier,
+  PreserveBerryModifier,
+  PokemonInstantReviveModifier,
+  PokemonHpRestoreModifier,
+  PokemonStatusHealModifier,
+  PokemonPpRestoreModifier,
+  PokemonAllMovePpRestoreModifier,
+  PokemonPpUpModifier,
+  PokemonLevelIncrementModifier,
+  TmModifier,
+  RememberMoveModifier,
+  EvolutionItemModifier,
+  FusePokemonModifier,
+  UnfusePokemonModifier,
+  MultipleParticipantExpBonusModifier,
+  HealingBoosterModifier,
+  ExpBoosterModifier,
+  PokemonExpBoosterModifier,
+  ExpShareModifier,
+  ExpBalanceModifier,
+  PokemonFriendshipBoosterModifier,
+  PokemonNatureWeightModifier,
+  PokemonFormChangeItemModifier,
+  MoneyRewardModifier,
+  MoneyMultiplierModifier,
+  DamageMoneyRewardModifier,
+  MoneyInterestModifier,
+  HiddenAbilityRateBoosterModifier,
+  ShinyRateBoosterModifier,
+  SwitchEffectTransferModifier,
+  TurnHeldItemTransferModifier,
+  ContactHeldItemTransferChanceModifier,
+  IvScannerModifier,
+  ExtraModifierModifier,
+  EnemyDamageBoosterModifier,
+  EnemyDamageReducerModifier,
+  EnemyTurnHealModifier,
+  EnemyAttackStatusEffectChanceModifier,
+  EnemyStatusEffectHealChanceModifier,
+  EnemyInstantReviveChanceModifier,
+  EnemyFusionChanceModifier
+};
+export function captureModifierState(modifier: Modifier) {
+  return createModifierStateCodec({ constructors: checkpointModifierConstructors, enums: { PokeballType, VoucherType, TempBattleStat, Type, Stat, BerryType, FormChangeItem, StatusEffect }, typeCodec: { capture: ModifierTypes.captureModifierTypeState, restore: ModifierTypes.restoreModifierTypeState } }).capture(modifier);
+}
+export function restoreModifierState(state: unknown): Modifier {
+  return createModifierStateCodec({ constructors: checkpointModifierConstructors, enums: { PokeballType, VoucherType, TempBattleStat, Type, Stat, BerryType, FormChangeItem, StatusEffect }, typeCodec: { capture: ModifierTypes.captureModifierTypeState, restore: ModifierTypes.restoreModifierTypeState } }).restore(state);
 }

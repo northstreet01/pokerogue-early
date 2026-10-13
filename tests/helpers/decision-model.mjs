@@ -2,24 +2,19 @@ import ts from 'typescript';
 import { parse, evaluate, pokemon, originalPokemon, arena, weather, terrain } from './original-model.mjs';
 import { createRosterStateCodec } from '../../src/battle-core/roster-state.mjs';
 import { createDecisionStateCodec, SceneRandom } from '../../src/battle-core/decision-state.mjs';
-import { createRegisteredStateCodec } from '../../src/battle-core/registered-state.mjs';
 import { RandomDataGenerator, nextBattleRandomInt, readBattleRandomCheckpoint } from '../../src/battle-core/random.mjs';
 import { copy, requireContract as check } from '../../src/battle-core/coop-contract.mjs';
 import { trainerCodec, trainerModule, originalTrainer } from './trainer-model.mjs';
+import { modifierCodec, originalModifier } from './modifier-model.mjs';
 
 const classes = (file, names) => parse(file).statements.filter(n => ts.isClassDeclaration(n) && names.includes(n.name.text)).map(n => n.getText()).join('\n');
 export const Battle = evaluate(`import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; ${classes('battle.ts', ['Battle'])}`, { random: { nextBattleRandomInt, readBattleRandomCheckpoint } }).default;
 export const Arena = evaluate(classes('field/arena.ts', ['Arena'])).Arena;
-const modifiers = evaluate(classes('modifier/modifier.ts', ['Modifier','PersistentModifier','ExpBoosterModifier']));
-const types = { exp: { id: 'exp' } }, modes = { 0: { modeId: 0 } };
+const modes = { 0: { modeId: 0 } };
 export const Trainer = trainerModule.default;
 export { trainerCodec };
 export const initialTrainer = originalTrainer;
-const scalar = { capture: copy, restore: v => { check(typeof v === 'number' && Number.isFinite(v) && v >= 0, 'INVALID_COMPONENT'); return v; } };
-export const modifierCodec = createRegisteredStateCodec({ exp: { prototype: modifiers.ExpBoosterModifier.prototype, fields: {
-  type: { capture: v => { check(v === types.exp); return 'exp'; }, restore: id => { check(id === 'exp'); return types.exp; } },
-  stackCount: scalar, virtualStackCount: scalar, boostMultiplier: scalar
-} } });
+export { modifierCodec };
 export const codec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], components: { modifier: modifierCodec } });
 export const trainerDecisionCodec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], components: { modifier: modifierCodec, trainer: trainerCodec } });
 export function initialDecision(seed = 'room-seed') {
@@ -27,7 +22,7 @@ export function initialDecision(seed = 'room-seed') {
   const battle = Object.create(Battle.prototype);
   Object.assign(battle, { gameMode: modes[0], waveIndex: 1, battleType: 0, battleSpec: 0, trainer: null, enemyLevels: [5], enemyParty: [entries[2].pokemon], seenEnemyPartyMemberIds: new Set([102]), double: true, started: true, turn: 1, turnCommands: { '-1':null, 0:null, 1:null, 2:null, 3:null }, playerParticipantIds: new Set([100,101]), battleScore: 0, postBattleLoot: [], escapeAttempts: 0, battleSeed: seed, battleSeedState: null });
   const field = Object.create(Arena.prototype); Object.assign(field, { biomeType: 0, tags: [arena.getArenaTag('SPIKES', 0, 33, 100, undefined, 2)], weather: new weather.Weather(1, 3), terrain: new terrain.Terrain(1, 2), ignoreAbilities: false, lastTimeOfDay: 0, pokemonPool: { 0: [1,4,7] }, trainerPool: { 0: [1] } });
-  const modifier = new modifiers.ExpBoosterModifier(types.exp, 20, 2); modifier.virtualStackCount = 1;
+  const modifier = originalModifier(); modifier.virtualStackCount = 1;
   return { roster: { entries, field: [100,101,102,null], retiredIds: [] }, battle, arena: field,
     scene: { seed, waveSeed: seed+'-wave', waveCycleOffset: 0, offsetGym: false, score: 0 },
     players: [0,1].map(i => ({ money: 100+i, pokeballCounts: { 0:100,1:0,2:0,3:0,4:0 }, modifiers: i === 0 ? [modifier] : [] })), enemyModifiers: [],

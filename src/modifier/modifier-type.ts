@@ -1,4 +1,5 @@
 import * as Modifiers from './modifier';
+import { createModifierTypeStateCodec } from '../battle-core/modifier-type-state.mjs';
 import { AttackMove, allMoves } from '../data/move';
 import { Moves } from "../data/enums/moves";
 import { PokeballType, getPokeballCatchMultiplier, getPokeballName } from '../data/pokeball';
@@ -1423,4 +1424,29 @@ export class ModifierTypeOption {
     this.upgradeCount = upgradeCount;
     this.cost = Math.round(cost);
   }
+}
+
+// Checkpoint reconstruction is separate from reward generators, notably TM's
+// generator which ignores pregenArgs and would otherwise consume randomness.
+function checkpointTypeCodec() {
+  const enumValue = (values: object) => (v: unknown) => Number.isSafeInteger(v) && typeof values[v as number] === 'string';
+  const recipe = (ctor: any, ids: string[], fields: string[], valid: ((v: any) => boolean)[], create: (...args: any[]) => ModifierType) =>
+    ({ prototype: ctor.prototype, ids, fields, valid, create });
+  return createModifierTypeStateCodec({ factories: modifierTypes, Generator: ModifierTypeGenerator, recipes: {
+    tempStat: recipe(TempBattleStatBoosterModifierType, ['TEMP_STAT_BOOSTER'], ['tempBattleStat'], [enumValue(TempBattleStat)], v => new TempBattleStatBoosterModifierType(v)),
+    baseStat: recipe(PokemonBaseStatBoosterModifierType, ['BASE_STAT_BOOSTER'], ['stat'], [enumValue(Stat)], v => new PokemonBaseStatBoosterModifierType(getBaseStatBoosterItemName(v), v)),
+    berry: recipe(BerryModifierType, ['BERRY'], ['berryType'], [enumValue(BerryType)], v => new BerryModifierType(v)),
+    attackType: recipe(AttackTypeBoosterModifierType, ['ATTACK_TYPE_BOOSTER'], ['moveType','boostPercent'], [v => enumValue(Type)(v) && v >= 0 && v < Type.STELLAR, v => v === 20], (v, p) => new AttackTypeBoosterModifierType(v, p)),
+    tera: recipe(TerastallizeModifierType, ['TERA_SHARD'], ['teraType'], [v => enumValue(Type)(v) && v >= 0], v => new TerastallizeModifierType(v)),
+    tm: recipe(TmModifierType, ['TM_COMMON','TM_GREAT','TM_ULTRA'], ['moveId'], [v => Number.isSafeInteger(v) && Object.prototype.hasOwnProperty.call(tmSpecies,v) && !!allMoves[v]], v => new TmModifierType(v)),
+    evolution: recipe(EvolutionItemModifierType, ['EVOLUTION_ITEM','RARE_EVOLUTION_ITEM'], ['evolutionItem'], [v => enumValue(EvolutionItem)(v) && v !== EvolutionItem.NONE], v => new EvolutionItemModifierType(v)),
+    form: recipe(FormChangeItemModifierType, ['FORM_CHANGE_ITEM'], ['formChangeItem'], [enumValue(FormChangeItem)], v => new FormChangeItemModifierType(v))
+  } });
+}
+
+export function captureModifierTypeState(type: ModifierType) {
+  return checkpointTypeCodec().capture(type);
+}
+export function restoreModifierTypeState(state: unknown): ModifierType {
+  return checkpointTypeCodec().restore(state);
 }

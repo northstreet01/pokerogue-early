@@ -1,4 +1,5 @@
 import * as Utils from "../utils";
+import { createEffectStateCodec } from "../battle-core/effect-state.mjs";
 
 export enum StatusEffect {
   NONE,
@@ -29,6 +30,16 @@ export class Status {
   isPostTurn(): boolean {
     return this.effect === StatusEffect.POISON || this.effect === StatusEffect.TOXIC || this.effect === StatusEffect.BURN;
   }
+}
+
+const statusStateCodec = createEffectStateCodec({ Status });
+
+export function captureStatusState(status: Status) {
+  return statusStateCodec.capture(status);
+}
+
+export function restoreStatusState(snapshot: unknown): Status {
+  return statusStateCodec.restore(snapshot);
 }
 
 export function getStatusEffectObtainText(statusEffect: StatusEffect, sourceText?: string): string {

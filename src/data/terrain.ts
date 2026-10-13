@@ -3,6 +3,7 @@ import Move from "./move";
 import { Type } from "./type";
 import * as Utils from "../utils";
 import { IncrementMovePriorityAbAttr, applyAbAttrs } from "./ability";
+import { createEffectStateCodec } from "../battle-core/effect-state.mjs";
 
 export enum TerrainType {
   NONE,
@@ -57,6 +58,16 @@ export class Terrain {
 
     return false;
   }
+}
+
+const terrainStateCodec = createEffectStateCodec({ Terrain });
+
+export function captureTerrainState(terrain: Terrain) {
+  return terrainStateCodec.capture(terrain);
+}
+
+export function restoreTerrainState(snapshot: unknown): Terrain {
+  return terrainStateCodec.restore(snapshot);
 }
 
 export function getTerrainColor(terrainType: TerrainType): [ integer, integer, integer ] {

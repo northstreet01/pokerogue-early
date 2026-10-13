@@ -10,7 +10,7 @@ import { GameMode } from "./game-mode";
 import { BattleSpec } from "./enums/battle-spec";
 import { PlayerGender } from "./system/game-data";
 import { PokemonHeldItemModifier } from "./modifier/modifier";
-import { nextBattleRandomInt } from './battle-core/random.mjs';
+import { nextBattleRandomInt, readBattleRandomCheckpoint } from './battle-core/random.mjs';
 import { getWildLevel, gaussianLevelOffset } from './battle-core/levels.mjs';
 
 export enum BattleType {
@@ -176,6 +176,19 @@ export default class Battle {
         const result = nextBattleRandomInt(this.battleSeed, this.turn, this.battleSeedState, range, min);
         this.battleSeedState = result.state;
         return result.value;
+    }
+
+    // Only the battle stream is covered here. A full decision checkpoint must
+    // also restore the room's other streams, combatants, arena and pending work.
+    captureRandomState() {
+        return readBattleRandomCheckpoint({ version: 1, seed: this.battleSeed, turn: this.turn, state: this.battleSeedState });
+    }
+
+    restoreRandomState(checkpoint: unknown): void {
+        const restored = readBattleRandomCheckpoint(checkpoint);
+        if (restored.seed !== this.battleSeed || restored.turn !== this.turn)
+            throw new Error('Battle random checkpoint belongs to another seed or turn');
+        this.battleSeedState = restored.state;
     }
 }
 

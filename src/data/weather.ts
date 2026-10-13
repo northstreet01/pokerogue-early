@@ -7,6 +7,7 @@ import * as Utils from "../utils";
 import BattleScene from "../battle-scene";
 import { SuppressWeatherEffectAbAttr } from "./ability";
 import { TerrainType } from "./terrain";
+import { createEffectStateCodec } from "../battle-core/effect-state.mjs";
 
 export enum WeatherType {
   NONE,
@@ -111,6 +112,16 @@ export class Weather {
 
     return false;
   }
+}
+
+const weatherStateCodec = createEffectStateCodec({ Weather });
+
+export function captureWeatherState(weather: Weather) {
+  return weatherStateCodec.capture(weather);
+}
+
+export function restoreWeatherState(snapshot: unknown): Weather {
+  return weatherStateCodec.restore(snapshot);
 }
 
 export function getWeatherStartMessage(weatherType: WeatherType): string {

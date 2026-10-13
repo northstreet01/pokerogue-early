@@ -11,6 +11,8 @@
 
 原版接入 B1 已提取随机数、等级和捕获纯规则并回接单人，使用原函数对照验证。完整服务器战斗仍待接入，见 [原版战斗接入进度](docs/original-battle-integration-2026-10-13.md)。
 
+B2 首批已增加原战斗/场地标签、异常状态、天气/场地和回合随机流的保存还原接口；完整精灵状态及行动队列尚未接入，不能用于完整联机恢复。详见 [状态检查点进度](docs/original-state-checkpoints-2026-10-13.md)。
+
 ```sh
 npm ci --ignore-scripts
 npm run start

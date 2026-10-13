@@ -13,6 +13,7 @@ import { BattlerTagType } from "./enums/battler-tag-type";
 import { TerrainType } from "./terrain";
 import { WeatherType } from "./weather";
 import { BattleStat } from "./battle-stat";
+import { createEffectStateCodec } from "../battle-core/effect-state.mjs";
 
 export enum BattlerTagLapseType {
   FAINT,
@@ -1024,4 +1025,25 @@ export function getBattlerTag(tagType: BattlerTagType, turnCount: integer, sourc
     default:
         return new BattlerTag(tagType, BattlerTagLapseType.CUSTOM, turnCount, sourceMove, sourceId);
   }
+}
+
+// Explicit IDs keep checkpoints stable after minification. Restoration does not
+// call constructors, onAdd, or the phase queue (which would repeat effects).
+const battlerTagStateCodec = createEffectStateCodec({
+  BattlerTag, RechargingTag, TrappedTag, FlinchedTag, ConfusedTag, InfatuatedTag,
+  SeedTag, NightmareTag, FrenzyTag, EncoreTag, HelpingHandTag, IngrainTag,
+  AquaRingTag, DrowsyTag, BindTag, WrapTag, FireSpinTag, WhirlpoolTag, ClampTag,
+  SandTombTag, MagmaStormTag, ThunderCageTag, ProtectedTag,
+  ContactStatChangeProtectedTag, ContactPoisonProtectedTag, ContactBurnProtectedTag,
+  EnduringTag, PerishSongTag, TruantTag, SlowStartTag, WeatherHighestStatBoostTag,
+  TerrainHighestStatBoostTag, HideSpriteTag, TypeBoostTag, CritBoostTag,
+  IgnoreAccuracyTag, SaltCuredTag
+});
+
+export function captureBattlerTagState(tag: BattlerTag) {
+  return battlerTagStateCodec.capture(tag);
+}
+
+export function restoreBattlerTagState(snapshot: unknown): BattlerTag {
+  return battlerTagStateCodec.restore(snapshot);
 }

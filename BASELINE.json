@@ -2,10 +2,10 @@
   "upstream": "https://github.com/pagefaultgames/pokerogue.git",
   "commit": "ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9",
   "upstreamVersion": "1.0.0",
-  "projectStage": "original-battle-adaptation-b1",
+  "projectStage": "original-battle-adaptation-b2",
   "originalBattleCore": {
-    "stage": "B1-partial",
-    "sharedModules": ["random", "levels", "capture"],
+    "stage": "B2-component-checkpoints-partial",
+    "sharedModules": ["random", "levels", "capture", "effect-state"],
     "fullServerBattleAvailable": false
   },
   "gamePort": 8020,

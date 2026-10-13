@@ -9,6 +9,7 @@ import { StatusEffect } from "./status-effect";
 import { BattlerIndex } from "../battle";
 import { Moves } from "./enums/moves";
 import { ArenaTagType } from "./enums/arena-tag-type";
+import { createEffectStateCodec } from "../battle-core/effect-state.mjs";
 
 export enum ArenaTagSide {
   BOTH,
@@ -366,4 +367,17 @@ export function getArenaTag(tagType: ArenaTagType, turnCount: integer, sourceMov
     case ArenaTagType.GRAVITY:
       return new GravityTag(turnCount);
   }
+}
+
+const arenaTagStateCodec = createEffectStateCodec({
+  MistTag, MudSportTag, WaterSportTag, SpikesTag, ToxicSpikesTag, DelayedAttackTag,
+  StealthRockTag, TrickRoomTag, GravityTag
+});
+
+export function captureArenaTagState(tag: ArenaTag) {
+  return arenaTagStateCodec.capture(tag);
+}
+
+export function restoreArenaTagState(snapshot: unknown): ArenaTag {
+  return arenaTagStateCodec.restore(snapshot);
 }

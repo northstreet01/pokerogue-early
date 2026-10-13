@@ -1,15 +1,20 @@
 import { BattleSpec } from "./enums/battle-spec";
 import Pokemon from "./field/pokemon";
+import i18next from './i18n';
 
-export function getPokemonMessage(pokemon: Pokemon, content: string): string {
-  let prefix: string;
+export function getPokemonNameWithAffix(pokemon: Pokemon): string {
+  let affix: string;
   switch (pokemon.scene.currentBattle.battleSpec) {
     case BattleSpec.DEFAULT:
-      prefix = !pokemon.isPlayer() ? pokemon.hasTrainer() ? 'Foe ' : 'Wild ' : '';
+      affix = !pokemon.isPlayer() ? pokemon.hasTrainer() ? 'foePokemonWithAffix' : 'wildPokemonWithAffix' : '';
       break;
     case BattleSpec.FINAL_BOSS:
-      prefix = !pokemon.isPlayer() ? 'Foe ' : '';
+      affix = !pokemon.isPlayer() ? 'foePokemonWithAffix' : '';
       break;
   }
-  return `${prefix}${pokemon.name}${content}`;
+  return affix ? i18next.t(`battle:${affix}`, { pokemonName: pokemon.name }) : pokemon.name;
+}
+
+export function getPokemonMessage(pokemon: Pokemon, content: string): string {
+  return `${getPokemonNameWithAffix(pokemon)}${content}`;
 }

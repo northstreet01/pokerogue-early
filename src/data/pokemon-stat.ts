@@ -1,3 +1,5 @@
+import i18next from '../i18n';
+
 export enum Stat {
   HP = 0,
   ATK,
@@ -29,5 +31,5 @@ export function getStatName(stat: Stat, shorten: boolean = false) {
       ret = !shorten ? 'Speed' : 'Spd';
       break;
   }
-  return ret;
+  return i18next.t(`pokemonInfo:stat.${Stat[stat]?.toLowerCase()}${shorten ? 'Shortened' : ''}`, { defaultValue: ret });
 }

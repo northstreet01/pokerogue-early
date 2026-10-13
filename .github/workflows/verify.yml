@@ -26,5 +26,7 @@ jobs:
         run: npm run test:coop
       - name: Original battle rule compatibility tests
         run: npm run test:battle-core
+      - name: Upstream localization compatibility tests
+        run: npm run test:localization
       - name: Build game and save manager
         run: npm run build

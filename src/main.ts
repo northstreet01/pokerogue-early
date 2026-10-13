@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import './i18n';
 import BattleScene from './battle-scene';
 import InvertPostFX from './pipelines/invert';
 import { version } from '../package.json';

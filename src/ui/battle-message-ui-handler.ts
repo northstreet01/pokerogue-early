@@ -1,4 +1,5 @@
 import BattleScene, { Button } from "../battle-scene";
+import i18next from '../i18n';
 import { addTextObject, TextStyle } from "./text";
 import { Mode } from "./ui";
 import * as Utils from "../utils";
@@ -126,7 +127,7 @@ export default class BattleMessageUiHandler extends MessageUiHandler {
 
     this.commandWindow.setVisible(false);
     this.movesWindowContainer.setVisible(false);
-    this.message.setWordWrapWidth(1780);
+    this.message.setWordWrapWidth(1780, i18next.language === 'zh-Hans');
 
     return true;
   }

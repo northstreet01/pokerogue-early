@@ -1,3 +1,4 @@
+import i18next from '../i18n';
 import BBCodeText from "phaser3-rex-plugins/plugins/bbcodetext";
 import BattleScene from "../battle-scene";
 import { Gender, getGenderColor, getGenderSymbol } from "../data/gender";
@@ -49,7 +50,7 @@ export default class PokemonInfoContainer extends Phaser.GameObjects.Container {
     movesBg.setOrigin(1, 0);
     this.pokemonMovesContainer.add(movesBg);
 
-    const movesLabel = addTextObject(this.scene, -movesBg.width / 2, 6, 'Moveset', TextStyle.WINDOW, { fontSize: '64px' });
+    const movesLabel = addTextObject(this.scene, -movesBg.width / 2, 6, i18next.t("pokemonInfoContainer:moveset"), TextStyle.WINDOW, { fontSize: '64px' });
     movesLabel.setOrigin(0.5, 0);
     this.pokemonMovesContainer.add(movesLabel);
 
@@ -80,7 +81,7 @@ export default class PokemonInfoContainer extends Phaser.GameObjects.Container {
     this.add(infoBg);
     this.add(this.statsContainer);
 
-    this.pokemonGenderLabelText = addTextObject(this.scene, -18, 20, 'Gender:', TextStyle.WINDOW, { fontSize: '64px' });
+    this.pokemonGenderLabelText = addTextObject(this.scene, -18, 20, i18next.t("pokemonInfoContainer:gender"), TextStyle.WINDOW, { fontSize: '64px' });
     this.pokemonGenderLabelText.setOrigin(1, 0);
     this.pokemonGenderLabelText.setVisible(false);
     this.add(this.pokemonGenderLabelText);
@@ -90,7 +91,7 @@ export default class PokemonInfoContainer extends Phaser.GameObjects.Container {
     this.pokemonGenderText.setVisible(false);
     this.add(this.pokemonGenderText);
 
-    this.pokemonAbilityLabelText = addTextObject(this.scene, -18, 30, 'Ability:', TextStyle.WINDOW, { fontSize: '64px' });
+    this.pokemonAbilityLabelText = addTextObject(this.scene, -18, 30, i18next.t("pokemonInfoContainer:ability"), TextStyle.WINDOW, { fontSize: '64px' });
     this.pokemonAbilityLabelText.setOrigin(1, 0);
     this.add(this.pokemonAbilityLabelText);
 
@@ -98,7 +99,7 @@ export default class PokemonInfoContainer extends Phaser.GameObjects.Container {
     this.pokemonAbilityText.setOrigin(0, 0);
     this.add(this.pokemonAbilityText);
 
-    this.pokemonNatureLabelText = addTextObject(this.scene, -18, 40, 'Nature:', TextStyle.WINDOW, { fontSize: '64px' });
+    this.pokemonNatureLabelText = addTextObject(this.scene, -18, 40, i18next.t("pokemonInfoContainer:nature"), TextStyle.WINDOW, { fontSize: '64px' });
     this.pokemonNatureLabelText.setOrigin(1, 0);
     this.add(this.pokemonNatureLabelText);
 

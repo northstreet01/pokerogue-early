@@ -1,4 +1,5 @@
 import { Stat, getStatName } from "./pokemon-stat";
+import i18next from '../i18n';
 import * as Utils from "../utils";
 import { TextStyle, getBBCodeFrag } from "../ui/text";
 
@@ -31,7 +32,7 @@ export enum Nature {
 }
 
 export function getNatureName(nature: Nature, includeStatEffects: boolean = false, forStarterSelect: boolean = false): string {
-  let ret = Utils.toReadableString(Nature[nature]);
+  let ret = i18next.t(`nature:${Nature[nature].toLowerCase()}`, { defaultValue: Utils.toReadableString(Nature[nature]) });
   if (includeStatEffects) {
     const stats = Utils.getEnumValues(Stat).slice(1);
     let increasedStat: Stat = null;

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import i18next from '../i18n';
 import BattleScene, { AnySound } from '../battle-scene';
 import BattleInfo, { PlayerBattleInfo, EnemyBattleInfo } from '../ui/battle-info';
 import { Moves } from "../data/enums/moves";
@@ -1181,7 +1182,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
             const oneHitKo = result === HitResult.ONE_HIT_KO;
             damage.value = this.damageAndUpdate(damage.value, result as DamageResult, isCritical, oneHitKo, oneHitKo);
             if (isCritical)
-              this.scene.queueMessage('A critical hit!');
+              this.scene.queueMessage(i18next.t('battle:hitResultCriticalHit'));
             this.scene.setPhaseQueueSplice();
             if (source.isPlayer()) {
               this.scene.validateAchvs(DamageAchv, damage);
@@ -1199,16 +1200,16 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
           if (source.turnData.hitsLeft === 1) {
             switch (result) {
               case HitResult.SUPER_EFFECTIVE:
-                this.scene.queueMessage('It\'s super effective!');
+                this.scene.queueMessage(i18next.t('battle:hitResultSuperEffective'));
                 break;
               case HitResult.NOT_VERY_EFFECTIVE:
-                this.scene.queueMessage('It\'s not very effective!');
+                this.scene.queueMessage(i18next.t('battle:hitResultNotVeryEffective'));
                 break;
               case HitResult.NO_EFFECT:
-                this.scene.queueMessage(`It doesn\'t affect ${this.name}!`);
+                this.scene.queueMessage(i18next.t('battle:hitResultNoEffect', { pokemonName: this.name }));
                 break;
               case HitResult.ONE_HIT_KO:  
-                this.scene.queueMessage('It\'s a one-hit KO!');
+                this.scene.queueMessage(i18next.t('battle:hitResultOneHitKo'));
                 break;
             }
           }

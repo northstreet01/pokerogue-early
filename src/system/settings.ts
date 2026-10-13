@@ -2,8 +2,11 @@ import BattleScene from "../battle-scene";
 import { hasTouchscreen } from "../touch-controls";
 import { updateWindowType } from "../ui/window";
 import { PlayerGender } from "./game-data";
+import i18next from '../i18n';
+import { SUPPORTED_LANGUAGE_ENTRIES } from './language.mjs';
 
 export enum Setting {
+  Language = "LANGUAGE",
   Game_Speed = "GAME_SPEED",
   Master_Volume = "MASTER_VOLUME",
   BGM_Volume = "BGM_VOLUME",
@@ -28,6 +31,7 @@ export interface SettingDefaults {
 }
 
 export const settingOptions: SettingOptions = {
+  [Setting.Language]: Object.values(SUPPORTED_LANGUAGE_ENTRIES as Record<string, { label: string }>).map(language => language.label),
   [Setting.Game_Speed]: [ '1x', '1.25x', '1.5x', '2x', '2.5x', '3x', '4x', '5x' ],
   [Setting.Master_Volume]: new Array(11).fill(null).map((_, i) => i ? (i * 10).toString() : 'Mute'),
   [Setting.BGM_Volume]: new Array(11).fill(null).map((_, i) => i ? (i * 10).toString() : 'Mute'),
@@ -44,6 +48,7 @@ export const settingOptions: SettingOptions = {
 };
 
 export const settingDefaults: SettingDefaults = {
+  [Setting.Language]: Math.max(Object.keys(SUPPORTED_LANGUAGE_ENTRIES).indexOf(i18next.language), 0),
   [Setting.Game_Speed]: 3,
   [Setting.Master_Volume]: 5,
   [Setting.BGM_Volume]: 10,

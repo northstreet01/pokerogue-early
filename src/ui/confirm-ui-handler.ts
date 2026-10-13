@@ -1,3 +1,4 @@
+import i18next from '../i18n';
 import BattleScene from "../battle-scene";
 import AbstractOptionSelectUiHandler, { OptionSelectConfig } from "./abstact-option-select-ui-handler";
 import { Mode } from "./ui";
@@ -19,11 +20,11 @@ export default class ConfirmUiHandler extends AbstractOptionSelectUiHandler {
       const config: OptionSelectConfig = {
         options: [
           {
-            label: 'Yes',
+            label: i18next.t("menu:yes"),
             handler: args[0]
           },
           {
-            label: 'No',
+            label: i18next.t("menu:no"),
             handler: args[1]
           }
         ]

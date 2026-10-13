@@ -1,3 +1,4 @@
+import i18next from '../i18n';
 import BattleScene, { Button } from "../battle-scene";
 import PokemonSpecies, { allSpecies, getPokemonSpecies, speciesStarters } from "../data/pokemon-species";
 import { Species } from "../data/enums/species";
@@ -152,7 +153,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     this.pokemonNameText.setOrigin(0, 0);
     this.starterSelectContainer.add(this.pokemonNameText);
 
-    this.pokemonGrowthRateLabelText = addTextObject(this.scene, 8, 106, 'Growth Rate:', TextStyle.SUMMARY, { fontSize: '36px' });
+    this.pokemonGrowthRateLabelText = addTextObject(this.scene, 8, 106, i18next.t("starterSelectUiHandler:growthRate"), TextStyle.SUMMARY, { fontSize: '36px' });
     this.pokemonGrowthRateLabelText.setOrigin(0, 0);
     this.pokemonGrowthRateLabelText.setVisible(false);
     this.starterSelectContainer.add(this.pokemonGrowthRateLabelText);
@@ -165,11 +166,11 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     this.pokemonGenderText.setOrigin(0, 0);
     this.starterSelectContainer.add(this.pokemonGenderText);
 
-    this.pokemonUncaughtText = addTextObject(this.scene, 6, 126, 'Uncaught', TextStyle.SUMMARY, { fontSize: '56px' });
+    this.pokemonUncaughtText = addTextObject(this.scene, 6, 126, i18next.t("starterSelectUiHandler:uncaught"), TextStyle.SUMMARY, { fontSize: '56px' });
     this.pokemonUncaughtText.setOrigin(0, 0);
     this.starterSelectContainer.add(this.pokemonUncaughtText);
 
-    this.pokemonAbilityLabelText = addTextObject(this.scene, 6, 126, 'Ability:', TextStyle.SUMMARY, { fontSize: '56px' });
+    this.pokemonAbilityLabelText = addTextObject(this.scene, 6, 126, i18next.t("starterSelectUiHandler:ability"), TextStyle.SUMMARY, { fontSize: '56px' });
     this.pokemonAbilityLabelText.setOrigin(0, 0);
     this.pokemonAbilityLabelText.setVisible(false);
     this.starterSelectContainer.add(this.pokemonAbilityLabelText);
@@ -178,7 +179,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     this.pokemonAbilityText.setOrigin(0, 0);
     this.starterSelectContainer.add(this.pokemonAbilityText);
 
-    this.pokemonNatureLabelText = addTextObject(this.scene, 6, 135, 'Nature:', TextStyle.SUMMARY, { fontSize: '56px' });
+    this.pokemonNatureLabelText = addTextObject(this.scene, 6, 135, i18next.t("starterSelectUiHandler:nature"), TextStyle.SUMMARY, { fontSize: '56px' });
     this.pokemonNatureLabelText.setOrigin(0, 0);
     this.pokemonNatureLabelText.setVisible(false);
     this.starterSelectContainer.add(this.pokemonNatureLabelText);
@@ -252,7 +253,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     this.valueLimitLabel.setOrigin(0.5, 0);
     this.starterSelectContainer.add(this.valueLimitLabel);
 
-    const startLabel = addTextObject(this.scene, 124, 162, 'Start', TextStyle.TOOLTIP_CONTENT);
+    const startLabel = addTextObject(this.scene, 124, 162, i18next.t("common:start"), TextStyle.TOOLTIP_CONTENT);
     startLabel.setOrigin(0.5, 0);
     this.starterSelectContainer.add(startLabel);
 
@@ -355,7 +356,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     this.pokemonEggMovesContainer = this.scene.add.container(102, 85);
     this.pokemonEggMovesContainer.setScale(0.375);
 
-    const eggMovesLabel = addTextObject(this.scene, -46, 0, 'Egg Moves', TextStyle.SUMMARY);
+    const eggMovesLabel = addTextObject(this.scene, -46, 0, i18next.t("starterSelectUiHandler:eggMoves"), TextStyle.SUMMARY);
     eggMovesLabel.setOrigin(0.5, 0);
     
     this.pokemonEggMovesContainer.add(eggMovesLabel);
@@ -560,7 +561,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
         else if (this.starterCursors.length < 6) {
           const options = [
             {
-              label: 'Add to Party',
+              label: i18next.t("starterSelectUiHandler:addToParty"),
               handler: () => {
                 ui.setMode(Mode.STARTER_SELECT);
                 let isDupe = false;
@@ -595,7 +596,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
               overrideSound: true
             },
             {
-              label: 'Toggle IVs',
+              label: i18next.t("starterSelectUiHandler:toggleIVs"),
               handler: () => {
                 this.toggleStatsMode();
                 ui.setMode(Mode.STARTER_SELECT);
@@ -605,7 +606,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
           if (this.speciesStarterMoves.length > 1) {
             const showSwapOptions = (moveset: StarterMoveset) => {
               ui.setMode(Mode.STARTER_SELECT).then(() => {
-                ui.showText('Select a move to swap out.', null, () => {
+                ui.showText(i18next.t("starterSelectUiHandler:selectMoveSwapOut"), null, () => {
                   ui.setModeWithoutClear(Mode.OPTION_SELECT, {
                     options: moveset.map((m, i) => {
                       return {
@@ -639,7 +640,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
                                     }
                                   };
                                 }).concat({
-                                  label: 'Cancel',
+                                  label: i18next.t("menu:cancel"),
                                   handler: () => showSwapOptions(this.starterMoveset)
                                 }),
                                 maxOptions: 8,
@@ -650,7 +651,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
                         }
                       }
                     }).concat({
-                      label: 'Cancel',
+                      label: i18next.t("menu:cancel"),
                       handler: () => {
                         this.clearText();
                         ui.setMode(Mode.STARTER_SELECT);
@@ -663,14 +664,14 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
               });
             };
             options.push({
-              label: 'Manage Moves',
+              label: i18next.t("starterSelectUiHandler:manageMoves"),
               handler: () => {
                 showSwapOptions(this.starterMoveset);
               }
             });
           }
           options.push({
-            label: 'Cancel',
+            label: i18next.t("menu:cancel"),
             handler: () => {
               ui.setMode(Mode.STARTER_SELECT);
             }
@@ -947,7 +948,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       this.pokemonNameText.setText(species.name);
 
       if (this.speciesStarterDexEntry?.caughtAttr) {
-        this.pokemonGrowthRateText.setText(Utils.toReadableString(GrowthRate[species.growthRate]));
+        this.pokemonGrowthRateText.setText(i18next.t(`growth:${GrowthRate[species.growthRate].toLowerCase().replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())}`));
         this.pokemonGrowthRateText.setColor(getGrowthRateColor(species.growthRate));
         this.pokemonGrowthRateText.setShadowColor(getGrowthRateColor(species.growthRate, true));
         this.pokemonGrowthRateLabelText.setVisible(true);
@@ -1223,7 +1224,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       this.clearText();
     };
 
-    ui.showText('Begin with these Pokémon?', null, () => {
+    ui.showText(i18next.t("starterSelectUiHandler:confirmStartTeam"), null, () => {
       ui.setModeWithoutClear(Mode.CONFIRM, () => {
         const startRun = (gameMode: GameModes) => {
           this.scene.gameMode = gameModes[gameMode];
@@ -1262,10 +1263,10 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
             });
           }
           options.push({
-            label: 'Cancel',
+            label: i18next.t("menu:cancel"),
             handler: () => cancel()
           });
-          ui.showText('Select a game mode.', null, () => ui.setModeWithoutClear(Mode.OPTION_SELECT, { options: options, yOffset: 19 }));
+          ui.showText(i18next.t("menu:selectGameMode"), null, () => ui.setModeWithoutClear(Mode.OPTION_SELECT, { options: options, yOffset: 19 }));
         } else
           startRun(GameModes.CLASSIC);
       }, cancel, null, null, 19);

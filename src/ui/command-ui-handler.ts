@@ -1,3 +1,4 @@
+import i18next from '../i18n';
 import { CommandPhase } from "../phases";
 import BattleScene, { Button } from "../battle-scene";
 import { addTextObject, TextStyle } from "./text";
@@ -25,7 +26,7 @@ export default class CommandUiHandler extends UiHandler {
 
   setup() {
     const ui = this.getUi();
-    const commands = [ 'Fight', 'Ball', 'Pokémon', 'Run' ];
+    const commands = [ 'fight', 'ball', 'pokemon', 'run' ].map(key => i18next.t(`commandUiHandler:${key}`));
 
     this.commandsContainer = this.scene.add.container(216, -38.7);
     this.commandsContainer.setVisible(false);
@@ -54,8 +55,8 @@ export default class CommandUiHandler extends UiHandler {
     const messageHandler = this.getUi().getMessageHandler();
     messageHandler.commandWindow.setVisible(true);
     messageHandler.movesWindowContainer.setVisible(false);
-    messageHandler.message.setWordWrapWidth(1110);
-    messageHandler.showText(`What will\n${commandPhase.getPokemon().name} do?`, 0);
+    messageHandler.message.setWordWrapWidth(1110, i18next.language === 'zh-Hans');
+    messageHandler.showText(i18next.t("commandUiHandler:actionMessage", { pokemonName: (commandPhase.getPokemon().name) }), 0);
     this.setCursor(this.getCursor());
 
     return true;

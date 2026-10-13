@@ -11,6 +11,7 @@
 		"test:battle-core": "node --test tests/battle-core*.test.mjs",
 		"typecheck": "tsc --noEmit",
 		"test:local-save": "node --test tests/local-save.test.mjs",
+		"test:localization": "node --test tests/localization.test.mjs",
 		"build": "vite build",
 		"preview": "vite preview",
 		"test": "vitest run",
@@ -37,6 +38,7 @@
 	"dependencies": {
 		"@material/material-color-utilities": "^0.2.7",
 		"crypto-js": "^4.2.0",
+		"i18next": "26.3.1",
 		"json-stable-stringify": "^1.1.0",
 		"phaser": "^3.70.0",
 		"phaser3-rex-plugins": "^1.1.84",

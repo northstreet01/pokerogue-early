@@ -5,6 +5,17 @@ import { TextStyle, addTextObject, getTextColor } from "./text";
 import { Mode } from "./ui";
 import UiHandler from "./ui-handler";
 import { addWindow } from "./window";
+import i18next from '../i18n';
+import { SUPPORTED_LANGUAGE_ENTRIES, readLanguage, saveLanguage } from '../system/language.mjs';
+
+const settingLocaleKeys = {
+  Language: 'language', Game_Speed: 'gameSpeed', Master_Volume: 'masterVolume', BGM_Volume: 'bgmVolume',
+  SE_Volume: 'seVolume', Damage_Numbers: 'damageNumbers', Show_Stats_on_Level_Up: 'showStatsOnLevelUp',
+  Window_Type: 'windowType', Tutorials: 'tutorials', Sprite_Set: 'spriteSet',
+  Fusion_Palette_Swaps: 'fusionPaletteSwaps', Player_Gender: 'playerGender', Touch_Controls: 'touchControls', Vibration: 'vibrations'
+};
+const optionLocaleKeys = { Mute: 'mute', Off: 'off', On: 'on', Simple: 'simple', Fancy: 'fancy',
+  Consistent: 'consistent', 'Prioritize Animation': 'prioritizeAnimation', Boy: 'boy', Girl: 'girl', Auto: 'auto', Disabled: 'disabled' };
 
 export default class SettingsUiHandler extends UiHandler {
   private settingsContainer: Phaser.GameObjects.Container;
@@ -35,9 +46,12 @@ export default class SettingsUiHandler extends UiHandler {
     const headerBg = addWindow(this.scene, 0, 0, (this.scene.game.canvas.width / 6) - 2, 24);
     headerBg.setOrigin(0, 0);
 
-    const headerText = addTextObject(this.scene, 0, 0, 'Options', TextStyle.SETTINGS_LABEL);
+    const headerText = addTextObject(this.scene, 0, 0, i18next.t('menu:settings'), TextStyle.SETTINGS_LABEL);
     headerText.setOrigin(0, 0);
     headerText.setPositionRelative(headerBg, 8, 4);
+
+    const reloadText = addTextObject(this.scene, 310, 8, `* ${i18next.t('settings:requireReload')}`, TextStyle.SETTINGS_LABEL, { fontSize: '60px' });
+    reloadText.setOrigin(1, 0);
 
     this.optionsBg = addWindow(this.scene, 0, headerBg.height, (this.scene.game.canvas.width / 6) - 2, (this.scene.game.canvas.height / 6) - headerBg.height - 2);
     this.optionsBg.setOrigin(0, 0);
@@ -48,13 +62,15 @@ export default class SettingsUiHandler extends UiHandler {
     this.optionValueLabels = [];
 
     Object.keys(Setting).forEach((setting, s) => {
-      this.settingLabels[s] = addTextObject(this.scene, 8, 28 + s * 16, setting.replace(/\_/g, ' '), TextStyle.SETTINGS_LABEL);
+      const label = i18next.t(`settings:${settingLocaleKeys[setting]}`, { defaultValue: setting.replace(/\_/g, ' ') });
+      this.settingLabels[s] = addTextObject(this.scene, 8, 28 + s * 16, label + (setting === 'Language' ? '*' : ''), TextStyle.SETTINGS_LABEL);
       this.settingLabels[s].setOrigin(0, 0);
 
       this.optionsContainer.add(this.settingLabels[s]);
 
       this.optionValueLabels.push(settingOptions[Setting[setting]].map((option, o) => {
-        const valueLabel = addTextObject(this.scene, 0, 0, option, settingDefaults[Setting[setting]] === o ? TextStyle.SETTINGS_SELECTED : TextStyle.WINDOW);
+        const label = optionLocaleKeys[option] ? i18next.t(`settings:${optionLocaleKeys[option]}`, { defaultValue: option }) : option;
+        const valueLabel = addTextObject(this.scene, 0, 0, label, settingDefaults[Setting[setting]] === o ? TextStyle.SETTINGS_SELECTED : TextStyle.WINDOW);
         valueLabel.setOrigin(0, 0);
 
         this.optionsContainer.add(valueLabel);
@@ -81,6 +97,7 @@ export default class SettingsUiHandler extends UiHandler {
 
     this.settingsContainer.add(headerBg);
     this.settingsContainer.add(headerText);
+    this.settingsContainer.add(reloadText);
     this.settingsContainer.add(this.optionsBg);
     this.settingsContainer.add(this.optionsContainer);
 
@@ -97,7 +114,9 @@ export default class SettingsUiHandler extends UiHandler {
     
     const settings: object = localStorage.hasOwnProperty('settings') ? JSON.parse(localStorage.getItem('settings')) : {};
 
-    Object.keys(settingDefaults).forEach((setting, s) => this.setOptionCursor(s, settings.hasOwnProperty(setting) ? settings[setting] : settingDefaults[setting]));
+    Object.keys(settingDefaults).forEach((setting, s) => this.setOptionCursor(s, setting === Setting.Language
+      ? Object.keys(SUPPORTED_LANGUAGE_ENTRIES).indexOf(readLanguage(localStorage))
+      : settings.hasOwnProperty(setting) ? settings[setting] : settingDefaults[setting]));
 
     this.settingsContainer.setVisible(true);
     this.setCursor(0);
@@ -129,7 +148,7 @@ export default class SettingsUiHandler extends UiHandler {
           }
           break;
         case Button.DOWN:
-          if (cursor < this.optionValueLabels.length) {
+          if (cursor < this.optionValueLabels.length - 1) {
             if (this.cursor < 8)
               success = this.setCursor(this.cursor + 1);
             else if (this.scrollCursor < this.optionValueLabels.length - 9)
@@ -170,6 +189,13 @@ export default class SettingsUiHandler extends UiHandler {
   setOptionCursor(settingIndex: integer, cursor: integer, save?: boolean): boolean {
     const setting = Setting[Object.keys(Setting)[settingIndex]];
 
+    if (save && setting === Setting.Language) {
+      // Upstream requires a reload for static translations. Persist now and let
+      // the player reload after saving; never discard an in-progress early turn.
+      try { saveLanguage(localStorage, Object.keys(SUPPORTED_LANGUAGE_ENTRIES)[cursor]); }
+      catch { this.getUi().playError(); return false; }
+    }
+
     if (setting === Setting.Touch_Controls && cursor && hasTouchscreen() && isMobile()) {
       this.getUi().playError();
       return false;
@@ -187,7 +213,7 @@ export default class SettingsUiHandler extends UiHandler {
     newValueLabel.setColor(getTextColor(TextStyle.SETTINGS_SELECTED));
     newValueLabel.setShadowColor(getTextColor(TextStyle.SETTINGS_SELECTED, true));
 
-    if (save)
+    if (save && setting !== Setting.Language)
       this.scene.gameData.saveSetting(setting, cursor);
 
     return true;

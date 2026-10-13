@@ -1,3 +1,4 @@
+import i18next from '../i18n';
 import BattleScene, { Button } from "../battle-scene";
 import { Voucher, getVoucherTypeIcon, getVoucherTypeName, vouchers } from "../system/voucher";
 import MessageUiHandler from "./message-ui-handler";
@@ -39,7 +40,7 @@ export default class VouchersUiHandler extends MessageUiHandler {
     const headerBg = addWindow(this.scene, 0, 0, (this.scene.game.canvas.width / 6) - 2, 24);
     headerBg.setOrigin(0, 0);
 
-    const headerText = addTextObject(this.scene, 0, 0, 'Vouchers', TextStyle.SETTINGS_LABEL);
+    const headerText = addTextObject(this.scene, 0, 0, i18next.t("voucher:vouchers"), TextStyle.SETTINGS_LABEL);
     headerText.setOrigin(0, 0);
     headerText.setPositionRelative(headerBg, 8, 4);
 

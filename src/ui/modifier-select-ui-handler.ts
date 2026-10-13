@@ -1,3 +1,4 @@
+import i18next from '../i18n';
 import BattleScene, { Button } from "../battle-scene";
 import { getPlayerShopModifierTypeOptionsForWave, ModifierTypeOption } from "../modifier/modifier-type";
 import { getPokeballAtlasKey, PokeballType } from "../data/pokeball";
@@ -41,7 +42,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     this.transferButtonContainer.setVisible(false);
     ui.add(this.transferButtonContainer);
 
-    const transferButtonText = addTextObject(this.scene, -4, -2, 'Transfer', TextStyle.PARTY);
+    const transferButtonText = addTextObject(this.scene, -4, -2, i18next.t("partyUiHandler:transfer"), TextStyle.PARTY);
     transferButtonText.setOrigin(1, 0);
     this.transferButtonContainer.add(transferButtonText);
 
@@ -49,7 +50,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     this.rerollButtonContainer.setVisible(false);
     ui.add(this.rerollButtonContainer);
 
-    const rerollButtonText = addTextObject(this.scene, -4, -2, 'Reroll', TextStyle.PARTY);
+    const rerollButtonText = addTextObject(this.scene, -4, -2, i18next.t("modifierSelectUiHandler:reroll"), TextStyle.PARTY);
     rerollButtonText.setOrigin(0, 0);
     this.rerollButtonContainer.add(rerollButtonText);
 

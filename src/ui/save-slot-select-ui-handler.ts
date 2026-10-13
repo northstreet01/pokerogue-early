@@ -1,3 +1,4 @@
+import i18next from '../i18n';
 import BattleScene, { Button } from "../battle-scene";
 import { gameModes } from "../game-mode";
 import { SessionSaveData } from "../system/game-data";
@@ -108,7 +109,7 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
                 originalCallback(this.cursor);
               };
               if (this.sessionSlots[this.cursor].hasData) {
-                ui.showText('Overwrite the data in the selected slot?', null, () => {
+                ui.showText(i18next.t("saveSlotSelectUiHandler:overwriteData"), null, () => {
                   ui.setOverlayMode(Mode.CONFIRM, () => saveAndCallback(), () => {
                     ui.revertMode();
                     ui.showText(null, 0);
@@ -219,7 +220,7 @@ class SessionSlot extends Phaser.GameObjects.Container {
     const slotWindow = addWindow(this.scene, 0, 0, 304, 52);
     this.add(slotWindow);
 
-    this.loadingLabel = addTextObject(this.scene, 152, 26, 'Loading…', TextStyle.WINDOW);
+    this.loadingLabel = addTextObject(this.scene, 152, 26, i18next.t("saveSlotSelectUiHandler:loading"), TextStyle.WINDOW);
     this.loadingLabel.setOrigin(0.5, 0.5);
     this.add(this.loadingLabel);
   }
@@ -283,7 +284,7 @@ class SessionSlot extends Phaser.GameObjects.Container {
     return new Promise<boolean>(resolve => {
       this.scene.gameData.getSession(this.slotId).then(async sessionData => {
         if (!sessionData) {
-          this.loadingLabel.setText('Empty');
+          this.loadingLabel.setText(i18next.t("saveSlotSelectUiHandler:empty"));
           resolve(false);
           return;
         }

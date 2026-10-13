@@ -1,3 +1,4 @@
+import i18next from '../i18n';
 import BattleScene, { Button } from "../battle-scene";
 import { Mode } from "./ui";
 import UiHandler from "./ui-handler";
@@ -89,7 +90,7 @@ export default class SummaryUiHandler extends UiHandler {
     this.tabSprite.setOrigin(1, 1);
     this.summaryContainer.add(this.tabSprite);
 
-    const summaryLabel = addTextObject(this.scene, 4, -165, 'Pokémon Info', TextStyle.SUMMARY);
+    const summaryLabel = addTextObject(this.scene, 4, -165, i18next.t("pokemonSummary:pokemonInfo"), TextStyle.SUMMARY);
     summaryLabel.setOrigin(0, 1);
     this.summaryContainer.add(summaryLabel);
 
@@ -134,7 +135,7 @@ export default class SummaryUiHandler extends UiHandler {
 
     this.statusContainer.add(statusBg);
     
-    const statusLabel = addTextObject(this.scene, 3, 0, 'Status', TextStyle.SUMMARY);
+    const statusLabel = addTextObject(this.scene, 3, 0, i18next.t("pokemonSummary:status"), TextStyle.SUMMARY);
     statusLabel.setOrigin(0, 0);
 
     this.statusContainer.add(statusLabel);
@@ -154,7 +155,7 @@ export default class SummaryUiHandler extends UiHandler {
     moveEffectBg.setOrigin(0, 0);
     this.moveEffectContainer.add(moveEffectBg);
 
-    const moveEffectLabels = addTextObject(this.scene, 8, 12, 'Power\nAccuracy\nCategory', TextStyle.SUMMARY);
+    const moveEffectLabels = addTextObject(this.scene, 8, 12, i18next.t("pokemonSummary:powerAccuracyCategory"), TextStyle.SUMMARY);
     moveEffectLabels.setLineSpacing(9);
     moveEffectLabels.setOrigin(0, 0);
 

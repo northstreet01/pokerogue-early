@@ -11,6 +11,7 @@ import { StarterMoveset } from '../system/game-data';
 import { speciesEggMoves } from './egg-moves';
 import { PartyMemberStrength } from "./enums/party-member-strength";
 import { GameMode } from '../game-mode';
+import { catalogName } from '../system/localized-catalog';
 
 export enum Region {
   NORMAL,
@@ -369,7 +370,8 @@ export abstract class PokemonSpeciesForm {
 }
 
 export default class PokemonSpecies extends PokemonSpeciesForm {
-  public name: string;
+  private originalName: string;
+  get name(): string { return catalogName('pokemon', Species[this.speciesId], this.originalName); }
   public pseudoLegendary: boolean;
   public legendary: boolean;
   public mythical: boolean;
@@ -389,7 +391,7 @@ export default class PokemonSpecies extends PokemonSpeciesForm {
       catchRate, baseFriendship, baseExp, genderDiffs);
     this.speciesId = id;
     this.formIndex = 0;
-    this.name = name;
+    this.originalName = name;
     this.generation = generation;
     this.pseudoLegendary = pseudoLegendary;
     this.legendary = legendary;

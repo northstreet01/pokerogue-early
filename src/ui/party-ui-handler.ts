@@ -1,3 +1,4 @@
+import i18next from '../i18n';
 import { CommandPhase } from "../phases";
 import BattleScene, { Button } from "../battle-scene";
 import { PlayerPokemon, PokemonMove } from "../field/pokemon";
@@ -298,12 +299,12 @@ export default class PartyUiHandler extends MessageUiHandler {
           this.clearOptions();
           ui.playSelect();
           pokemon.pauseEvolutions = false;
-          this.showText(`Evolutions have been unpaused for ${pokemon.name}.`, null, () => this.showText(null, 0), null, true);
+          this.showText(i18next.t("partyUiHandler:unpausedEvolutions", { pokemonName: (pokemon.name) }), null, () => this.showText(null, 0), null, true);
         } else if (option === PartyOption.RELEASE) {
           this.clearOptions();
           ui.playSelect();
           if (this.cursor >= this.scene.currentBattle.getBattlerCount()) {
-            this.showText(`Do you really want to release ${pokemon.name}?`, null, () => {
+            this.showText(i18next.t("partyUiHandler:releaseConfirmation", { pokemonName: (pokemon.name) }), null, () => {
               ui.setModeWithoutClear(Mode.CONFIRM, () => {
                 ui.setMode(Mode.PARTY);
                 this.doRelease(this.cursor);
@@ -313,7 +314,7 @@ export default class PartyUiHandler extends MessageUiHandler {
               });
             });
           } else
-            this.showText('You can\'t release a Pokémon that\'s in battle!', null, () => this.showText(null, 0), null, true);
+            this.showText(i18next.t("partyUiHandler:releaseInBattle"), null, () => this.showText(null, 0), null, true);
           return true;
         } else if (option === PartyOption.CANCEL)
           return this.processInput(Button.CANCEL);
@@ -631,9 +632,9 @@ export default class PartyUiHandler extends MessageUiHandler {
           default:
             if (formChangeItemModifiers && option >= PartyOption.FORM_CHANGE_ITEM) {
               const modifier = formChangeItemModifiers[option - PartyOption.FORM_CHANGE_ITEM];
-              optionName = `${modifier.active ? 'Deactivate' : 'Activate'} ${modifier.type.name}`;
+              optionName = `${i18next.t(modifier.active ? 'partyUiHandler:deactivate' : 'partyUiHandler:activate')} ${modifier.type.name}`;
             } else
-              optionName = Utils.toReadableString(PartyOption[option]);
+              optionName = i18next.t(`partyUiHandler:${PartyOption[option].toLowerCase().replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())}`, { defaultValue: Utils.toReadableString(PartyOption[option]) });
             break;
         }
       } else if (option === PartyOption.SCROLL_UP)
@@ -981,7 +982,7 @@ class PartyCancelButton extends Phaser.GameObjects.Container {
 
     this.partyCancelPb = partyCancelPb;
 
-    const partyCancelText = addTextObject(this.scene, -7, -6, 'Cancel', TextStyle.PARTY);
+    const partyCancelText = addTextObject(this.scene, -7, -6, i18next.t("partyUiHandler:cancel"), TextStyle.PARTY);
     this.add(partyCancelText);
   }
 

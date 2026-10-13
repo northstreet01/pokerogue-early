@@ -2,6 +2,7 @@ import BBCodeText from "phaser3-rex-plugins/plugins/gameobjects/tagtext/bbcodete
 import InputText from "phaser3-rex-plugins/plugins/inputtext";
 import { ModifierTier } from "../modifier/modifier-tier";
 import { EggTier } from "../data/enums/egg-type";
+import i18next from '../i18n';
 
 export enum TextStyle {
   MESSAGE,
@@ -107,6 +108,8 @@ function getTextStyleOptions(style: TextStyle, extraStyleOptions?: Phaser.Types.
     styleOptions = Object.assign(styleOptions, extraStyleOptions);
   }
 
+  // Phaser's advanced wrapping also breaks CJK text that has no spaces.
+  styleOptions.wordWrap = { useAdvancedWrap: i18next.language === 'zh-Hans', ...styleOptions.wordWrap };
   return [ styleOptions, shadowColor, shadowSize ];
 }
 

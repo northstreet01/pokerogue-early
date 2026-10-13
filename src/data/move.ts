@@ -1,4 +1,5 @@
 import { Moves } from "./enums/moves";
+import { catalogName, catalogDescription } from '../system/localized-catalog';
 import { ChargeAnim, MoveChargeAnim, initMoveAnim, loadMoveAnimAssets } from "./battle-anims";
 import { BattleEndPhase, MovePhase, NewBattlePhase, PokemonHealPhase, StatChangePhase, SwitchSummonPhase } from "../phases";
 import { BattleStat, getBattleStatName } from "./battle-stat";
@@ -68,14 +69,16 @@ type UserMoveConditionFunc = (user: Pokemon, move: Move) => boolean;
 
 export default class Move {
   public id: Moves;
-  public name: string;
+  private originalName: string;
+  get name(): string { return catalogName('move', Moves[this.id], this.originalName); }
   public type: Type;
   public category: MoveCategory;
   public moveTarget: MoveTarget;
   public power: integer;
   public accuracy: integer;
   public pp: integer;
-  public effect: string;
+  private originalEffect: string;
+  get effect(): string { return catalogDescription('move', Moves[this.id], 'effect', this.originalEffect); }
   public chance: integer;
   public priority: integer;
   public generation: integer;
@@ -85,14 +88,14 @@ export default class Move {
 
   constructor(id: Moves, name: string, type: Type, category: MoveCategory, defaultMoveTarget: MoveTarget, power: integer, accuracy: integer, pp: integer, effect: string, chance: integer, priority: integer, generation: integer) {
     this.id = id;
-    this.name = name;
+    this.originalName = name;
     this.type = type;
     this.category = category;
     this.moveTarget = defaultMoveTarget;
     this.power = power;
     this.accuracy = accuracy;
     this.pp = pp;
-    this.effect = effect;
+    this.originalEffect = effect;
     this.chance = chance;
     this.priority = priority;
     this.generation = generation;

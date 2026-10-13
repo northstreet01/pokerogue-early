@@ -1,4 +1,5 @@
 import Pokemon, { HitResult, PokemonMove } from "../field/pokemon";
+import { catalogName, catalogDescription } from '../system/localized-catalog';
 import { Type } from "./type";
 import * as Utils from "../utils";
 import { BattleStat, getBattleStatName } from "./battle-stat";
@@ -18,8 +19,10 @@ import { SpeciesFormChangeManualTrigger } from "./pokemon-forms";
 
 export class Ability {
   public id: Abilities;
-  public name: string;
-  public description: string;
+  private originalName: string;
+  private originalDescription: string;
+  get name(): string { return catalogName('ability', Abilities[this.id], this.originalName); }
+  get description(): string { return catalogDescription('ability', Abilities[this.id], 'description', this.originalDescription); }
   public generation: integer;
   public isPassive: boolean;
   public isIgnorable: boolean;
@@ -28,8 +31,8 @@ export class Ability {
 
   constructor(id: Abilities, name: string, description: string, generation: integer) {
     this.id = id;
-    this.name = name;
-    this.description = description;
+    this.originalName = name;
+    this.originalDescription = description;
     this.generation = generation;
     this.attrs = [];
     this.conditions = [];

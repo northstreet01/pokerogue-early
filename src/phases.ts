@@ -1,3 +1,4 @@
+import { prepareQueuedFight, selectEncoreFight } from './battle-core/forced-command.mjs';
 import { selectFightCommand } from './battle-core/fight-command.mjs';
 import { selectEnemyCommand } from './battle-core/enemy-command.mjs';
 import { getFieldOrder, getMoveOrder } from './battle-core/turn-order.mjs';
@@ -1497,25 +1498,10 @@ export class CommandPhase extends FieldPhase {
 
     const playerPokemon = this.scene.getPlayerField()[this.fieldIndex];
 
-    const moveQueue = playerPokemon.getMoveQueue();
-
-    while (moveQueue.length && moveQueue[0]
-      && moveQueue[0].move && (!playerPokemon.getMoveset().find(m => m.moveId === moveQueue[0].move)
-      || !playerPokemon.getMoveset()[playerPokemon.getMoveset().findIndex(m => m.moveId === moveQueue[0].move)].isUsable(playerPokemon, moveQueue[0].ignorePP)))
-        moveQueue.shift();
-
-    if (moveQueue.length) {
-      const queuedMove = moveQueue[0];
-      if (!queuedMove.move)
-        this.handleCommand(Command.FIGHT, -1, false);
-      else {
-        const moveIndex = playerPokemon.getMoveset().findIndex(m => m.moveId === queuedMove.move);
-        if (moveIndex > -1 && playerPokemon.getMoveset()[moveIndex].isUsable(playerPokemon, queuedMove.ignorePP)) {
-          this.handleCommand(Command.FIGHT, moveIndex, queuedMove.ignorePP, { targets: queuedMove.targets, multiple: queuedMove.targets.length > 1 });
-        } else
-          this.scene.ui.setMode(Mode.COMMAND, this.fieldIndex);
-      }
-    } else
+    const forced = prepareQueuedFight(playerPokemon);
+    if (forced)
+      this.handleCommand(Command.FIGHT, forced.cursor, ...forced.args);
+    else
       this.scene.ui.setMode(Mode.COMMAND, this.fieldIndex);
   }
 
@@ -1653,20 +1639,9 @@ export class CommandPhase extends FieldPhase {
   }
 
   checkFightOverride(): boolean {
-    const pokemon = this.getPokemon();
-
-    const encoreTag = pokemon.getTag(EncoreTag) as EncoreTag;
-
-    if (!encoreTag)
-      return false;
-
-    const moveIndex = pokemon.getMoveset().findIndex(m => m.moveId === encoreTag.moveId);
-
-    if (moveIndex === -1 || !pokemon.getMoveset()[moveIndex].isUsable(pokemon))
-      return false;
-
-    this.handleCommand(Command.FIGHT, moveIndex, false);
-
+    const forced = selectEncoreFight(this.getPokemon(), pokemon => pokemon.getTag(EncoreTag));
+    if (!forced) return false;
+    this.handleCommand(Command.FIGHT, forced.cursor, ...forced.args);
     return true;
   }
 

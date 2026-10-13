@@ -1,4 +1,5 @@
 import { copy, requireContract as check } from './coop-contract.mjs';
+import { selectEncoreFight } from './forced-command.mjs';
 
 // Original CommandPhase FIGHT selection. Trusted internal args retain early's
 // positional override semantics; never pass unvalidated network args here.
@@ -24,8 +25,9 @@ export function resolveFightIntent(pokemon, fieldIndex, input, rules) {
     && Number.isInteger(fieldIndex) && fieldIndex >= 0 && fieldIndex <= 1, 'INVALID_FIGHT_INTENT');
   check(Number.isInteger(intent.cursor) && intent.cursor >= 0 && intent.cursor < pokemon.getMoveset().length, 'INVALID_MOVE_CURSOR');
   check(pokemon.hp > 0 && pokemon.getMoveQueue().length === 0, 'UNSUPPORTED_FORCED_COMMAND');
-  // Forced tags (e.g. Encore) must be checked by the original runner before
-  // offering options. This resolver does not synthesize legal options.
+  check(typeof rules.getEncoreTag === 'function', 'FORCED_RULES_UNAVAILABLE');
+  const forced = selectEncoreFight(pokemon, rules.getEncoreTag);
+  check(!forced || forced.cursor === intent.cursor, 'FORCED_MOVE_REQUIRED');
   const selected = selectFightCommand(pokemon, fieldIndex, intent.cursor, [false], rules);
   check(selected, 'MOVE_UNUSABLE');
   if (selected.needsTarget) {

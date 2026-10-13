@@ -6,8 +6,9 @@ import { formalFixture } from './helpers/formal-ws.mjs';
 import { createSnapshotConsumer } from '../src/battle-core/coop-client.mjs';
 import { copy } from '../src/battle-core/coop-contract.mjs';
 import { resolveFightIntent } from '../src/battle-core/fight-command.mjs';
+import { battler } from './helpers/original-model.mjs';
 
-const fightRules = {fightCommand:0,noneMove:0,struggleMove:165,getMoveTargets:()=>({targets:[2],multiple:false})};
+const fightRules = {fightCommand:0,noneMove:0,struggleMove:165,getEncoreTag:p=>p.getTag(battler.EncoreTag),getMoveTargets:()=>({targets:[2],multiple:false})};
 
 function initialDecision() {
   const ctx = initialUntrainedDecision();
@@ -15,7 +16,9 @@ function initialDecision() {
   ctx.battle.trainer = initialTrainer(2);
   for (const seat of [0,1]) {
     const pokemon = ctx.roster.entries[seat].pokemon;
-    pokemon.summonData.moveQueue=[]; pokemon.summonData.disabledMove=0; pokemon.summonData.tags=[];
+    pokemon.summonData.moveQueue=[]; pokemon.summonData.disabledMove=0;
+    const encore=battler.getBattlerTag('ENCORE',3,33,pokemon.id);encore.moveId=57;
+    pokemon.summonData.tags=[encore];
     ctx.decision.options[seat]=[{kind:'fight',pokemonId:pokemon.id,cursor:0,target:null}];
   }
   return ctx;

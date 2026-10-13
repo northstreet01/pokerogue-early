@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { parse, originalPokemon } from './helpers/original-model.mjs';
+import { parse, originalPokemon, battler } from './helpers/original-model.mjs';
 import { selectFightCommand, resolveFightIntent } from '../src/battle-core/fight-command.mjs';
 import { codec, initialDecision } from './helpers/decision-model.mjs';
 
@@ -37,7 +37,7 @@ test('actual player FIGHT branch preserves original selection, Struggle, overrid
 });
 test('network fight intent rejects forged internal flags, wrong instance, cursor and target without consuming PP',()=>{
   const pokemon=originalPokemon();pokemon.summonData.moveQueue=[];pokemon.summonData.disabledMove=0;
-  const rules={fightCommand:0,noneMove:0,struggleMove:165,getMoveTargets:()=>({targets:[2,3],multiple:false})};
+  const rules={fightCommand:0,noneMove:0,struggleMove:165,getEncoreTag:p=>p.getTag(battler.EncoreTag),getMoveTargets:()=>({targets:[2,3],multiple:false})};
   const intent={kind:'fight',pokemonId:pokemon.id,cursor:0,target:3};
   const before=pokemon.getMoveset().map(m=>m.ppUsed);
   const command=resolveFightIntent(pokemon,0,intent,rules);
@@ -52,7 +52,7 @@ test('restored original Pokemon resolves the same fight and spread-target comman
   const ctx=initialDecision();const p=ctx.roster.entries[0].pokemon;p.summonData.moveQueue=[];p.summonData.disabledMove=0;
   const saved=codec.capture(ctx),restored=codec.restore(saved).roster.entries[0].pokemon;
   const intent={kind:'fight',pokemonId:p.id,cursor:0,target:null};
-  const rules={fightCommand:0,noneMove:0,struggleMove:165,getMoveTargets:()=>({targets:[2,3],multiple:true})};
+  const rules={fightCommand:0,noneMove:0,struggleMove:165,getEncoreTag:p=>p.getTag(battler.EncoreTag),getMoveTargets:()=>({targets:[2,3],multiple:true})};
   assert.deepEqual(resolveFightIntent(restored,0,intent,rules),resolveFightIntent(p,0,intent,rules));
   assert.deepEqual(codec.capture(ctx),saved);
 });

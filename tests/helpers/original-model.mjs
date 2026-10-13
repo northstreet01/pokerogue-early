@@ -35,6 +35,7 @@ const battleIndices = enums('battle.ts', ['BattlerIndex']);
 class Phase { constructor(...args) { this.args = args; } }
 class Holder { constructor(value) { this.value = value; } }
 const utils = { IntegerHolder: Holder, NumberHolder: Holder, BooleanHolder: Holder };
+Object.assign(utils, evaluate(parse('utils.ts').statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'getEnumValues').getText()));
 const pokemonEnums = enums('field/pokemon.ts', ['HitResult', 'MoveResult']);
 const allMoves = new Proxy([], { get: (_, id) => ({ name: `Move ${id}`, pp: 20 }) });
 const messages = { getPokemonMessage: (pokemon, suffix) => `${pokemon.name}${suffix}` };
@@ -64,10 +65,13 @@ const arena = evaluate(read('data/arena-tag.ts'), {
 
 // Catalog fixtures exercise reference identity, not catalog/content compatibility.
 // All executed Pokemon methods below are the actual source, unmodified.
-const species = new Map([1, 4, 7].map(id => [id, { speciesId: id, formIndex: 0, forms: [], baseExp: 64 }]));
+const species = new Map([1, 2, 4, 7].map(id => [id, { speciesId: id, formIndex: 0, forms: [], baseExp: 64,
+  baseStats:[45,49,49,65,65,45],getName:()=>`Species ${id}`,getAbilityCount:()=>1,getAbility:()=>0,ability1:0,type1:0,type2:null }]));
 species.get(4).forms = [{ speciesId: 4, formIndex: 0 }, { speciesId: 4, formIndex: 1 }];
-const moveCatalog = { 0: { id: 0, pp: -1 }, 33: { id: 33, pp: 35 }, 57: { id: 57, pp: 15 } };
-const abilityCatalog = { 0: { id: 0 }, 1: { id: 1 } };
+const moveIds=new Set(Object.values(moves.Moves).filter(v=>typeof v==='number'));
+const moveCatalog = new Proxy({ 0: { id: 0, pp: -1 }, 33: { id: 33, pp: 35 }, 57: { id: 57, pp: 15 } },{get:(target,id)=>Object.hasOwn(target,id)?target[id]
+  :moveIds.has(Number(id))?{id:Number(id),pp:20,name:`Move ${id}`}:undefined});
+const abilityCatalog = { 0: { id: 0,hasAttr:()=>false,getAttrs:()=>[],conditions:[] }, 1: { id: 1,hasAttr:()=>false,getAttrs:()=>[],conditions:[] } };
 const dependencies = Object.fromEntries(parse('field/pokemon.ts').statements.filter(ts.isImportDeclaration).map(n => [n.moduleSpecifier.text, {}]));
 Object.assign(dependencies, {
   phaser: { default: { GameObjects: { Container: class { constructor() { throw Error('Renderer constructor called'); } } } } },
@@ -76,9 +80,17 @@ Object.assign(dependencies, {
   '../data/pokemon-species': { getPokemonSpecies: id => species.get(id) },
   '../data/status-effect': status, '../data/battler-tags': battler,
   '../data/enums/battler-tag-type': battlerTypes,
+  '../data/enums/species': enums('data/enums/species.ts',['Species']),
+  '../data/nature':evaluate(read('data/nature.ts'),{'./pokemon-stat':stats,'../i18n':{default:{t:k=>k}},'../utils':utils,'../ui/text':{}}),
+  '../data/tms':evaluate(read('data/tms.ts'),{'./enums/moves':moves,'./enums/species':enums('data/enums/species.ts',['Species']),
+    '../modifier/modifier-tier':enums('modifier/modifier-tier.ts',['ModifierTier'])}),
+  '../data/battle-stat': battleStats, '../utils': utils,
+  '../data/pokemon-forms': { SpeciesFormChangePostMoveTrigger: class {} },
+  '../system/achv': { achvs: { TRANSFER_MAX_BATTLE_STAT: 'TRANSFER_MAX_BATTLE_STAT' } },
   '../battle-core/pokemon-state.mjs': { createPokemonStateCodec }
 });
 const pokemon = evaluate(read('field/pokemon.ts'), dependencies);
+export function installPokemonTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(dependencies[path],value);}
 export { read, parse, evaluate, pokemon, species, moveCatalog, status, battler, arena, moves, weather, terrain };
 
 export function originalPokemon(id = 100, enemy = false) {

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { pushPhase, prependPhase, selectNextPhase, populatePhaseQueue } from './battle-core/phase-queue.mjs';
 import { ruleSeedOffset } from './battle-core/random-context.mjs';
 import { getMaxExpLevel as calculateMaxExpLevel } from './battle-core/levels.mjs';
 import UI, { Mode } from './ui/ui';
@@ -1529,14 +1530,11 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	pushPhase(phase: Phase, defer: boolean = false): void {
-		(!defer ? this.phaseQueue : this.nextCommandPhaseQueue).push(phase);
+		pushPhase(this, phase, defer);
 	}
 
 	unshiftPhase(phase: Phase): void {
-		if (this.phaseQueuePrependSpliceIndex === -1)
-			this.phaseQueuePrepend.push(phase);
-		else
-			this.phaseQueuePrepend.splice(this.phaseQueuePrependSpliceIndex, 0, phase);
+		prependPhase(this, phase);
 	}
 
 	clearPhaseQueue(): void {
@@ -1552,22 +1550,9 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	shiftPhase(): void {
-		if (this.standbyPhase) {
-			this.currentPhase = this.standbyPhase;
-			this.standbyPhase = null;
-			return;
-		}
-
-		if (this.phaseQueuePrependSpliceIndex > -1)
-			this.clearPhaseQueueSplice();
-		if (this.phaseQueuePrepend.length) {
-			while (this.phaseQueuePrepend.length)
-				this.phaseQueue.unshift(this.phaseQueuePrepend.pop());
-		}
-		if (!this.phaseQueue.length)
-			this.populatePhaseQueue();
-		this.currentPhase = this.phaseQueue.shift();
-		this.currentPhase.start();
+		const next = selectNextPhase(this, () => this.populatePhaseQueue());
+		if (next.start)
+			next.phase.start();
 	}
 	
 	overridePhase(phase: Phase): boolean {
@@ -1622,11 +1607,7 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	populatePhaseQueue(): void {
-		if (this.nextCommandPhaseQueue.length) {
-			this.phaseQueue.push(...this.nextCommandPhaseQueue);
-			this.nextCommandPhaseQueue.splice(0, this.nextCommandPhaseQueue.length);
-		}
-		this.phaseQueue.push(new TurnInitPhase(this));
+		populatePhaseQueue(this, () => new TurnInitPhase(this));
 	}
 
 	getWaveMoneyAmount(moneyMultiplier: number): integer {

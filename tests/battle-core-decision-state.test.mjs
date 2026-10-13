@@ -8,6 +8,20 @@ import { RandomDataGenerator, withSeedOffset } from '../src/battle-core/random.m
 import { copy } from '../src/battle-core/coop-contract.mjs';
 import { originalModifier } from './helpers/modifier-model.mjs';
 
+test('arena catalogue references and remembered trainer reject invalid candidates atomically',()=>{
+  const c=initialDecision();c.scene.lastEnemyTrainer=initialTrainer();
+  c.battle.trainer=c.scene.lastEnemyTrainer;
+  c.arena.pokemonPool={0:[1,{5:[4,7]}]};
+  const saved=trainerDecisionCodec.capture(c),r=trainerDecisionCodec.restore(saved);
+  assert.equal(r.scene.lastEnemyTrainer,r.battle.trainer);
+  assert.deepEqual(r.arena.pokemonPool,c.arena.pokemonPool);
+  const mutations=[s=>{s.arena.biomeType.value=9999;},s=>{s.arena.lastTimeOfDay.value=9999;},
+    s=>{s.arena.pokemonPool.value[0][1][5][0]=999999;},s=>{s.arena.trainerPool.value[0]=[999999];},
+    s=>{s.scene.gameMode=999;},s=>{s.scene.lastEnemyTrainer.value=999;}];
+  for(const mutate of mutations){const bad=copy(saved);mutate(bad);const input=copy(bad);
+    assert.throws(()=>trainerDecisionCodec.restore(bad));assert.deepEqual(bad,input);assert.deepEqual(trainerDecisionCodec.capture(c),saved);}
+});
+
 test('Battle checkpoint preserves cross-Pokemon tag identity and original method continuation', () => {
   const original = withTransferredTag(initialDecision()), saved = codec.capture(original);
   const restored = codec.restore(copy(saved));
@@ -99,7 +113,7 @@ test('registered trainer and loot restore without constructors; absent codec and
   assert.throws(()=>trainerDecisionCodec.capture(original),/INVALID_MODIFIER_FIELD/);
 });
 
-test('decision v3 preserves shared mutable ModifierType identity and rejects forged aliases', () => {
+test('decision checkpoint preserves shared mutable ModifierType identity and rejects forged aliases', () => {
   const original = initialDecision(), first = original.players[0].modifiers[0], second = originalModifier();
   second.type = first.type; original.players[0].modifiers.push(second);
   const saved = codec.capture(original), restored = codec.restore(saved);

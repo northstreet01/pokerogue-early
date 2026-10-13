@@ -1,4 +1,5 @@
 import { selectSwitchSummon } from './battle-core/switch-command.mjs';
+import { finishSwitchSummon } from './battle-core/switch-finish.mjs';
 import { inspectLearnMove } from './battle-core/learn-command.mjs';
 import { applyTargetSelection } from './battle-core/target-command.mjs';
 import { prepareQueuedFight, selectEncoreFight } from './battle-core/forced-command.mjs';
@@ -1291,16 +1292,9 @@ export class SwitchSummonPhase extends SummonPhase {
 
     const pokemon = this.getPokemon();
 
-    // Compensate for turn spent summoning
-    if (pokemon.scene.currentBattle.turnCommands[this.fieldIndex]?.command === Command.POKEMON)
-      pokemon.battleSummonData.turnCount--;
-
-    if (this.batonPass && pokemon)
-      pokemon.transferSummon(this.lastPokemon);
-
-    this.lastPokemon?.resetSummonData();
-
-    this.scene.triggerPokemonFormChange(pokemon, SpeciesFormChangeActiveTrigger, true);
+    finishSwitchSummon(pokemon, this.lastPokemon, this.batonPass,
+      pokemon.scene.currentBattle.turnCommands[this.fieldIndex]?.command === Command.POKEMON,
+      p => this.scene.triggerPokemonFormChange(p, SpeciesFormChangeActiveTrigger, true));
   }
 
   queuePostSummon(): void {

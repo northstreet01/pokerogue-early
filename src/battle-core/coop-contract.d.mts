@@ -32,7 +32,7 @@ export interface ServerAdapter<Context, Checkpoint extends Json> {
   validateCheckpoint(checkpoint: Checkpoint): void | Promise<void>;
   restoreCheckpoint(checkpoint: Checkpoint): Context | Promise<Context>;
   projectSnapshot(context: Context, seat: Seat): Projection | Promise<Projection>;
-  describeDecision(context: Context): { id: string; requiredSeats: Seat[] } | Promise<{ id: string; requiredSeats: Seat[] }>;
+  describeDecision(context: Context): { id: string; requiredSeats: Seat[]; collection?: 'all' | 'incremental' | 'auto' } | Promise<{ id: string; requiredSeats: Seat[]; collection?: 'all' | 'incremental' | 'auto' }>;
 }
 export interface ClientAdapter {
   applySnapshot(snapshot: Snapshot): void | Promise<void>;

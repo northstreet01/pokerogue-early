@@ -1,76 +1,60 @@
 # 新窗口开发交接
 
-更新：2026-10-13。本次只整理文档，不启动开发、不创建新聊天。新窗口先恢复上下文，再按用户指令继续。
+更新：2026-10-14。用户要求“完成 M2 后提交”。本批完成 M2 安全停点状态层，在 main 提交；未推送。实际提交号、未提交修改及远程同步状态必须重新读取 Git。
 
 ## 当前停在哪里
 
-- 本地 main 最新代码：`8b5a3716`（跨精灵共享标签检查点修复）。开始整理时工作区干净。
-- 上一代码批：`9f295062`（交互决策、房间随机源及奖励池状态）；其后 `cc1dd5de` 保存暂停点与已批准规则。
-- 本次只读核对远程 main 仍为 `9f295062`。`cc1dd5de`、`8b5a3716` 尚未推送；本次文档整理提交也仅保存在本地。后续必须重新核对 Git，不能假定远程已同步。
-- 最新批的既有验证记录：135/135 自动测试、类型检查、生产构建通过。本次文档整理未重跑代码测试，仅检查文档差异、链接及一致性。
-- **M2 仍部分完成，CHECKPOINT-01 未验收。原游戏完整合作战斗尚不可用。**
+- 开发基点 `8758a080`；此前本地相对 origin/main ahead 3。本批增加原 Phase/队列、可变引用、安全交互停点和正式协调器 incremental/auto 推进模式。
+- 最终 177/177 自动测试、类型检查和生产构建通过，范围与命令见 [M2 验收记录](m2-checkpoints-2026-10-14.md)。M2 的完成表示安全停点状态层验收，不表示完整 M3 战斗运行器、原合作 UI 或真实双机已完成。
+- decision payload v5、Pokemon v2、roster v3、original Phase v1；M1 envelope 不变。旧检查点明确拒绝，未静默迁移或覆盖。
+- 原 Phase 清单覆盖三个源文件 68 个声明/63 个具体类；待续队列六字段、非空 pendingEffects、进化/形态目录引用及共享对象已支持。已开始的 Phase 必须保存剩余阶段，恢复不能重新 start。
+- 安全停点包括选队完成、待行动/目标/替补/学招、进化及取消/暂停、地图、独立整备、整备内个人子决策、待续处理和结束。选队完成允许 Battle=null；不会在恢复时生成敌人或重抽选项。
+- `/` 为原单人，`/coop.html` 为隔离实验页。正式 `/coop/v1/ws` 默认仍缺 M3 原运行器并返回 ADAPTER_UNAVAILABLE。测试适配器不能接入生产冒充完整规则。
 
 ## 工作目录与保护边界
 
 - 只在 `E:\pokeregue\pokerogue-early` 开发；远程 `https://github.com/northstreet01/pokerogue-early.git`，分支 `main`。
-- `E:\pokeregue\pokerogue` 是另一份含用户未上传工作的目录，不能重置、清理或批量覆盖；移植扩展时只读参考并记录来源。
-- 接手先读 `git status --short`、`git log -5 --oneline` 和远程同步状态。禁止强制拉取、reset、清理用户修改。
-- 发布排除房间数据、恢复凭据、个人备份、环境秘密、node_modules、构建和临时审计输出；不得读取真实房间生成公开测试夹具。
+- 不修改 `E:\pokeregue\pokerogue`，不重置、清理或覆盖用户工作。
+- 接手先读 `git status --short`、`git log -5 --oneline`、`git rev-list --left-right --count HEAD...origin/main`；本地 origin/main 可能过期，不声称远程已同步。
+- 用户批准的是完成 M2 后提交；本批不推送。后续推送需明确当前授权并遵守工具审批，不能绕过拒绝。
+- 不提交个人房间、恢复凭据、存档、环境秘密、node_modules、dist 和临时测试输出；不要用真实房间生成公开夹具。
 
-## 已确认玩法，不要重复询问
+## 已确认玩法
 
-- 地图分支：双方选择一致后前进，达成一致前可修改各自选择。
-- 战后整备：各自独立整备，双方准备后进入下一战。
-- 以上两项已写入 SPEC，但正式运行时和恢复流程尚未实现。
-- 经验归属、蛋/券归属、敌我同回合全部倒下的判定等仍见 SPEC 第 8 节；不把实验引擎行为当作批准规则。
+地图双方选择一致后前进，一致前可修改；战后各自独立整备，双方准备后继续。状态协调已实现，原 UI 和完整权威下一战推进仍待后续模块。没有因版本限制精灵种类、世代或内容范围；测试小目录是夹具，不是产品限制。
 
-## 代码现状
-
-| 范围 | 已有内容 | 仍缺 |
-|---|---|---|
-| M1 | 正式协议、校验、服务/客户端适配接口、真实 WS 双客户端测试入口；契约层已验收 | 原运行器与游戏 UI 接入不能算作 M1 已完成内容 |
-| M2 | Pokemon/Battle/Arena、Trainer、57 类 Modifier、生成型道具类型、个人资源、随机流和奖励池；待行动/目标/替补/学招决策 | 完整待续 Phase、进化、地图、整备、结束及选队完成等停点装配；完整原场景续行 |
-| M2 最新修复 | roster v2 的 tagGroups 保留跨精灵共享标签及 primer 引用；错误候选不污染原模型/输入/房间 | 未覆盖所有跨精灵可变对象共享，也未执行完整接棒 Phase |
-| M3 | 原行动排序、敌方命令、FIGHT、排队动作/Encore，以及目标/学招/替补局部分支已提取回接 | Move/MoveEffect、完整回合、全量 AI/特性、完整非 FIGHT 执行 |
-| M4–M8 | 实验联机、本地存档和协议恢复有基础 | 正式原 UI、整备、收藏、完整恢复、真实双机长期验收 |
-
-版本分别为：通用 M1 envelope 版本不变，decision payload v3，roster payload v2。旧版不兼容检查点明确拒绝，不猜测恢复或覆盖旧保存。
-
-`pendingEffects` 仍只接受空列表。局部交互状态可恢复，不代表携带任意 Phase 队列的完整原场景可恢复。
-
-`/` 是原单人，`/coop.html` 是隔离实验页。`server/coop-service.mjs` 仍调用有限实验引擎。正式 `/coop/v1/ws` 默认没有原版适配器，开局返回 `ADAPTER_UNAVAILABLE`；测试适配器不能接到生产冒充运行器。
+经验归属、蛋/券归属、敌我同回合全部倒下的判定仍按 SPEC 第 8 节处理；不能把实验引擎规则当作用户批准的规则。
 
 ## 阅读顺序
 
-1. [SPEC](../SPEC.md)：批准玩法、局外收藏边界和验收。
-2. [架构](coop-architecture-2026-10-13.md)、[模块计划](coop-development-plan.md)：权威边界、协议与模块依赖。
-3. [最新共享标签修复](shared-tag-checkpoints-m2-2026-10-13.md)：`8b5a3716` 的范围、135 项验证及限制。
-4. [交互与随机状态](decision-random-checkpoints-m2-2026-10-13.md)：`9f295062` 的 payload v3、房间随机源、奖励池与未完成清单。
-5. 按需读 [Pokemon](original-pokemon-checkpoints-m2-2026-10-13.md)、[等待行动](wait-action-checkpoints-m2-2026-10-13.md)、[Trainer](trainer-checkpoints-m2-2026-10-13.md)、[Modifier](modifier-checkpoints-m2-2026-10-13.md)、[强制动作](forced-command-m3-2026-10-13.md)。这些是历史批次记录，测试数量不能当当前总数。
-6. [语言适配](upstream-localization-2026-10-13.md)、[实验页说明](../COOP.md)：保留已有扩展与原内容。
+1. [SPEC](../SPEC.md)：需求与当前验收，重点第 5/7/8 节。
+2. [架构](coop-architecture-2026-10-13.md)、[计划](coop-development-plan.md)：权威边界、接口和 M1–M8 依赖。
+3. [M2 当前验收](m2-checkpoints-2026-10-14.md)：字段/引用/安全停点、177 项证据、测试范围和 M3 缺口。
+4. 按需查看历史 [队列/换人收尾](phase-continuation-m2-2026-10-13.md)、[共享标签](shared-tag-checkpoints-m2-2026-10-13.md)、[决策随机流](decision-random-checkpoints-m2-2026-10-13.md)、Pokemon/Trainer/Modifier 记录；旧版本/数量属于当时状态。
+5. [语言适配](upstream-localization-2026-10-13.md)、[实验页](../COOP.md)：维护扩展，保持原内容和独立入口。
 
-## 再次开发时的下一步
+## 下一步工作安排
 
-1. 不重复已有 Pokemon/Battle 切片。先列原 Phase 的 prepend/deferred/standby 与交互后续处理，设计显式可恢复状态；不得直接 JSON 化函数或 UI 回调。
-2. 补完整待续序列与进化等停点；按已批准规则补地图一致选择、独立整备与双方准备状态，记录修改选择、重连、单方准备和重启场景。
-3. 每个切片同时做原版未中断/恢复继续差分和真实 WS 两端模型恢复/提取确认；保留单方输入、重发、写盘失败及损坏模型的故障矩阵。
-4. 注意原 `getMoveTargets` 的随机目标分支会消耗 Battle RNG，不能直接用作无副作用的网络校验提供者。现有受控测试提供者不是全招式合法性验收。
-5. 区分接口、检查点、原运行器、UI、浏览器与真实双机的完成状态。整个模块未完成时不得因局部测试通过而勾选验收。
+1. M3：接可信权威原推进器与 `src/original-phase-checkpoints.ts`，以 Move/MoveEffect 和一回合闭环为下一有界切片；复用原公式/方法，显式进入/恢复安全停点。
+2. 提供无副作用合法目标校验和房间 RNG；接原进场特性/场地、持有物、形态及非 FIGHT 效果；不把测试提供者当生产规则。
+3. 每一切片都补原版未中断/恢复差分与真实 WS 双端提取确认；延续输入重发、单方输入重启、写盘失败、损坏模型、旧连接 ACK 和两房间隔离矩阵。
+4. M4/M5 接原选队/共同战斗/整备 UI，M6 接永久收藏事务；M7 故障矩阵贯穿，M8 用真实双机和长局验收。
 
-## 检查与服务
+## 检查命令
 
-~~~powershell
+```powershell
 Set-Location E:\pokeregue\pokerogue-early
 git status --short
 git log -5 --oneline
 git rev-list --left-right --count HEAD...origin/main
 npm run typecheck
-node --test tests/battle-core*.test.mjs tests/coop*.test.mjs tests/local-save.test.mjs tests/localization.test.mjs
+node --test --test-concurrency=1 --test-reporter=tap tests/battle-core*.test.mjs tests/coop*.test.mjs tests/local-save.test.mjs tests/localization.test.mjs
 npm run build
-~~~
+git diff --check
+```
 
-按变更范围执行；文档变更仅检查差异、链接和一致性。开发/生产服务默认 8020，先查已有进程，不占端口或停掉用户游戏。测试用临时端口、隔离档案和合成房间。仅上传 dist 不足以运行 Node 联机。
+本机 WS 测试使用随机端口。先查现有服务，不占用 8020 或停止用户游戏。生产构建有既有 chunk/混合导入警告。并发回归曾出现测试进程无断言详情退出，相关文件单跑通过；最终验收采用串行完整回归，保留此环境限制。
 
 ## 可直接发送给新窗口
 
-> 请先读取 E:\pokeregue\pokerogue-early\docs\DEVELOPMENT-HANDOFF.md，并核对 Git 状态、最近提交与远程同步情况。最新代码提交 8b5a3716，既有验证记录 135 项测试、类型检查和构建通过，完整 M2 仍未验收。地图规则已确定为双方选择一致后前进、可修改选择；战后各自独立整备、双方准备后进入下一战，不要重复询问。本次先恢复上下文并说明下一步，不自行启动开发；我明确要求继续后，再补完整 Phase 待续序列和剩余安全停点，保持原版规则、独立收藏和真实 WS 双端恢复测试，不修改另一份 pokerogue 目录。
+> 请先读取 E:\pokeregue\pokerogue-early\docs\DEVELOPMENT-HANDOFF.md，核对 Git 和当前 main 提交。M2 安全停点状态层已完成并按要求提交，未推送；177 项测试、类型检查和构建证据见 docs/m2-checkpoints-2026-10-14.md。下一步从 M3 原 Move/MoveEffect 与一回合权威推进器开始，复用生产状态 codec 和安全停点，不重复做 M2 字段层。保持 / 和 /coop.html，缺完整运行器仍明确拒绝；不限制原精灵内容，不修改另一份 pokerogue。先恢复上下文，按我的下一条指令决定是否开发。

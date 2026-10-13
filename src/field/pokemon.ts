@@ -2748,3 +2748,6 @@ export function capturePokemonState(pokemon: Pokemon) {
 export function restorePokemonState(snapshot: unknown): Pokemon {
   return pokemonStateCodec.restore(snapshot);
 }
+
+export const capturePokemonMoveState = pokemonStateCodec.captureMove;
+export const restorePokemonMoveState = pokemonStateCodec.restoreMove;

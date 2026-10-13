@@ -60,6 +60,10 @@ function assignOwn(target, key, value) {
 // Preserve mutable aliases (e.g. a summon primer sharing moves/tags), rather than
 // silently turning one runtime object into two diverging copies after JSON.
 const catalogFields = new Set(['species', 'fusionSpecies', 'speciesForm', 'fusionSpeciesForm']);
+export function pokemonRuleNodes(pokemon) {
+  return graph(pokemon, Object.keys({ ...base, ...pokemonStateFields.PlayerPokemon, ...pokemonStateFields.EnemyPokemon })).nodes;
+}
+export const equivalentPokemonRuleNodes = (a, b) => equivalent(a, b);
 function graph(root, rootFields) {
   const nodes = new Map(), seen = new Map(), active = new Set(), aliases = [];
   function walk(node, path) {
@@ -127,9 +131,23 @@ export function createPokemonStateCodec({ constructors, getSpecies, getMove, get
       return restoring ? reference : { speciesId: id, formIndex: index, base: isBase };
     }
     if (rule === 'status') return restoring ? restoreStatus(input) : captureStatus(input);
+    if (rule === 'nullableMove') return input === null ? null : restoring ? restoreRecord(input, 'PokemonMove') : captureRecord(input, 'PokemonMove');
     if (rule === 'tags') return array(input, path, 128).map(tag => restoring ? restoreTag(tag) : captureTag(tag));
+    // Original transferSummon iterates BattleStat.RAND as well, writing an
+    // explicit undefined at index 7. Preserve that own slot (not a sparse hole)
+    // instead of trimming it or silently converting it to null through JSON.
+    if (rule === 'stages') {
+      const list = array(input, path, 8);
+      if (list.length !== 7 && list.length !== 8) fail(path);
+      return list.map((stage, index) => {
+        if (index < 7) return integer(stage, -6, 6, path);
+        if (restoring) { keys(stage, ['undefined'], path); if (stage.undefined !== true) fail(path); return undefined; }
+        if (stage !== undefined) fail(path);
+        return { undefined: true };
+      });
+    }
     if (has(schemas, rule)) return restoring ? restoreRecord(input, rule) : captureRecord(input, rule);
-    const lists = { moves: ['PokemonMove', 4], queue: ['QueuedMove', 10000], history: ['TurnMove', 100000], attacks: ['AttackMoveResult', 10000], moveIds: ['moveId', 10000], stats: ['uint', 6], ivs: ['uint', 6], stages: ['int', 7], targets: ['int', 4], types: ['int', 2] };
+    const lists = { moves: ['nullableMove', 4], queue: ['QueuedMove', 10000], history: ['TurnMove', 100000], attacks: ['AttackMoveResult', 10000], moveIds: ['moveId', 10000], stats: ['uint', 6], ivs: ['uint', 6], targets: ['int', 4], types: ['int', 2] };
     if (!has(lists, rule)) fail(`schema ${rule}`);
     const [itemRule, max] = lists[rule], list = array(input, path, max);
     if (['stats', 'ivs', 'stages'].includes(rule) && list.length !== max) fail(path);
@@ -189,15 +207,17 @@ export function createPokemonStateCodec({ constructors, getSpecies, getMove, get
     return candidate;
   }
   return Object.freeze({
+    captureMove: move => captureRecord(move, 'PokemonMove'),
+    restoreMove: snapshot => restoreRecord(snapshot, 'PokemonMove'),
     capture(pokemon) {
       const type = prototypes.get(Object.getPrototypeOf(pokemon));
       if (!['PlayerPokemon', 'EnemyPokemon'].includes(type)) fail('Pokemon type');
       const { aliases } = graph(pokemon, Object.keys(schemas[type]));
-      return { version: 1, ...captureRecord(pokemon, type), aliases };
+      return { version: 2, ...captureRecord(pokemon, type), aliases };
     },
     restore(snapshot) {
       keys(snapshot, ['version', 'type', 'fields', 'undefinedFields', 'aliases'], 'envelope');
-      if (snapshot.version !== 1 || !['PlayerPokemon', 'EnemyPokemon'].includes(snapshot.type)) fail('version/type');
+      if (snapshot.version !== 2 || !['PlayerPokemon', 'EnemyPokemon'].includes(snapshot.type)) fail('version/type');
       const candidate = restoreRecord({ type: snapshot.type, fields: snapshot.fields, undefinedFields: snapshot.undefinedFields }, snapshot.type);
       const { nodes } = graph(candidate, Object.keys(schemas[snapshot.type])), order = [...nodes.keys()], used = new Set();
       for (const alias of array(snapshot.aliases, 'aliases')) {

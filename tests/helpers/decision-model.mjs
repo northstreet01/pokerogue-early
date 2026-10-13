@@ -1,6 +1,7 @@
 import { createModifierPoolState } from '../../src/battle-core/modifier-pool-state.mjs';
+import { emptyContinuation } from '../../src/battle-core/phase-continuation.mjs';
 import ts from 'typescript';
-import { parse, evaluate, pokemon, originalPokemon, arena, weather, terrain } from './original-model.mjs';
+import { parse, evaluate, pokemon, originalPokemon, arena, weather, terrain,moveCatalog } from './original-model.mjs';
 import { createRosterStateCodec } from '../../src/battle-core/roster-state.mjs';
 import { createDecisionStateCodec, SceneRandom } from '../../src/battle-core/decision-state.mjs';
 import { RandomDataGenerator, nextBattleRandomInt, readBattleRandomCheckpoint } from '../../src/battle-core/random.mjs';
@@ -9,6 +10,13 @@ import { trainerCodec, trainerModule, originalTrainer } from './trainer-model.mj
 import { modifierCodec, originalModifier } from './modifier-model.mjs';
 import { getFieldOrder } from '../../src/battle-core/turn-order.mjs';
 import { selectEnemyCommand } from '../../src/battle-core/enemy-command.mjs';
+import {phaseCodec,evolutionCodec} from './phase-model.mjs';
+import {createSafeDecisionCodec} from '../../src/battle-core/safe-decisions.mjs';
+import {types} from './modifier-model.mjs';
+import {createArenaPoolStateCodec} from '../../src/battle-core/arena-pool-state.mjs';
+const enumOf=(file,name)=>evaluate(parse(file).statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n'))[name];
+const biomes=enumOf('data/enums/biome.ts','Biome'),times=enumOf('data/enums/time-of-day.ts','TimeOfDay'),species=enumOf('data/enums/species.ts','Species'),trainers=enumOf('data/enums/trainer-type.ts','TrainerType');
+export const arenaPoolCodec=createArenaPoolStateCodec({hasBiome:id=>typeof biomes[id]==='string',hasTimeOfDay:id=>typeof times[id]==='string',hasSpecies:id=>typeof species[id]==='string',hasTrainer:id=>typeof trainers[id]==='string'});
 
 const classes = (file, names) => parse(file).statements.filter(n => ts.isClassDeclaration(n) && names.includes(n.name.text)).map(n => n.getText()).join('\n');
 export const Battle = evaluate(`import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; ${classes('battle.ts', ['Battle'])}`, { random: { nextBattleRandomInt, readBattleRandomCheckpoint } }).default;
@@ -18,8 +26,9 @@ export const Trainer = trainerModule.default;
 export { trainerCodec };
 export const initialTrainer = originalTrainer;
 export { modifierCodec };
-export const codec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], hasMove: id => [33,57].includes(id), components: { modifier: modifierCodec } });
-export const trainerDecisionCodec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], hasMove: id => [33,57].includes(id), components: { modifier: modifierCodec, trainer: trainerCodec } });
+export const safeCodec=createSafeDecisionCodec({evolution:evolutionCodec,modifierType:{restore:types.restoreModifierTypeState},hasBiome:id=>Number.isInteger(id)&&id>=0&&id<=50,hasMove:id=>!!moveCatalog[id]});
+export const codec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], hasMove: id => !!moveCatalog[id], safeDecisions:safeCodec,phaseState:phaseCodec,arenaPools:arenaPoolCodec,components: { modifier: modifierCodec } });
+export const trainerDecisionCodec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], hasMove: id => !!moveCatalog[id],safeDecisions:safeCodec,phaseState:phaseCodec,arenaPools:arenaPoolCodec, components: { modifier: modifierCodec, trainer: trainerCodec } });
 export function initialDecision(seed = 'room-seed') {
   const entries = [0,1,2].map(i => ({ owner: i < 2 ? i : null, group: i < 2 ? 'party' : 'enemy', index: 0, pokemon: originalPokemon(100+i, i === 2) }));
   const battle = Object.create(Battle.prototype);
@@ -27,10 +36,10 @@ export function initialDecision(seed = 'room-seed') {
   const field = Object.create(Arena.prototype); Object.assign(field, { biomeType: 0, tags: [arena.getArenaTag('SPIKES', 0, 33, 100, undefined, 2)], weather: new weather.Weather(1, 3), terrain: new terrain.Terrain(1, 2), ignoreAbilities: false, lastTimeOfDay: 0, pokemonPool: { 0: [1,4,7] }, trainerPool: { 0: [1] } });
   const modifier = originalModifier(); modifier.virtualStackCount = 1;
   return { roster: { entries, field: [100,101,102,null], retiredIds: [] }, battle, arena: field,
-    scene: { seed, waveSeed: seed+'-wave', waveCycleOffset: 0, offsetGym: false, score: 0 },
+    scene: { seed, waveSeed: seed+'-wave', waveCycleOffset: 0, offsetGym: false, score: 0,gameMode:modes[0] },
     players: [0,1].map(i => ({ money: 100+i, pokeballCounts: { 0:100,1:0,2:0,3:0,4:0 }, modifiers: i === 0 ? [modifier] : [] })), enemyModifiers: [],
     sceneRandom: new SceneRandom(new RandomDataGenerator([seed]).state()), modifierPools: createModifierPoolState(),
-    decision: { id: 'decision-1', kind: 'wait-actions', requiredSeats: [0,1], options: { 0:[{kind:'test-continue',pokemonId:100}], 1:[{kind:'test-continue',pokemonId:101}] } }, pendingEffects: [] };
+    decision: { id: 'decision-1', kind: 'wait-actions', requiredSeats: [0,1], options: { 0:[{kind:'test-continue',pokemonId:100}], 1:[{kind:'test-continue',pokemonId:101}] } }, pendingEffects: [], continuation: emptyContinuation() };
 }
 export function continueDecision(ctx) {
   // Test provider consumes the room Battle RNG. Full original AI/model binding

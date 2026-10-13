@@ -85,6 +85,8 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
   async function decision(ctx) {
     const result = await adapter.describeDecision(ctx);
     check(result && typeof result.id === 'string' && result.id.length > 0 && result.id.length <= 128 && Array.isArray(result.requiredSeats) && result.requiredSeats.every(seat => seat === 0 || seat === 1) && new Set(result.requiredSeats).size === result.requiredSeats.length, 'INVALID_DECISION');
+    check(result.collection === undefined || ['all','incremental','auto'].includes(result.collection), 'INVALID_DECISION');
+    check(result.collection!=='auto'||result.requiredSeats.length===0,'INVALID_DECISION');
     return result;
   }
   async function projection(ctx, seat) {
@@ -110,7 +112,8 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
   async function advance(room) {
     if (blocked(room)) return;
     const ctx = await context(room), nextDecision = await decision(ctx);
-    if (!nextDecision.requiredSeats.length || !nextDecision.requiredSeats.every(seat => Object.hasOwn(room.inputs, seat))) return;
+    if (nextDecision.collection!=='auto'&&(!nextDecision.requiredSeats.length || (nextDecision.collection === 'incremental'
+      ? !Object.keys(room.inputs).length : !nextDecision.requiredSeats.every(seat => Object.hasOwn(room.inputs, seat))))) return;
     try {
       // Each accepted input is already durable. Runner only mutates a restored
       // candidate; failures never replace the committed context or consume its RNG.

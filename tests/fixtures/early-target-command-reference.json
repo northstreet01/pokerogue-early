@@ -1,0 +1,4 @@
+{
+  "commit": "7cace491",
+  "source": "export class SelectTargetPhase extends PokemonPhase {\n  constructor(scene: BattleScene, fieldIndex: integer) {\n    super(scene, fieldIndex);\n  }\n\n  start() {\n    super.start();\n\n    const turnCommand = this.scene.currentBattle.turnCommands[this.fieldIndex];\n    const move = turnCommand.move?.move;\n    this.scene.ui.setMode(Mode.TARGET_SELECT, this.fieldIndex, move, (cursor: integer) => {\n      this.scene.ui.setMode(Mode.MESSAGE);\n      if (cursor === -1) {\n        this.scene.currentBattle.turnCommands[this.fieldIndex] = null;\n        this.scene.unshiftPhase(new CommandPhase(this.scene, this.fieldIndex));\n      } else\n        turnCommand.targets = [ cursor ];\n      if (turnCommand.command === Command.BALL && this.fieldIndex)\n        this.scene.currentBattle.turnCommands[this.fieldIndex - 1].skip = true;\n      this.end();\n    });\n  }\n}"
+}

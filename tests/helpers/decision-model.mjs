@@ -1,3 +1,4 @@
+import { createModifierPoolState } from '../../src/battle-core/modifier-pool-state.mjs';
 import ts from 'typescript';
 import { parse, evaluate, pokemon, originalPokemon, arena, weather, terrain } from './original-model.mjs';
 import { createRosterStateCodec } from '../../src/battle-core/roster-state.mjs';
@@ -17,8 +18,8 @@ export const Trainer = trainerModule.default;
 export { trainerCodec };
 export const initialTrainer = originalTrainer;
 export { modifierCodec };
-export const codec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], components: { modifier: modifierCodec } });
-export const trainerDecisionCodec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], components: { modifier: modifierCodec, trainer: trainerCodec } });
+export const codec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], hasMove: id => [33,57].includes(id), components: { modifier: modifierCodec } });
+export const trainerDecisionCodec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], hasMove: id => [33,57].includes(id), components: { modifier: modifierCodec, trainer: trainerCodec } });
 export function initialDecision(seed = 'room-seed') {
   const entries = [0,1,2].map(i => ({ owner: i < 2 ? i : null, group: i < 2 ? 'party' : 'enemy', index: 0, pokemon: originalPokemon(100+i, i === 2) }));
   const battle = Object.create(Battle.prototype);
@@ -28,7 +29,7 @@ export function initialDecision(seed = 'room-seed') {
   return { roster: { entries, field: [100,101,102,null], retiredIds: [] }, battle, arena: field,
     scene: { seed, waveSeed: seed+'-wave', waveCycleOffset: 0, offsetGym: false, score: 0 },
     players: [0,1].map(i => ({ money: 100+i, pokeballCounts: { 0:100,1:0,2:0,3:0,4:0 }, modifiers: i === 0 ? [modifier] : [] })), enemyModifiers: [],
-    sceneRandom: new SceneRandom(new RandomDataGenerator([seed]).state()),
+    sceneRandom: new SceneRandom(new RandomDataGenerator([seed]).state()), modifierPools: createModifierPoolState(),
     decision: { id: 'decision-1', kind: 'wait-actions', requiredSeats: [0,1], options: { 0:[{kind:'test-continue',pokemonId:100}], 1:[{kind:'test-continue',pokemonId:101}] } }, pendingEffects: [] };
 }
 export function continueDecision(ctx) {

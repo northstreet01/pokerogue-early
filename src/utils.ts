@@ -1,3 +1,9 @@
+import { ruleRandom, unseededRandom } from './battle-core/random-context.mjs';
+
+export function getSceneRandom(): Phaser.Math.RandomDataGenerator {
+  return ruleRandom(() => Phaser.Math.RND);
+}
+
 export const MissingTextureKey = '__MISSING';
 
 export function toReadableString(str: string): string {
@@ -9,7 +15,7 @@ export function randomString(length: integer, seeded: boolean = false) {
   let result = '';
   
   for (let i = 0; i < length; i++) {
-    const randomIndex = seeded ? randSeedInt(characters.length) : Math.floor(Math.random() * characters.length);
+    const randomIndex = seeded ? randSeedInt(characters.length) : Math.floor(unseededRandom() * characters.length);
     result += characters[randomIndex];
   }
   
@@ -38,8 +44,8 @@ export function clampInt(value: integer, min: integer, max: integer): integer {
 export function randGauss(stdev: number, mean: number = 0): number {
   if (!stdev)
     return 0;
-  const u = 1 - Math.random();
-  const v = Math.random();
+  const u = 1 - unseededRandom();
+  const v = unseededRandom();
   const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
   return z * stdev + mean;
 }
@@ -47,8 +53,8 @@ export function randGauss(stdev: number, mean: number = 0): number {
 export function randSeedGauss(stdev: number, mean: number = 0): number {
   if (!stdev)
     return 0;
-  const u = 1 - Phaser.Math.RND.realInRange(0, 1);
-  const v = Phaser.Math.RND.realInRange(0, 1);
+  const u = 1 - getSceneRandom().realInRange(0, 1);
+  const v = getSceneRandom().realInRange(0, 1);
   const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
   return z * stdev + mean;
 }
@@ -65,13 +71,13 @@ export function padInt(value: integer, length: integer, padWith?: string): strin
 export function randInt(range: integer, min: integer = 0): integer {
   if (range === 1)
     return min;
-  return Math.floor(Math.random() * range) + min;
+  return Math.floor(unseededRandom() * range) + min;
 }
 
 export function randSeedInt(range: integer, min: integer = 0): integer {
   if (range <= 1)
     return min;
-  return Phaser.Math.RND.integerInRange(min, (range - 1) + min);
+  return getSceneRandom().integerInRange(min, (range - 1) + min);
 }
 
 export function randIntRange(min: integer, max: integer): integer {
@@ -87,13 +93,13 @@ export function randItem<T>(items: T[]): T {
 export function randSeedItem<T>(items: T[]): T {
   return items.length === 1
     ? items[0]
-    : Phaser.Math.RND.pick(items);
+    : getSceneRandom().pick(items);
 }
 
 export function randSeedWeightedItem<T>(items: T[]): T {
   return items.length === 1
     ? items[0]
-    : Phaser.Math.RND.weightedPick(items);
+    : getSceneRandom().weightedPick(items);
 }
 
 export function getSunday(date: Date): Date {

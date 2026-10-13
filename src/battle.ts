@@ -94,11 +94,11 @@ export default class Battle {
 
     private getLevelForWave(): integer {
         return getWildLevel(this.waveIndex, this.gameMode.getWaveForDifficulty(this.waveIndex),
-            this.battleSpec === BattleSpec.FINAL_BOSS, () => this.gameMode.isWaveFinal(this.waveIndex), Phaser.Math.RND);
+            this.battleSpec === BattleSpec.FINAL_BOSS, () => this.gameMode.isWaveFinal(this.waveIndex), Utils.getSceneRandom());
     }
 
     randSeedGaussForLevel(value: number): number { 
-        return gaussianLevelOffset(value, Phaser.Math.RND);
+        return gaussianLevelOffset(value, Utils.getSceneRandom());
     }
 
     getBattlerCount(): integer {

@@ -1,3 +1,5 @@
+import { ruleModifierPools } from '../battle-core/random-context.mjs';
+import { createModifierPoolState } from '../battle-core/modifier-pool-state.mjs';
 import * as Modifiers from './modifier';
 import { createModifierTypeStateCodec } from '../battle-core/modifier-type-state.mjs';
 import { AttackMove, allMoves } from '../data/move';
@@ -1136,17 +1138,8 @@ export function getModifierType(modifierTypeFunc: ModifierTypeFunc): ModifierTyp
   return modifierType;
 }
 
-let modifierPoolThresholds = {};
-let ignoredPoolIndexes = {};
-
-let dailyStarterModifierPoolThresholds = {};
-let ignoredDailyStarterPoolIndexes = {};
-
-let enemyModifierPoolThresholds = {};
-let enemyIgnoredPoolIndexes = {};
-
-let enemyBuffModifierPoolThresholds = {};
-let enemyBuffIgnoredPoolIndexes = {};
+const browserModifierPools = createModifierPoolState();
+const getModifierPools = () => ruleModifierPools(() => browserModifierPools);
 
 const tierWeights = [ 769 / 1024, 192 / 1024, 48 / 1024, 12 / 1024, 1 / 1024 ];
 
@@ -1219,21 +1212,21 @@ export function regenerateModifierPoolThresholds(party: Pokemon[], poolType: Mod
     console.table(modifierTableData);
   switch (poolType) {
     case ModifierPoolType.PLAYER:
-      modifierPoolThresholds = thresholds;
-      ignoredPoolIndexes = ignoredIndexes;
+      getModifierPools().modifierPoolThresholds = thresholds;
+      getModifierPools().ignoredPoolIndexes = ignoredIndexes;
       break;
     case ModifierPoolType.WILD:
     case ModifierPoolType.TRAINER:
-      enemyModifierPoolThresholds = thresholds;
-      enemyIgnoredPoolIndexes = ignoredIndexes;
+      getModifierPools().enemyModifierPoolThresholds = thresholds;
+      getModifierPools().enemyIgnoredPoolIndexes = ignoredIndexes;
       break;
     case ModifierPoolType.ENEMY_BUFF:
-      enemyBuffModifierPoolThresholds = thresholds;
-      enemyBuffIgnoredPoolIndexes = ignoredIndexes;
+      getModifierPools().enemyBuffModifierPoolThresholds = thresholds;
+      getModifierPools().enemyBuffIgnoredPoolIndexes = ignoredIndexes;
       break;
     case ModifierPoolType.DAILY_STARTER:
-      dailyStarterModifierPoolThresholds = thresholds;
-      ignoredDailyStarterPoolIndexes = ignoredIndexes;
+      getModifierPools().dailyStarterModifierPoolThresholds = thresholds;
+      getModifierPools().ignoredDailyStarterPoolIndexes = ignoredIndexes;
       break;
   }
 }
@@ -1334,23 +1327,23 @@ function getNewModifierTypeOption(party: Pokemon[], poolType: ModifierPoolType, 
   switch (poolType) {
     case ModifierPoolType.PLAYER:
       pool = modifierPool;
-      thresholds = modifierPoolThresholds;
+      thresholds = getModifierPools().modifierPoolThresholds;
       break;
     case ModifierPoolType.WILD:
       pool = wildModifierPool;
-      thresholds = enemyModifierPoolThresholds;
+      thresholds = getModifierPools().enemyModifierPoolThresholds;
       break;
     case ModifierPoolType.TRAINER:
       pool = trainerModifierPool;
-      thresholds = enemyModifierPoolThresholds;
+      thresholds = getModifierPools().enemyModifierPoolThresholds;
       break;
     case ModifierPoolType.ENEMY_BUFF:
       pool = enemyBuffModifierPool;
-      thresholds = enemyBuffModifierPoolThresholds;
+      thresholds = getModifierPools().enemyBuffModifierPoolThresholds;
       break;
     case ModifierPoolType.DAILY_STARTER:
       pool = dailyStarterModifierPool;
-      thresholds = dailyStarterModifierPoolThresholds;
+      thresholds = getModifierPools().dailyStarterModifierPoolThresholds;
       break;
   }
   if (tier === undefined) {
@@ -1391,7 +1384,7 @@ function getNewModifierTypeOption(party: Pokemon[], poolType: ModifierPoolType, 
   }
   
   if (player)
-    console.log(index, ignoredPoolIndexes[tier].filter(i => i <= index).length, ignoredPoolIndexes[tier])
+    console.log(index, getModifierPools().ignoredPoolIndexes[tier].filter(i => i <= index).length, getModifierPools().ignoredPoolIndexes[tier])
   let modifierType: ModifierType = (pool[tier][index]).modifierType;
   if (modifierType instanceof ModifierTypeGenerator) {
     modifierType = (modifierType as ModifierTypeGenerator).generateType(party);

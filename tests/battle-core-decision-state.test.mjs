@@ -55,7 +55,7 @@ test('registered trainer and loot restore without constructors; absent codec and
   assert.throws(()=>trainerDecisionCodec.capture(original),/INVALID_MODIFIER_FIELD/);
 });
 
-test('decision v2 preserves shared mutable ModifierType identity and rejects forged aliases', () => {
+test('decision v3 preserves shared mutable ModifierType identity and rejects forged aliases', () => {
   const original = initialDecision(), first = original.players[0].modifiers[0], second = originalModifier();
   second.type = first.type; original.players[0].modifiers.push(second);
   const saved = codec.capture(original), restored = codec.restore(saved);
@@ -64,6 +64,6 @@ test('decision v2 preserves shared mutable ModifierType identity and rejects for
   assert.equal(restored.players[0].modifiers[1].type.tier, 3);
   const corrupt = copy(saved); corrupt.modifierTypeGroups[0].push(999);
   assert.throws(() => codec.restore(corrupt), /INVALID_TYPE_ALIAS/);
-  const old = copy(saved); old.version = 1;
+  const old = copy(saved); old.version = 2; delete old.modifierPools;
   assert.throws(() => codec.restore(old), /VERSION_MISMATCH/);
 });

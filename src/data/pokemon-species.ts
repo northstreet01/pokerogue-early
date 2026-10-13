@@ -526,7 +526,7 @@ export default class PokemonSpecies extends PokemonSpeciesForm {
       }
     }
 
-    if (noEvolutionChance === 1 || Phaser.Math.RND.realInRange(0, 1) < noEvolutionChance)
+    if (noEvolutionChance === 1 || Utils.getSceneRandom().realInRange(0, 1) < noEvolutionChance)
       return this.speciesId;
       
     const randValue = evolutionPool.size === 1 ? 0 : Utils.randSeedInt(totalWeight);

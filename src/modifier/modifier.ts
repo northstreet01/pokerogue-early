@@ -1765,7 +1765,7 @@ export class ContactHeldItemTransferChanceModifier extends HeldItemTransferModif
   }
 
   getTransferredItemCount(): integer {
-    return Phaser.Math.RND.realInRange(0, 1) < (this.chance * this.getStackCount()) ? 1 : 0;
+    return Utils.getSceneRandom().realInRange(0, 1) < (this.chance * this.getStackCount()) ? 1 : 0;
   }
 
   getTransferMessage(pokemon: Pokemon, targetPokemon: Pokemon, item: ModifierTypes.ModifierType): string {
@@ -1953,7 +1953,7 @@ export class EnemyAttackStatusEffectChanceModifier extends EnemyPersistentModifi
 
   apply(args: any[]): boolean {
     const target = (args[0] as Pokemon);
-    if (Phaser.Math.RND.realInRange(0, 1) < (this.chance * this.getStackCount()))
+    if (Utils.getSceneRandom().realInRange(0, 1) < (this.chance * this.getStackCount()))
       return target.trySetStatus(this.effect, true);
 
     return false;
@@ -1983,7 +1983,7 @@ export class EnemyStatusEffectHealChanceModifier extends EnemyPersistentModifier
 
   apply(args: any[]): boolean {
     const target = (args[0] as Pokemon);
-    if (target.status && Phaser.Math.RND.realInRange(0, 1) < (this.chance * this.getStackCount())) {
+    if (target.status && Utils.getSceneRandom().realInRange(0, 1) < (this.chance * this.getStackCount())) {
       target.scene.queueMessage(getPokemonMessage(target, getStatusEffectHealText(target.status.effect)));
       target.resetStatus();
       target.updateInfo();
@@ -2018,7 +2018,7 @@ export class EnemyInstantReviveChanceModifier extends EnemyPersistentModifier {
   }
 
   apply(args: any[]): boolean {
-    if (Phaser.Math.RND.realInRange(0, 1) >= (this.chance * this.getStackCount()))
+    if (Utils.getSceneRandom().realInRange(0, 1) >= (this.chance * this.getStackCount()))
       return false;
 
     const pokemon = args[0] as Pokemon;
@@ -2058,7 +2058,7 @@ export class EnemyFusionChanceModifier extends EnemyPersistentModifier {
   }
 
   apply(args: any[]): boolean {
-    if (Phaser.Math.RND.realInRange(0, 1) >= (this.chance * this.getStackCount()))
+    if (Utils.getSceneRandom().realInRange(0, 1) >= (this.chance * this.getStackCount()))
       return false;
 
     (args[0] as Utils.BooleanHolder).value = true;

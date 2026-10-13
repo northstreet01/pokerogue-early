@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
 import { RandomDataGenerator, nextBattleRandomInt, shiftSeed, withSeedOffset } from '../src/battle-core/random.mjs';
+import { ruleSeedOffset } from '../src/battle-core/random-context.mjs';
 import { getWildLevel, getMaxExpLevel, gaussianLevelOffset } from '../src/battle-core/levels.mjs';
 import { getCaptureThreshold, advanceCaptureCheck } from '../src/battle-core/capture.mjs';
 
@@ -13,7 +14,7 @@ const { fragments: original } = JSON.parse(fs.readFileSync(new URL('./fixtures/e
 function reference(random, fragments = original) {
   const exports = {};
   const source = `${original.shift}\n${original.randSeedInt}\n
-    const Utils = {shiftCharCodes,randSeedInt};
+    const Utils = {shiftCharCodes,randSeedInt,getSceneRandom:()=>Phaser.Math.RND};
     class Reference { ${fragments.battleRand}\n${fragments.level}\n${fragments.gauss}\n${fragments.levelCap}\n${fragments.seedScope} }
     exports.Reference = Reference;
     exports.threshold = (maxHp,hp,rate,ball,status) => {
@@ -36,7 +37,7 @@ function reference(random, fragments = original) {
     };`;
   vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,
     {exports,Phaser:{Math:{RND:random}},BattleSpec:{FINAL_BOSS:1},nextBattleRandomInt,getWildLevel,gaussianLevelOffset,
-      calculateMaxExpLevel:getMaxExpLevel,withSeedOffset,getCaptureThreshold,advanceCaptureCheck});
+      calculateMaxExpLevel:getMaxExpLevel,withSeedOffset,ruleSeedOffset,getCaptureThreshold,advanceCaptureCheck});
   return exports;
 }
 

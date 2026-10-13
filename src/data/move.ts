@@ -905,7 +905,7 @@ export class StealHeldItemChanceAttr extends MoveEffectAttr {
 
   apply(user: Pokemon, target: Pokemon, move: Move, args: any[]): Promise<boolean> {
     return new Promise<boolean>(resolve => {
-      const rand = Phaser.Math.RND.realInRange(0, 1);
+      const rand = Utils.getSceneRandom().realInRange(0, 1);
       if (rand >= this.chance)
         return resolve(false);
       const heldItems = this.getTargetHeldItems(target).filter(i => i.getTransferrable(false));
@@ -951,7 +951,7 @@ export class RemoveHeldItemAttr extends MoveEffectAttr {
 
   apply(user: Pokemon, target: Pokemon, move: Move, args: any[]): Promise<boolean> {
     return new Promise<boolean>(resolve => {
-      const rand = Phaser.Math.RND.realInRange(0, 1);
+      const rand = Utils.getSceneRandom().realInRange(0, 1);
       if (rand >= this.chance)
         return resolve(false);
       const heldItems = this.getTargetHeldItems(target).filter(i => i.getTransferrable(false));

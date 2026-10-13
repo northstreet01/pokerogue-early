@@ -1,3 +1,5 @@
+import { createModifierPoolState } from '../../src/battle-core/modifier-pool-state.mjs';
+import { ruleModifierPools } from '../../src/battle-core/random-context.mjs';
 import ts from 'typescript';
 import { parse, evaluate, read, pokemon, status } from './original-model.mjs';
 import { createModifierStateCodec } from '../../src/battle-core/modifier-state.mjs';
@@ -18,6 +20,7 @@ Object.assign(dependencies, { './modifier-type':types, '../battle-core/modifier-
 export const modifiers = evaluate(`const Phaser = { GameObjects: { Container: class { constructor(){throw Error('renderer');} } } };\n${read('modifier/modifier.ts')}`,dependencies);
 const typeDependencies = deps('modifier/modifier-type.ts');
 Object.assign(typeDependencies, {
+  '../battle-core/modifier-pool-state.mjs':{createModifierPoolState}, '../battle-core/random-context.mjs':{ruleModifierPools},
   './modifier':modifiers, '../battle-core/modifier-type-state.mjs':{createModifierTypeStateCodec}, '../utils':utils,
   '../data/move':{allMoves:{33:{name:'Tackle',type:0},57:{name:'Surf',type:10}}},
   '../data/pokeball':{...enums('data/pokeball.ts'),getPokeballName:()=> 'Ball',getPokeballCatchMultiplier:()=>1},

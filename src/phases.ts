@@ -1,3 +1,6 @@
+import { selectSwitchSummon } from './battle-core/switch-command.mjs';
+import { inspectLearnMove } from './battle-core/learn-command.mjs';
+import { applyTargetSelection } from './battle-core/target-command.mjs';
 import { prepareQueuedFight, selectEncoreFight } from './battle-core/forced-command.mjs';
 import { selectFightCommand } from './battle-core/fight-command.mjs';
 import { selectEnemyCommand } from './battle-core/enemy-command.mjs';
@@ -1697,13 +1700,10 @@ export class SelectTargetPhase extends PokemonPhase {
     const move = turnCommand.move?.move;
     this.scene.ui.setMode(Mode.TARGET_SELECT, this.fieldIndex, move, (cursor: integer) => {
       this.scene.ui.setMode(Mode.MESSAGE);
-      if (cursor === -1) {
-        this.scene.currentBattle.turnCommands[this.fieldIndex] = null;
-        this.scene.unshiftPhase(new CommandPhase(this.scene, this.fieldIndex));
-      } else
-        turnCommand.targets = [ cursor ];
-      if (turnCommand.command === Command.BALL && this.fieldIndex)
-        this.scene.currentBattle.turnCommands[this.fieldIndex - 1].skip = true;
+      applyTargetSelection(this.scene.currentBattle.turnCommands, this.fieldIndex, cursor, {
+        ballCommand: Command.BALL,
+        requeueCommand: index => this.scene.unshiftPhase(new CommandPhase(this.scene, index))
+      }, turnCommand);
       this.end();
     });
   }
@@ -3223,8 +3223,9 @@ export class SwitchPhase extends BattlePhase {
     const fieldIndex = this.scene.currentBattle.getBattlerCount() === 1 || this.scene.getParty().filter(p => !p.isFainted()).length > 1 ? this.fieldIndex : 0;
 
     this.scene.ui.setMode(Mode.PARTY, this.isModal ? PartyUiMode.FAINT_SWITCH : PartyUiMode.POST_BATTLE_SWITCH, fieldIndex, (slotIndex: integer, option: PartyOption) => {
-      if (slotIndex >= this.scene.currentBattle.getBattlerCount() && slotIndex < 6)
-        this.scene.unshiftPhase(new SwitchSummonPhase(this.scene, fieldIndex, slotIndex, this.doReturn, option === PartyOption.PASS_BATON));
+      const summon = selectSwitchSummon(fieldIndex, slotIndex, this.scene.currentBattle.getBattlerCount(), this.doReturn, option, PartyOption.PASS_BATON);
+      if (summon)
+        this.scene.unshiftPhase(new SwitchSummonPhase(this.scene, summon.fieldIndex, summon.slotIndex, summon.doReturn, summon.batonPass));
       this.scene.ui.setMode(Mode.MESSAGE).then(() => super.end());
     }, PartyUiHandler.FilterNonFainted);
   }
@@ -3358,14 +3359,10 @@ export class LearnMovePhase extends PlayerPartyMemberPokemonPhase {
     const pokemon = this.getPokemon();
     const move = allMoves[this.moveId];
 
-    const existingMoveIndex = pokemon.getMoveset().findIndex(m => m?.moveId === move.id);
-
-    if (existingMoveIndex > -1)
+    const selection = inspectLearnMove(pokemon, move.id);
+    if (selection.kind === 'known')
       return this.end();
-
-    const emptyMoveIndex = pokemon.getMoveset().length < 4
-      ? pokemon.getMoveset().length
-      : pokemon.getMoveset().findIndex(m => m === null);
+    const emptyMoveIndex = selection.kind === 'automatic' ? selection.slot : -1;
 
     const messageMode = this.scene.ui.getHandler() instanceof EvolutionSceneHandler
       ? Mode.EVOLUTION_SCENE

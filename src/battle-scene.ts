@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { withSeedOffset } from './battle-core/random.mjs';
+import { ruleSeedOffset } from './battle-core/random-context.mjs';
 import { getMaxExpLevel as calculateMaxExpLevel } from './battle-core/levels.mjs';
 import UI, { Mode } from './ui/ui';
 import { NextEncounterPhase, NewBiomeEncounterPhase, SelectBiomePhase, MessagePhase, TurnInitPhase, ReturnPhase, LevelCapPhase, ShowTrainerPhase, LoginPhase, ConsolidateDataPhase, MovePhase, TitlePhase } from './phases';
@@ -1111,11 +1111,11 @@ export default class BattleScene extends Phaser.Scene {
 
 	resetSeed(waveIndex?: integer): void {
 		this.waveSeed = Utils.shiftCharCodes(this.seed, waveIndex || this.currentBattle?.waveIndex || 0);
-		Phaser.Math.RND.sow([ this.waveSeed ]);
+		Utils.getSceneRandom().sow([ this.waveSeed ]);
 	}
 
 	executeWithSeedOffset(func: Function, offset: integer, seedOverride?: string): void {
-		withSeedOffset(Phaser.Math.RND, seedOverride || this.seed, offset, func);
+		ruleSeedOffset(() => Utils.getSceneRandom(), seedOverride || this.seed, offset, func);
 	}
 
 	addFieldSprite(x: number, y: number, texture: string | Phaser.Textures.Texture, frame?: string | number, terrainColorRatio: number = 0): Phaser.GameObjects.Sprite {

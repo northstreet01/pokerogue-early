@@ -10,6 +10,8 @@ import { GameMode } from "./game-mode";
 import { BattleSpec } from "./enums/battle-spec";
 import { PlayerGender } from "./system/game-data";
 import { PokemonHeldItemModifier } from "./modifier/modifier";
+import { nextBattleRandomInt } from './battle-core/random.mjs';
+import { getWildLevel, gaussianLevelOffset } from './battle-core/levels.mjs';
 
 export enum BattleType {
     WILD,
@@ -91,33 +93,12 @@ export default class Battle {
     }
 
     private getLevelForWave(): integer {
-        let levelWaveIndex = this.gameMode.getWaveForDifficulty(this.waveIndex);
-        let baseLevel = 1 + levelWaveIndex / 2 + Math.pow(levelWaveIndex / 25, 2);
-        const bossMultiplier = 1.2;
-
-        if (!(this.waveIndex % 10)) {
-            const ret = Math.floor(baseLevel * bossMultiplier);
-            if (this.battleSpec === BattleSpec.FINAL_BOSS || !(this.waveIndex % 250))
-                return Math.ceil(ret / 25) * 25;
-            let levelOffset = 0;
-            if (!this.gameMode.isWaveFinal(this.waveIndex))
-                levelOffset = Math.round(Phaser.Math.RND.realInRange(-1, 1) * Math.floor(levelWaveIndex / 10));
-            return ret + levelOffset;
-        }
-
-        let levelOffset = 0;
-        
-        const deviation = 10 / levelWaveIndex;
-        levelOffset = Math.abs(this.randSeedGaussForLevel(deviation));
-
-        return Math.max(Math.round(baseLevel + levelOffset), 1);
+        return getWildLevel(this.waveIndex, this.gameMode.getWaveForDifficulty(this.waveIndex),
+            this.battleSpec === BattleSpec.FINAL_BOSS, () => this.gameMode.isWaveFinal(this.waveIndex), Phaser.Math.RND);
     }
 
     randSeedGaussForLevel(value: number): number { 
-        let rand = 0;
-        for (let i = value; i > 0; i--)
-            rand += Phaser.Math.RND.realInRange(0, 1);
-        return rand / value;
+        return gaussianLevelOffset(value, Phaser.Math.RND);
     }
 
     getBattlerCount(): integer {
@@ -192,16 +173,9 @@ export default class Battle {
     }
 
     randSeedInt(range: integer, min: integer = 0): integer {
-        let ret: integer;
-        const state = Phaser.Math.RND.state();
-        if (this.battleSeedState)
-            Phaser.Math.RND.state(this.battleSeedState);
-        else
-            Phaser.Math.RND.sow([ Utils.shiftCharCodes(this.battleSeed, this.turn << 6) ]);
-        ret = Utils.randSeedInt(range, min);
-        this.battleSeedState = Phaser.Math.RND.state();
-        Phaser.Math.RND.state(state);
-        return ret;
+        const result = nextBattleRandomInt(this.battleSeed, this.turn, this.battleSeedState, range, min);
+        this.battleSeedState = result.state;
+        return result.value;
     }
 }
 

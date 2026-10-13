@@ -9,6 +9,8 @@
 
 实验页的捕获记录现已隔离到独立收藏副本，不写回正式图鉴；实验内容限制不改变原游戏规则。审查结果见 [代码审查记录](docs/code-review-2026-10-13.md)。
 
+原版接入 B1 已提取随机数、等级和捕获纯规则并回接单人，使用原函数对照验证。完整服务器战斗仍待接入，见 [原版战斗接入进度](docs/original-battle-integration-2026-10-13.md)。
+
 ```sh
 npm ci --ignore-scripts
 npm run start
@@ -19,7 +21,7 @@ npm run start
 收藏、图鉴、扭蛋数据与单人进度保存在独立 IndexedDB 中；设置和教程使用 localStorage。
 存档按浏览器和访问地址隔离，可导入、导出备份。仓库不包含个人存档、node_modules 或构建产物。
 
-验证：`npm run typecheck`、`npm run test:local-save`、`npm run test:coop`、`npm run build`。
+验证：`npm run typecheck`、`npm run test:local-save`、`npm run test:coop`、`npm run test:battle-core`、`npm run build`。
 
 - [当前开发记录](LOCAL-FOUNDATION.md)
 - [已确认需求与设计](docs/coop-game-design-2026-10-13.md)

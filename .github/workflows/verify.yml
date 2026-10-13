@@ -24,5 +24,7 @@ jobs:
         run: npm run test:local-save
       - name: Cooperative battle and socket regression tests
         run: npm run test:coop
+      - name: Original battle rule compatibility tests
+        run: npm run test:battle-core
       - name: Build game and save manager
         run: npm run build

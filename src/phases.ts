@@ -1,6 +1,7 @@
 import BattleScene, { STARTER_FORM_OVERRIDE, STARTER_SPECIES_OVERRIDE, bypassLogin, startingWave } from "./battle-scene";
 import { default as Pokemon, PlayerPokemon, EnemyPokemon, PokemonMove, MoveResult, DamageResult, FieldPosition, HitResult, TurnMove } from "./field/pokemon";
 import * as Utils from './utils';
+import { getCaptureThreshold, advanceCaptureCheck } from './battle-core/capture.mjs';
 import { Moves } from "./data/enums/moves";
 import { allMoves, applyMoveAttrs, BypassSleepAttr, ChargeAttr, applyFilteredMoveAttrs, HitsTagAttr, MissEffectAttr, MoveAttr, MoveEffectAttr, MoveFlags, MultiHitAttr, OverrideMoveEffectAttr, VariableAccuracyAttr, MoveTarget, OneHitKOAttr, getMoveTargets, MoveTargetSet, MoveEffectTrigger, CopyMoveAttr, AttackMove, SelfStatusMove, DelayedAttackAttr, RechargeAttr, PreMoveMessageAttr, HealStatusEffectAttr } from "./data/move";
 import { Mode } from './ui/ui';
@@ -3632,13 +3633,10 @@ export class AttemptCapturePhase extends PokemonPhase {
 
     this.originalY = pokemon.y;
 
-    const _3m = 3 * pokemon.getMaxHp();
-    const _2h = 2 * pokemon.hp;
     const catchRate = pokemon.species.catchRate;
     const pokeballMultiplier = getPokeballCatchMultiplier(this.pokeballType);
     const statusMultiplier = pokemon.status ? getStatusEffectCatchRateMultiplier(pokemon.status.effect) : 1;
-    const x = Math.round((((_3m - _2h) * catchRate * pokeballMultiplier) / _3m) * statusMultiplier);
-    const y = Math.round(65536 / Math.sqrt(Math.sqrt(255 / x)));
+    const y = getCaptureThreshold(pokemon.getMaxHp(), pokemon.hp, catchRate, pokeballMultiplier, statusMultiplier);
     const fpOffset = pokemon.getFieldPositionOffset();
 
     const pokeballAtlasKey = getPokeballAtlasKey(this.pokeballType);
@@ -3696,17 +3694,15 @@ export class AttemptCapturePhase extends PokemonPhase {
                   }
                 },
                 onRepeat: () => {
-                  if (!pokemon.species.isObtainable()) {
+                  const result = advanceCaptureCheck(shakeCount, pokemon.species.isObtainable(), pokeballMultiplier, y,
+                    range => pokemon.randSeedInt(range));
+                  shakeCount = result.shakeCount;
+                  if (result.outcome === 'failed') {
                     shakeCounter.stop();
                     this.failCatch(shakeCount);
-                  } else if (shakeCount++ < 3) {
-                    if (pokeballMultiplier === -1 || pokemon.randSeedInt(65536) < y)
-                      this.scene.playSound('pb_move');
-                    else {
-                      shakeCounter.stop();
-                      this.failCatch(shakeCount);
-                    }
-                  } else {
+                  } else if (result.outcome === 'shake')
+                    this.scene.playSound('pb_move');
+                  else {
                     this.scene.playSound('pb_lock');
                     addPokeballCaptureStars(this.scene, this.pokeball);
                     

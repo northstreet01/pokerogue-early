@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+import { withSeedOffset } from './battle-core/random.mjs';
+import { getMaxExpLevel as calculateMaxExpLevel } from './battle-core/levels.mjs';
 import UI, { Mode } from './ui/ui';
 import { NextEncounterPhase, NewBiomeEncounterPhase, SelectBiomePhase, MessagePhase, TurnInitPhase, ReturnPhase, LevelCapPhase, ShowTrainerPhase, LoginPhase, ConsolidateDataPhase, MovePhase, TitlePhase } from './phases';
 import Pokemon, { PlayerPokemon, EnemyPokemon } from './field/pokemon';
@@ -1113,12 +1115,7 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	executeWithSeedOffset(func: Function, offset: integer, seedOverride?: string): void {
-		if (!func)
-			return;
-		const state = Phaser.Math.RND.state();
-		Phaser.Math.RND.sow([ Utils.shiftCharCodes(seedOverride || this.seed, offset) ]);
-		func();
-		Phaser.Math.RND.state(state);
+		withSeedOffset(Phaser.Math.RND, seedOverride || this.seed, offset, func);
 	}
 
 	addFieldSprite(x: number, y: number, texture: string | Phaser.Textures.Texture, frame?: string | number, terrainColorRatio: number = 0): Phaser.GameObjects.Sprite {
@@ -1207,8 +1204,7 @@ export default class BattleScene extends Phaser.Scene {
 			return Number.MAX_SAFE_INTEGER;
 		const waveIndex = Math.ceil((this.currentBattle?.waveIndex || 1) / 10) * 10;
 		const difficultyWaveIndex = this.gameMode.getWaveForDifficulty(waveIndex);
-		const baseLevel = (1 + difficultyWaveIndex / 2 + Math.pow(difficultyWaveIndex / 25, 2)) * 1.2;
-		return Math.ceil(baseLevel / 2) * 2 + 2;
+		return calculateMaxExpLevel(difficultyWaveIndex);
 	}
 
 	randomSpecies(waveIndex: integer, level: integer, fromArenaPool?: boolean, speciesFilter?: PokemonSpeciesFilter, filterAllEvolutions?: boolean): PokemonSpecies {

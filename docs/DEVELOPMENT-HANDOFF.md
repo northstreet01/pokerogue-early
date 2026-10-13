@@ -5,7 +5,7 @@
 ## 工作目录与起点
 
 - 只在 `E:\pokeregue\pokerogue-early` 开发；远程 `https://github.com/northstreet01/pokerogue-early.git`，分支 `main`。
-- M1 批次起点是 `df9eb8bf`（架构、模块排期和交接）；本批 M1 工作区修改随本批提交；未推送，接手以 Git 状态为准。
+- M1 已审查并提交 `13ac6839`，未推送。M2 首批 Pokemon/队伍切片随独立提交交付；接手先查 Git 状态和最新提交，不假定工作区无后续修改。
 - `E:\pokeregue\pokerogue` 是另一份含用户未上传工作的新版目录，不能重置、清理或批量覆盖。需要移植扩展时只读参考并记录来源。
 - 接手先读 `git status --short`、`git log -5 --oneline`；不要假定用户之后没有修改，不做强制拉取、reset 或清理。
 - 发布排除服务器房间数据、恢复凭据、个人备份、环境秘密、node_modules、构建和临时审计输出。不要读取真实房间文件来生成公开测试夹具。
@@ -22,14 +22,16 @@
 
 已存在 Node/WebSocket 房间、去重/确认/持久化基础，本地档案与备份，B1 局部纯规则，B2 效果/RNG 状态组件，首批上游中英语言适配。M1 已新增正式契约、适配入口和 12 项协议测试，连同原有 63 项共 75 项通过；详见 [M1 记录](coop-contract-m1-2026-10-13.md)。
 
-**原游戏尚未接入完整合作战斗。** `/` 是原单人；`/coop.html` 是隔离实验页。`server/coop-service.mjs` 仍导入 `src/coop/engine.mjs`，不能把这套有限规则当原版运行器。完整精灵、全部随机流、决策状态、实际客户端模型 ACK、原 UI 联机与原版合作收藏仍待实现。
+**原游戏尚未接入完整合作战斗。** `/` 是原单人；`/coop.html` 是隔离实验页。`server/coop-service.mjs` 仍导入 `src/coop/engine.mjs`，不能把这套有限规则当原版运行器。Pokemon/队伍切片及其实际模型 ACK 已有测试，完整场景、全部随机流、决策状态、原 UI 联机与原版合作收藏仍待实现。
 
-正式 `/coop/v1/ws` 已在开发/生产服务挂载，默认无原版适配器，开局返回 `ADAPTER_UNAVAILABLE`。`src/battle-core/coop-contract.mjs` 与类型声明定义正式消息/适配接口；`coop-client.mjs` 从应用后的模型提取并确认。测试使用两个独立计数器模型，仅证明协议，原 Pokemon 模型尚未接入。
+正式 `/coop/v1/ws` 已在开发/生产服务挂载，默认无原版适配器，开局返回 `ADAPTER_UNAVAILABLE`。`src/battle-core/coop-contract.mjs` 与类型声明定义正式消息/适配接口；`coop-client.mjs` 从应用后的模型提取并确认。M1 计数器测试仅证明协议；M2 新增原 Pokemon 类的独立双端恢复测试，尚未接入生产原游戏客户端。
 
 ## 下一项可执行任务：M2
 
-1. 阅读 M1 映射/实现记录、B2 与当前适配接口，登记完整精灵字段、稳定引用、所有权、派生值及安全决策停点。
-2. 按切片补齐精灵、本局资源、全部随机流及决策上下文；完整校验后一次替换，失败不污染旧状态，不给 getter 赋值。
+M2 第一批已完成：原 Pokemon 字段/临时效果/共享引用与队伍所有权、场上稳定 ID、双端原模型恢复；整体仍部分完成。当前 84 项测试、类型检查、构建通过。先读 [M2 记录](original-pokemon-checkpoints-m2-2026-10-13.md)，继续 Battle/场景级资源、全随机流与决策停点装配，不重复首批工作。
+
+1. 阅读 M2 首批字段及停点清单，检查已实现的 Pokemon/队伍切片，再补 Battle/场景、modifier、训练家和资源清单。
+2. 按切片补齐本局资源、全部随机流及决策上下文；完整校验后一次替换，失败不污染旧状态，不给 getter 赋值。
 3. 每个切片同时做原版未中断/恢复继续差分，并接 M1 真实 WS 两端入口；两端实际恢复原模型后独立提取摘要。
 4. 保持 `/` 与实验页行为；完成后更新 SPEC/模块证据，再进入 M3 原规则运行器。不得将测试适配器用于正式游戏。
 
@@ -53,4 +55,4 @@ npm run build
 
 ## 可直接发送给新窗口的任务
 
-> 在 E:\pokeregue\pokerogue-early 继续开发。先检查工作区，再读 SPEC.md、docs/coop-architecture-2026-10-13.md、docs/coop-development-plan.md、docs/DEVELOPMENT-HANDOFF.md 和 docs/coop-contract-m1-2026-10-13.md。M1 契约与协议测试已完成，M1 已提交（编号以 Git 记录为准）；从 M2 完整状态检查点开始，单端原版差分与真实 WS 双端原模型恢复同时推进。架构为 Node.js 权威结算，不是浏览器 P2P。保留 early 原规则、原图鉴和本地局外收藏；不重写简化游戏，不动 E:\pokeregue\pokerogue 的未上传内容。每批次更新模块进度与验证证据，区分文档、接口、运行器、UI 和双机验收。
+> 在 E:\pokeregue\pokerogue-early 继续开发。先检查工作区并读 SPEC、架构、模块计划、交接及 docs/original-pokemon-checkpoints-m2-2026-10-13.md。M1 已提交 13ac6839；M2 首批 Pokemon/队伍检查点及双端原模型恢复已完成，继续 Battle/场景级资源、全随机流和决策停点装配。单端原版差分与真实 WS 双端恢复同步推进。保持 Node.js 权威结算、early 原规则、原图鉴与个人收藏，不动另一目录的未上传内容。每批次分别记录接口、状态、运行器、UI 与双机验收。

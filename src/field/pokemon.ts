@@ -13,12 +13,13 @@ import { AttackTypeBoosterModifier, DamageMoneyRewardModifier, EnemyDamageBooste
 import { PokeballType } from '../data/pokeball';
 import { Gender } from '../data/gender';
 import { initMoveAnim, loadMoveAnimAssets } from '../data/battle-anims';
-import { Status, StatusEffect } from '../data/status-effect';
+import { Status, StatusEffect, captureStatusState, restoreStatusState } from '../data/status-effect';
 import { pokemonEvolutions, pokemonPrevolutions, SpeciesFormEvolution, SpeciesEvolutionCondition } from '../data/pokemon-evolutions';
 import { reverseCompatibleTms, tmSpecies } from '../data/tms';
 import { DamagePhase, FaintPhase, LearnMovePhase, ObtainStatusEffectPhase, StatChangePhase, SwitchSummonPhase } from '../phases';
 import { BattleStat } from '../data/battle-stat';
-import { BattlerTag, BattlerTagLapseType, EncoreTag, HelpingHandTag, TypeBoostTag, getBattlerTag } from '../data/battler-tags';
+import { BattlerTag, BattlerTagLapseType, EncoreTag, HelpingHandTag, TypeBoostTag, getBattlerTag, captureBattlerTagState, restoreBattlerTagState } from '../data/battler-tags';
+import { createPokemonStateCodec } from '../battle-core/pokemon-state.mjs';
 import { BattlerTagType } from "../data/enums/battler-tag-type";
 import { Species } from '../data/enums/species';
 import { WeatherType } from '../data/weather';
@@ -2727,4 +2728,23 @@ export class PokemonMove {
   getName(): string {
     return this.getMove().name;
   }
+}
+
+// A detached original-rule model, not a Phaser display object. M2 scene assembly
+// and M4 rendering must bind it explicitly; do not insert it into fieldUI.
+const pokemonStateCodec = createPokemonStateCodec({
+  constructors: { PlayerPokemon, EnemyPokemon, PokemonMove, PokemonSummonData,
+    PokemonBattleData, PokemonBattleSummonData, PokemonTurnData },
+  getSpecies: getPokemonSpecies, getMove: (id: number) => allMoves[id],
+  getAbility: (id: number) => allAbilities[id],
+  captureTag: captureBattlerTagState, restoreTag: restoreBattlerTagState,
+  captureStatus: captureStatusState, restoreStatus: restoreStatusState
+});
+
+export function capturePokemonState(pokemon: Pokemon) {
+  return pokemonStateCodec.capture(pokemon);
+}
+
+export function restorePokemonState(snapshot: unknown): Pokemon {
+  return pokemonStateCodec.restore(snapshot);
 }

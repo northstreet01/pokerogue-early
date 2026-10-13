@@ -5,18 +5,31 @@ import { bindTrainerScene } from './helpers/trainer-model.mjs';
 import { formalFixture } from './helpers/formal-ws.mjs';
 import { createSnapshotConsumer } from '../src/battle-core/coop-client.mjs';
 import { copy } from '../src/battle-core/coop-contract.mjs';
+import { resolveFightIntent } from '../src/battle-core/fight-command.mjs';
+
+const fightRules = {fightCommand:0,noneMove:0,struggleMove:165,getMoveTargets:()=>({targets:[2],multiple:false})};
 
 function initialDecision() {
   const ctx = initialUntrainedDecision();
   ctx.battle.battleType = 1;
   ctx.battle.trainer = initialTrainer(2);
+  for (const seat of [0,1]) {
+    const pokemon = ctx.roster.entries[seat].pokemon;
+    pokemon.summonData.moveQueue=[]; pokemon.summonData.disabledMove=0; pokemon.summonData.tags=[];
+    ctx.decision.options[seat]=[{kind:'fight',pokemonId:pokemon.id,cursor:0,target:null}];
+  }
   return ctx;
 }
 
 const adapter = {
   rulesVersion:'m2-wait-action-test',contentHash:'test-catalog',
   createInitialContext:()=>initialDecision(), captureCheckpoint:codec.capture, validateCheckpoint:codec.validate, restoreCheckpoint:codec.restore,
-  describeDecision:ctx=>({id:ctx.decision.id,requiredSeats:ctx.decision.requiredSeats}), validateAction:codec.validateAction,
+  describeDecision:ctx=>({id:ctx.decision.id,requiredSeats:ctx.decision.requiredSeats}),
+  validateAction(ctx,seat,action) {
+    codec.validateAction(ctx,seat,action);
+    const pokemon=ctx.roster.entries.find(e=>e.pokemon.id===ctx.roster.field[seat]).pokemon;
+    resolveFightIntent(pokemon,seat,action,fightRules);
+  },
   advanceToDecision(ctx) { const result=continueDecision(ctx); return {context:ctx,events:[result],grants:[]}; },
   projectSnapshot(ctx,seat) {
     const players=[0,1].map(()=>({money:0,pokeballCounts:{0:0,1:0,2:0,3:0,4:0},modifiers:[]}));

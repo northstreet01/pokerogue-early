@@ -28,6 +28,8 @@
 
 ## 下一项可执行任务：M2
 
+最新 M3 第三批：原玩家 FIGHT 分支提取和严格网络意图校验，累计 108 项测试，见 [第三批记录](fight-command-m3-2026-10-13.md)。下一步强制动作与目标决策状态，再推进 Move/MoveEffect 执行；非 FIGHT 行动与完整运行器仍未完成。后文为历史记录。
+
 最新为 M3 第二批：原 EnemyCommand 决策提取与回接，105 项测试通过，见 [第二批记录](enemy-command-m3-2026-10-13.md)。下一步玩家 Command 合法性/目标选择，再推进 Move/MoveEffect；完整 AI 场景绑定和 M2 其他停点仍未完成。后文为历史记录，提交/推送先查 Git。
 
 当前已进入 M3 首批：原行动排序提取并回接单人，合计 103 项测试、类型检查和构建通过，见 [M3 记录](turn-order-m3-2026-10-13.md)。M2 缺口仍须继续补；下一批从原 Command/EnemyCommand 的受控决策入口及 Move/MoveEffect 规则分离推进，不重复 Modifier 全类登记。下面第四批及更早内容为历史记录。
@@ -65,4 +67,4 @@ npm run build
 
 ## 可直接发送给新窗口的任务
 
-> 在 E:\pokeregue\pokerogue-early 继续开发。先检查 Git 状态并读 SPEC、架构、模块计划及 docs/enemy-command-m3-2026-10-13.md。M2 全 Modifier 类恢复 c50d5cba、M3 排序 d105b214 已推送；最新敌方决策批次提交与推送以 Git 为准。当前 105 项测试、类型检查和构建通过。下一步玩家 Command 合法性与目标选择入口，再推进 Move/MoveEffect；完整 AI 场景绑定、M2 其他安全停点与全随机调用仍未完成。保持原规则与收藏语义，单端原版差分和真实 WS 双端恢复同步推进，不修改另一目录未上传内容。
+> 在 E:\pokeregue\pokerogue-early 继续开发。先检查 Git 状态并读 SPEC、架构、模块计划及 docs/fight-command-m3-2026-10-13.md。M3 排序 d105b214、敌方决策 5fe230f2 已推送；最新玩家 FIGHT 批次提交与推送以 Git 为准。当前 108 项测试、类型检查和构建通过。下一步强制动作与目标决策状态，再推进 Move/MoveEffect 的 PP、命中和效果执行；非 FIGHT 行动、完整 AI 场景绑定、M2 其他停点与全随机调用仍未完成。保持原规则与收藏语义，单端原版差分和真实 WS 双端恢复同步推进，不修改另一目录未上传内容。

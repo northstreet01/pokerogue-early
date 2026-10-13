@@ -1,3 +1,4 @@
+import { selectFightCommand } from './battle-core/fight-command.mjs';
 import { selectEnemyCommand } from './battle-core/enemy-command.mjs';
 import { getFieldOrder, getMoveOrder } from './battle-core/turn-order.mjs';
 import i18next from './i18n';
@@ -1525,19 +1526,14 @@ export class CommandPhase extends FieldPhase {
 
     switch (command) {
       case Command.FIGHT:
-        let useStruggle = false;
-        if (cursor === -1 || playerPokemon.trySelectMove(cursor, args[0] as boolean) || (useStruggle = cursor > -1 && !playerPokemon.getMoveset().filter(m => m.isUsable(playerPokemon)).length)) {
-          const moveId = !useStruggle ? cursor > -1 ? playerPokemon.getMoveset()[cursor].moveId : Moves.NONE : Moves.STRUGGLE;
-          const turnCommand: TurnCommand = { command: Command.FIGHT, cursor: cursor, move: { move: moveId, targets: [], ignorePP: args[0] }, args: args };
-          const moveTargets: MoveTargetSet = args.length < 3 ? getMoveTargets(playerPokemon, moveId) : args[2];
-          if (!moveId)
-            turnCommand.targets = [ this.fieldIndex ];
-          console.log(moveTargets, playerPokemon.name);
-          if (moveTargets.targets.length <= 1 || moveTargets.multiple)
-            turnCommand.move.targets = moveTargets.targets;
-          else
+        const selection = selectFightCommand(playerPokemon, this.fieldIndex, cursor, args, {
+          fightCommand: Command.FIGHT, noneMove: Moves.NONE, struggleMove: Moves.STRUGGLE, getMoveTargets
+        });
+        if (selection) {
+          console.log(selection.targets, playerPokemon.name);
+          if (selection.needsTarget)
             this.scene.unshiftPhase(new SelectTargetPhase(this.scene, this.fieldIndex));
-          this.scene.currentBattle.turnCommands[this.fieldIndex] = turnCommand;
+          this.scene.currentBattle.turnCommands[this.fieldIndex] = selection.command;
           success = true;
         } else if (cursor < playerPokemon.getMoveset().length) {
           const move = playerPokemon.getMoveset()[cursor];

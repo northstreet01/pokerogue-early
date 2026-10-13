@@ -5,21 +5,16 @@ import { createDecisionStateCodec, SceneRandom } from '../../src/battle-core/dec
 import { createRegisteredStateCodec } from '../../src/battle-core/registered-state.mjs';
 import { RandomDataGenerator, nextBattleRandomInt, readBattleRandomCheckpoint } from '../../src/battle-core/random.mjs';
 import { copy, requireContract as check } from '../../src/battle-core/coop-contract.mjs';
+import { trainerCodec, trainerModule, originalTrainer } from './trainer-model.mjs';
 
 const classes = (file, names) => parse(file).statements.filter(n => ts.isClassDeclaration(n) && names.includes(n.name.text)).map(n => n.getText()).join('\n');
 export const Battle = evaluate(`import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; ${classes('battle.ts', ['Battle'])}`, { random: { nextBattleRandomInt, readBattleRandomCheckpoint } }).default;
 export const Arena = evaluate(classes('field/arena.ts', ['Arena'])).Arena;
 const modifiers = evaluate(classes('modifier/modifier.ts', ['Modifier','PersistentModifier','ExpBoosterModifier']));
 const types = { exp: { id: 'exp' } }, modes = { 0: { modeId: 0 } };
-export const Trainer = evaluate(`const Phaser = { GameObjects: { Container: class { constructor() { throw Error('render constructor'); } } } }; ${classes('field/trainer.ts', ['Trainer'])}`).default;
-const config = { partyTemplates: [{ size: 2 }] };
-const stringField = { capture: copy, restore: v => { check(typeof v === 'string'); return v; } };
-export const trainerCodec = createRegisteredStateCodec({ trainer: { prototype: Trainer.prototype, fields: {
-  config: { capture: v => { check(v === config); return 'fixture-trainer'; }, restore: id => { check(id === 'fixture-trainer'); return config; } },
-  variant: { capture: copy, restore: v => { check(Number.isInteger(v) && v >= 0 && v <= 2); return v; } },
-  partyTemplateIndex: { capture: copy, restore: v => { check(v === 0); return v; } }, name: stringField, partnerName: stringField
-} } });
-export const initialTrainer = () => Object.assign(Object.create(Trainer.prototype), { config, variant: 0, partyTemplateIndex: 0, name: 'test', partnerName: '' });
+export const Trainer = trainerModule.default;
+export { trainerCodec };
+export const initialTrainer = originalTrainer;
 const scalar = { capture: copy, restore: v => { check(typeof v === 'number' && Number.isFinite(v) && v >= 0, 'INVALID_COMPONENT'); return v; } };
 export const modifierCodec = createRegisteredStateCodec({ exp: { prototype: modifiers.ExpBoosterModifier.prototype, fields: {
   type: { capture: v => { check(v === types.exp); return 'exp'; }, restore: id => { check(id === 'exp'); return types.exp; } },

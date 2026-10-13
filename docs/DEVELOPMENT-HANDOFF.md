@@ -28,6 +28,8 @@
 
 ## 下一项可执行任务：M2
 
+第三批已补原 Trainer 生产检查点导出与双端恢复，合计 96 项测试通过，见 [第三批记录](trainer-checkpoints-m2-2026-10-13.md)。下一批优先补 Modifier 全类型及生成型 ModifierType 恢复，再补原 Phase 决策映射与全局 RNG；Trainer 全配置队伍生成与完整场景绑定仍未验收。下文第一、二批为历史记录，不代表当前总测试数。
+
 第二批已增加显式 wait-actions 检查点装配（Battle/Arena/个人资源、组件注册、两随机流、已收输入恢复验证），合计 92 项测试通过。先读 [第二批记录](wait-action-checkpoints-m2-2026-10-13.md)。下一步补全生产 Trainer/Modifier 注册、原 Phase 决策映射及全局 RNG 调用改接；不要重复已实现的装配层，也不要误认为全量场景和完整运行器已完成。下段首批记录保留历史范围。
 
 M2 第一批已完成：原 Pokemon 字段/临时效果/共享引用与队伍所有权、场上稳定 ID、双端原模型恢复；整体仍部分完成。当前 84 项测试、类型检查、构建通过。先读 [M2 记录](original-pokemon-checkpoints-m2-2026-10-13.md)，继续 Battle/场景级资源、全随机流与决策停点装配，不重复首批工作。
@@ -57,4 +59,4 @@ npm run build
 
 ## 可直接发送给新窗口的任务
 
-> 在 E:\pokeregue\pokerogue-early 继续开发。先检查工作区并读 SPEC、架构、模块计划、交接及 docs/wait-action-checkpoints-m2-2026-10-13.md。M1 已提交 13ac6839；M2 首批已提交 78900705，第二批 wait-actions 装配提交号读取 Git。当前 92 项测试通过，M2 仍部分完成；下一步补生产 Trainer/Modifier 全类型注册、原 Phase 决策映射及全局 RNG 改接，不重复现有装配层。单端原版差分与真实 WS 双端恢复同步推进。保持 Node.js 权威结算、early 原规则、原图鉴与个人收藏，不动另一目录的未上传内容。每批次分别记录接口、状态、运行器、UI 与双机验收。
+> 在 E:\pokeregue\pokerogue-early 继续开发。先检查工作区并读 SPEC、架构、模块计划、交接及 docs/trainer-checkpoints-m2-2026-10-13.md。M1 已提交 13ac6839；M2 首批 78900705，第二批 271b5570，第三批 Trainer 适配提交号读取 Git。当前 96 项测试、类型检查和构建通过，M2 仍部分完成；下一步优先补 Modifier 全类型及生成型 ModifierType 恢复，再补原 Phase 决策映射及全局 RNG 改接。Trainer 生产导出已有实现，但全配置队伍生成与完整场景绑定未验收。单端原版差分与真实 WS 双端恢复同步推进。保持 Node.js 权威结算、early 原规则、原图鉴与个人收藏，不动另一目录的未上传内容。每批次分别记录接口、状态、运行器、UI 与双机验收。

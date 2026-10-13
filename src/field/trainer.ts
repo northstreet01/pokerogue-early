@@ -10,6 +10,7 @@ import { PersistentModifier } from "../modifier/modifier";
 import { trainerNamePools } from "../data/trainer-names";
 import { ArenaTagType } from "#app/data/enums/arena-tag-type";
 import { ArenaTag, ArenaTagSide, ArenaTrapTag } from "#app/data/arena-tag";
+import { createTrainerStateCodec } from '../battle-core/trainer-state.mjs';
 
 export enum TrainerVariant {
   DEFAULT,
@@ -440,4 +441,14 @@ export default class Trainer extends Phaser.GameObjects.Container {
 
 export default interface Trainer {
   scene: BattleScene
+}
+
+// Resolve the catalog lazily: trainer-config and Trainer import one another.
+// The returned Trainer is a detached rule model; a runtime must bind its scene.
+export function captureTrainerState(trainer: Trainer) {
+  return createTrainerStateCodec({ Trainer, trainerConfigs }).capture(trainer);
+}
+
+export function restoreTrainerState(state: unknown): Trainer {
+  return createTrainerStateCodec({ Trainer, trainerConfigs }).restore(state);
 }

@@ -1,9 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { codec, initialDecision, continueDecision, modifierCodec } from './helpers/decision-model.mjs';
+import { trainerDecisionCodec as codec, initialDecision as initialUntrainedDecision, initialTrainer, continueDecision, modifierCodec } from './helpers/decision-model.mjs';
+import { bindTrainerScene } from './helpers/trainer-model.mjs';
 import { formalFixture } from './helpers/formal-ws.mjs';
 import { createSnapshotConsumer } from '../src/battle-core/coop-client.mjs';
 import { copy } from '../src/battle-core/coop-contract.mjs';
+
+function initialDecision() {
+  const ctx = initialUntrainedDecision();
+  ctx.battle.battleType = 1;
+  ctx.battle.trainer = initialTrainer(2);
+  return ctx;
+}
 
 const adapter = {
   rulesVersion:'m2-wait-action-test',contentHash:'test-catalog',
@@ -40,6 +48,12 @@ test('wait-action real WS restart retains one input, both RNG streams and privat
   try {
     const original=initialDecision(), expectedEvent=continueDecision(original);
     let pair=await clients(f); const ids=pair.map(c=>c.identity), roomId=ids[0].roomId;
+    assert.notEqual(pair[0].model.battle.trainer, pair[1].model.battle.trainer);
+    for (const c of pair) {
+      const trainer = bindTrainerScene(c.model.battle.trainer);
+      assert.deepEqual(trainer.getPartyLevels(50), bindTrainerScene(initialTrainer(2)).getPartyLevels(50));
+      assert.equal(Object.hasOwn(trainer, 'name'), false);
+    }
     assert.ok(pair[0].snapshot.shared.players.every(p=>p.money===0&&p.modifiers.length===0));
     assert.equal(pair[0].model.players[1].money,0); // Teammate inventory was not sent.
     const pending=action(pair[0],'once'); pair[0].send(pending); await pair[0].wait(m=>m.type==='actionReceipt'&&m.accepted);
@@ -50,6 +64,23 @@ test('wait-action real WS restart retains one input, both RNG streams and privat
     assert.deepEqual(f.rooms.get(roomId).checkpoint,codec.capture(original));
     pair[0].send(pending); await pair[0].wait(m=>m.type==='actionReceipt'); assert.equal(f.rooms.get(roomId).revision,1);
   } finally {await f.close();}
+});
+
+test('unknown persisted Trainer config blocks recovery without overwriting the room', async () => {
+  let f = await formalFixture(adapter);
+  try {
+    const pair = await clients(f), identity = pair[0].identity, store = f.store;
+    await f.close();
+    const room = store.data.get(identity.roomId);
+    room.checkpoint.components.find(c => c.kind === 'trainer').state.configId = 999;
+    const before = copy(room);
+    f = await formalFixture(adapter, store);
+    const c = await f.client();
+    c.send({type:'resumeSeat',roomId:identity.roomId,resumeToken:identity.resumeToken});
+    assert.equal((await c.wait(m => m.type === 'error')).code, 'UNKNOWN_TRAINER_CONFIG');
+    assert.deepEqual(store.data.get(identity.roomId), before);
+    assert.equal(c.messages.some(m => m.type === 'snapshot'), false);
+  } finally { await f.close(); }
 });
 test('wait-action transition write failure leaves both accepted inputs and exact random state for retry',async()=>{
   const store={data:new Map(),fail:false,async load(){return [...this.data.values()].map(copy);},async save(room){if(this.fail&&room.revision===1)throw Error('disk');this.data.set(room.roomId,copy(room));}};

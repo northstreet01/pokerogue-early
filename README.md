@@ -2,6 +2,8 @@
 
 项目需求、真实进度、原版保留边界及后续验收统一见 [SPEC.md](SPEC.md)。独立合作验证页尚未接入原游戏，实验内容限制不是正式玩法需求。
 
+新窗口继续开发先读 [交接说明](docs/DEVELOPMENT-HANDOFF.md)，按 [模块计划](docs/coop-development-plan.md) 从 M1 正式联机接口与真实双客户端测试入口开始；[架构文档](docs/coop-architecture-2026-10-13.md) 定义服务器权威、检查点与确认边界。
+
 基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的固定历史提交
 `ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9`，从较早版本逐步开发独立成长、共同战斗的合作游戏。
 

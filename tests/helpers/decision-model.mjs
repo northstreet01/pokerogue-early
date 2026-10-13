@@ -52,3 +52,22 @@ export function continueDecision(ctx) {
   ctx.decision.id = `decision-${ctx.battle.turn}`;
   return { enemyCommand, order, rolls, boosted: boosted.value };
 }
+
+// Reference topology produced by the original transferSummon tag loop. This
+// fixture does not claim to execute the complete switch/animation phase.
+export function withTransferredTag(ctx) {
+  const active = ctx.roster.entries[0].pokemon, reserve = originalPokemon(103);
+  reserve.summonData.tags = [active.summonData.tags[0]];
+  reserve.summonDataPrimer = reserve.summonData;
+  ctx.roster.entries.push({ owner: 0, group: 'party', index: 1, pokemon: reserve });
+  return ctx;
+}
+export function continueTransferredTag(ctx) {
+  const active = ctx.roster.entries[0].pokemon;
+  active.transferTagsBySourceId(100, 101);
+  const alive = active.summonData.tags[0].lapse(active, 2);
+  return { alive, tags: ctx.roster.entries.filter(e => e.owner === 0).map(e => ({
+    pokemonId: e.pokemon.id, sourceId: e.pokemon.summonData.tags[0].sourceId,
+    turnCount: e.pokemon.summonData.tags[0].turnCount
+  })) };
+}

@@ -1,12 +1,56 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import ts from 'typescript';
-import { codec, initialDecision, continueDecision, Battle, Arena, trainerDecisionCodec, initialTrainer, Trainer } from './helpers/decision-model.mjs';
+import { codec, initialDecision, continueDecision, Battle, Arena, trainerDecisionCodec, initialTrainer, Trainer, withTransferredTag, continueTransferredTag } from './helpers/decision-model.mjs';
 import { parse } from './helpers/original-model.mjs';
 import { battleCheckpointFields, arenaCheckpointFields, SceneRandom } from '../src/battle-core/decision-state.mjs';
 import { RandomDataGenerator, withSeedOffset } from '../src/battle-core/random.mjs';
 import { copy } from '../src/battle-core/coop-contract.mjs';
 import { originalModifier } from './helpers/modifier-model.mjs';
+
+test('Battle checkpoint preserves cross-Pokemon tag identity and original method continuation', () => {
+  const original = withTransferredTag(initialDecision()), saved = codec.capture(original);
+  const restored = codec.restore(copy(saved));
+  const active = restored.roster.entries[0].pokemon, reserve = restored.roster.entries[3].pokemon;
+  assert.equal(active.summonData.tags[0], reserve.summonData.tags[0]);
+  assert.equal(reserve.summonData, reserve.summonDataPrimer);
+  assert.notEqual(active.summonData.tags[0], original.roster.entries[0].pokemon.summonData.tags[0]);
+  for (let turn = 0; turn < 3; turn++) {
+    assert.deepEqual(continueTransferredTag(restored), continueTransferredTag(original));
+    assert.deepEqual(continueDecision(restored), continueDecision(original));
+    assert.deepEqual(codec.capture(restored), codec.capture(original));
+  }
+});
+
+test('invalid cross-Pokemon aliases reject the candidate without changing old models or input', () => {
+  const old = withTransferredTag(initialDecision()), before = codec.capture(old);
+  for (const mutate of [
+    s => { s.roster.tagGroups[0][1].pokemonId = 999; },
+    s => { s.roster.tagGroups[0][1].summon = '__proto__'; },
+    s => { s.roster.tagGroups[0][1].index = 128; },
+    s => { s.roster.tagGroups[0].push(s.roster.tagGroups[0][0]); },
+    s => { s.roster.tagGroups[0].pop(); },
+    s => { s.roster.entries[3].pokemon.fields.summonData.fields.tags[0].fields.turnCount++; },
+    s => { s.roster.version = 1; delete s.roster.tagGroups; },
+    s => { s.decision.options[0][0].pokemonId = 999; }
+  ]) {
+    const bad = copy(before); mutate(bad); const input = copy(bad);
+    let current = old;
+    assert.throws(() => { current = codec.restore(bad); });
+    assert.equal(current, old); assert.deepEqual(codec.capture(old), before); assert.deepEqual(bad, input);
+  }
+});
+
+test('equal tag values do not create shared identity and roster order is not a Pokemon reference', () => {
+  const original = withTransferredTag(initialDecision());
+  // Same values in another Pokemon must remain a distinct tag.
+  original.roster.entries[1].pokemon.summonData.tags[0].sourceId = 100;
+  original.roster.entries.reverse();
+  const saved = codec.capture(original), restored = codec.restore(saved);
+  const get = id => restored.roster.entries.find(e => e.pokemon.id === id).pokemon.summonData.tags[0];
+  assert.equal(get(100), get(103)); assert.notEqual(get(100), get(101));
+  assert.deepEqual(codec.capture(restored), saved);
+});
 
 test('Battle and Arena manifests account for all declared fields', () => {
   for (const [file, name, expected] of [['battle.ts','Battle',battleCheckpointFields],['field/arena.ts','Arena',arenaCheckpointFields]]) {

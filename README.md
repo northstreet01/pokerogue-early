@@ -2,18 +2,20 @@
 
 项目需求、真实进度、原版保留边界及后续验收统一见 [SPEC.md](SPEC.md)。独立合作验证页尚未接入原游戏，实验内容限制不是正式玩法需求。
 
-新窗口继续开发先读 [交接说明](docs/DEVELOPMENT-HANDOFF.md)，按 [模块计划](docs/coop-development-plan.md) 从 M1 正式联机接口与真实双客户端测试入口开始；[架构文档](docs/coop-architecture-2026-10-13.md) 定义服务器权威、检查点与确认边界。
+新窗口继续开发先读 [交接说明](docs/DEVELOPMENT-HANDOFF.md)，核对 Git 状态，再按 [模块计划](docs/coop-development-plan.md) 继续。M1 契约及协议测试已完成，M2 检查点与 M3 原版运行器部分完成；[架构文档](docs/coop-architecture-2026-10-13.md) 定义服务器权威、检查点与确认边界。
 
 基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的固定历史提交
 `ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9`，从较早版本逐步开发独立成长、共同战斗的合作游戏。
 
-当前包含早期单人游戏、本地存档，以及第一阶段合作验证版：建房/加入、各自选 3 只、服务器共同双打、个人奖励商店、捕获收藏和战后保存恢复。新合作暂支持 10 种精灵与 14 个招式，未接入特性/进化或完整原版战斗；单人仍使用旧引擎。
+**项目没有因版本而限制精灵种类、世代或数量。** 上述历史提交用于标识代码来源和规则对照基线，不是精灵范围上限。尚未接入的精灵或机制属于开发缺口，不能据此缩减正式玩法需求。
+
+当前包含原版单人游戏、本地存档和独立合作实验页。实验页可验证建房/加入、各自选队、共同战斗、个人整备及保存恢复，但使用有限实验引擎，尚未接入完整原版战斗。其具体实现缺口见 [实验页说明](COOP.md)，不能作为正式合作的精灵或招式范围。
 
 实验页的捕获记录现已隔离到独立收藏副本，不写回正式图鉴；实验内容限制不改变原游戏规则。审查结果见 [代码审查记录](docs/code-review-2026-10-13.md)。
 
 原版接入 B1 已提取随机数、等级和捕获纯规则并回接单人，使用原函数对照验证。完整服务器战斗仍待接入，见 [原版战斗接入进度](docs/original-battle-integration-2026-10-13.md)。
 
-B2 首批已增加原战斗/场地标签、异常状态、天气/场地和回合随机流的保存还原接口；完整精灵状态及行动队列尚未接入，不能用于完整联机恢复。详见 [状态检查点进度](docs/original-state-checkpoints-2026-10-13.md)。
+M2 已有 Pokemon、Battle/Arena、资源、随机流及部分决策检查点。本轮补齐跨精灵共享标签引用，并验证恢复失败保留旧状态、双客户端 WebSocket 重启后继续与不中断执行一致。135 项自动测试、类型检查及构建通过；完整 Phase 待续、完整冒险恢复和原游戏合作 UI 仍未验收。详见 [本轮范围与证据](docs/shared-tag-checkpoints-m2-2026-10-13.md)。
 
 ```sh
 npm ci --ignore-scripts
@@ -21,7 +23,7 @@ npm run start
 ```
 
 游戏入口为 `http://localhost:8020/`，本地存档页面为 `http://localhost:8020/save-tools.html`。
-合作入口为 `http://localhost:8020/coop.html`。双端连接和支持范围见 [COOP.md](COOP.md)。
+独立合作实验页为 `http://localhost:8020/coop.html`，尚非原游戏正式合作入口。双端连接方法和实验实现现状见 [COOP.md](COOP.md)。
 收藏、图鉴、扭蛋数据与单人进度保存在独立 IndexedDB 中；设置和教程使用 localStorage。
 存档按浏览器和访问地址隔离，可导入、导出备份。仓库不包含个人存档、node_modules 或构建产物。
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { trainerDecisionCodec as codec, initialDecision as initialUntrainedDecision, initialTrainer, continueDecision, modifierCodec } from './helpers/decision-model.mjs';
+import { trainerDecisionCodec as codec, initialDecision as initialUntrainedDecision, initialTrainer, continueDecision, modifierCodec, withTransferredTag, continueTransferredTag } from './helpers/decision-model.mjs';
 import { bindTrainerScene } from './helpers/trainer-model.mjs';
 import { formalFixture } from './helpers/formal-ws.mjs';
 import { createSnapshotConsumer } from '../src/battle-core/coop-client.mjs';
@@ -21,7 +21,7 @@ function initialDecision() {
     pokemon.summonData.tags=[encore];
     ctx.decision.options[seat]=[{kind:'fight',pokemonId:pokemon.id,cursor:0,target:null}];
   }
-  return ctx;
+  return withTransferredTag(ctx);
 }
 
 const adapter = {
@@ -33,7 +33,7 @@ const adapter = {
     const pokemon=ctx.roster.entries.find(e=>e.pokemon.id===ctx.roster.field[seat]).pokemon;
     resolveFightIntent(pokemon,seat,action,fightRules);
   },
-  advanceToDecision(ctx) { const result=continueDecision(ctx); return {context:ctx,events:[result],grants:[]}; },
+  advanceToDecision(ctx) { const result=continueDecision(ctx), tags=continueTransferredTag(ctx); return {context:ctx,events:[result,tags],grants:[]}; },
   projectSnapshot(ctx,seat) {
     const players=[0,1].map(()=>({money:0,pokeballCounts:{0:0,1:0,2:0,3:0,4:0},modifiers:[]}));
     const shared=codec.capture({...ctx,players}), p=ctx.players[seat];
@@ -59,10 +59,10 @@ async function clients(f,identities) {
 }
 const action=(c,id)=>({type:'submitAction',roomId:c.snapshot.roomId,runId:c.snapshot.runId,decisionId:c.snapshot.decisionId,expectedRevision:c.snapshot.revision,actionId:id,action:c.snapshot.shared.decision.options[c.identity.seat][0]});
 
-test('wait-action real WS restart retains one input, both RNG streams and private resources without double cost',async()=>{
+for (const firstSeat of [0,1]) test(`wait-action real WS restart retains seat ${firstSeat} input, shared tags, RNG and resources without double cost`,async()=>{
   let f=await formalFixture(adapter);
   try {
-    const original=initialDecision(), expectedEvent=continueDecision(original);
+    const original=initialDecision(), expectedEvent=continueDecision(original), expectedTags=continueTransferredTag(original);
     let pair=await clients(f); const ids=pair.map(c=>c.identity), roomId=ids[0].roomId;
     assert.notEqual(pair[0].model.battle.trainer, pair[1].model.battle.trainer);
     for (const c of pair) {
@@ -72,14 +72,32 @@ test('wait-action real WS restart retains one input, both RNG streams and privat
     }
     assert.ok(pair[0].snapshot.shared.players.every(p=>p.money===0&&p.modifiers.length===0));
     assert.equal(pair[0].model.players[1].money,0); // Teammate inventory was not sent.
-    const pending=action(pair[0],'once'); pair[0].send(pending); await pair[0].wait(m=>m.type==='actionReceipt'&&m.accepted);
+    const pending=action(pair[firstSeat],'once'); pair[firstSeat].send(pending); await pair[firstSeat].wait(m=>m.type==='actionReceipt'&&m.accepted);
     const store=f.store; await f.close(); f=await formalFixture(adapter,store); pair=await clients(f,ids);
-    pair[0].send(pending); await pair[0].wait(m=>m.type==='actionReceipt'&&m.accepted);
-    pair[1].send(action(pair[1],'finish')); await pair[1].wait(m=>m.type==='actionReceipt'&&m.accepted);
-    for(const c of pair) { const s=await c.wait(m=>m.type==='snapshot'&&m.revision===1); assert.deepEqual(s.events,[expectedEvent]); await c.consume(s); assert.deepEqual(adapter.projectSnapshot(c.model,c.identity.seat),adapter.projectSnapshot(original,c.identity.seat)); }
+    pair[firstSeat].send(pending); await pair[firstSeat].wait(m=>m.type==='actionReceipt'&&m.accepted);
+    pair[1-firstSeat].send(action(pair[1-firstSeat],'finish')); await pair[1-firstSeat].wait(m=>m.type==='actionReceipt'&&m.accepted);
+    for(const c of pair) { const s=await c.wait(m=>m.type==='snapshot'&&m.revision===1); assert.deepEqual(s.events,[expectedEvent,expectedTags]); await c.consume(s); assert.deepEqual(adapter.projectSnapshot(c.model,c.identity.seat),adapter.projectSnapshot(original,c.identity.seat));
+      assert.equal(c.model.roster.entries[0].pokemon.summonData.tags[0],c.model.roster.entries[3].pokemon.summonData.tags[0]); }
     assert.deepEqual(f.rooms.get(roomId).checkpoint,codec.capture(original));
-    pair[0].send(pending); await pair[0].wait(m=>m.type==='actionReceipt'); assert.equal(f.rooms.get(roomId).revision,1);
+    pair[firstSeat].send(pending); await pair[firstSeat].wait(m=>m.type==='actionReceipt'); assert.equal(f.rooms.get(roomId).revision,1);
   } finally {await f.close();}
+});
+
+test('corrupt persisted cross-Pokemon tag reference refuses WS recovery without rewriting the checkpoint', async () => {
+  let f = await formalFixture(adapter);
+  try {
+    const pair = await clients(f), identity = pair[0].identity, store = f.store;
+    await f.close();
+    const room = store.data.get(identity.roomId);
+    room.checkpoint.roster.tagGroups[0][1].pokemonId = 999;
+    const before = copy(room);
+    f = await formalFixture(adapter, store);
+    const c = await f.client();
+    c.send({type:'resumeSeat',roomId:identity.roomId,resumeToken:identity.resumeToken});
+    assert.equal((await c.wait(m => m.type === 'error')).code, 'INVALID_TAG_ALIAS');
+    assert.deepEqual(store.data.get(identity.roomId), before);
+    assert.equal(c.messages.some(m => m.type === 'snapshot'), false);
+  } finally { await f.close(); }
 });
 
 test('unknown persisted Trainer config blocks recovery without overwriting the room', async () => {
@@ -111,7 +129,7 @@ test('wait-action transition write failure leaves both accepted inputs and exact
     pair[0].send({type:'requestSnapshot',roomId,runId:pair[0].snapshot.runId,knownRevision:0,reason:'retry'});
     for(const c of pair)await c.consume(await c.wait(m=>m.type==='snapshot'));
     await pair[0].wait(m=>m.type==='snapshot'&&m.revision===1);
-    const expected=codec.restore(before);continueDecision(expected);assert.deepEqual(f.rooms.get(roomId).checkpoint,codec.capture(expected));
+    const expected=codec.restore(before);continueDecision(expected);continueTransferredTag(expected);assert.deepEqual(f.rooms.get(roomId).checkpoint,codec.capture(expected));
   } finally {store.fail=false;await f.close();}
 });
 test('corrupt persisted action is rejected at restore before publication or rewriting the save',async()=>{

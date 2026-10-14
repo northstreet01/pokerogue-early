@@ -5,12 +5,15 @@ import {createPhaseStateCodec} from '../../src/battle-core/phase-state.mjs';
 import {createCatalogReferenceCodec} from '../../src/battle-core/catalog-reference.mjs';
 import {selectSwitchSummon} from '../../src/battle-core/switch-command.mjs';
 import {finishSwitchSummon} from '../../src/battle-core/switch-finish.mjs';
+import {executeMoveAction} from '../../src/battle-core/move-action.mjs';
+import {checkMoveHit} from '../../src/battle-core/move-hit-check.mjs';
 
 const declarations=file=>parse(file).statements.filter(n=>ts.isClassDeclaration(n)||ts.isEnumDeclaration(n)||ts.isImportDeclaration(n)).map(n=>n.getText()).join('\n');
 const dependencies=file=>Object.fromEntries(parse(file).statements.filter(ts.isImportDeclaration).map(n=>[n.moduleSpecifier.text,{}]));
 class Phase{constructor(scene){this.scene=scene;}start(){}end(){this.scene.shiftPhase();}}
 const deps=dependencies('phases.ts');
-Object.assign(deps,{'./phase':{Phase},'./battle-core/switch-command.mjs':{selectSwitchSummon},'./battle-core/switch-finish.mjs':{finishSwitchSummon}});
+Object.assign(deps,{'./phase':{Phase},'./battle-core/switch-command.mjs':{selectSwitchSummon},'./battle-core/switch-finish.mjs':{finishSwitchSummon},
+  './battle-core/move-action.mjs':{executeMoveAction},'./battle-core/move-hit-check.mjs':{checkMoveHit}});
 export const originalPhases=evaluate(declarations('phases.ts'),deps);
 export function installPhaseTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(deps[path],value);}
 export const evolutionPhases=evaluate(declarations('evolution-phase.ts'),{...dependencies('evolution-phase.ts'),'./phase':{Phase},'./phases':originalPhases});

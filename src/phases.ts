@@ -1,3 +1,5 @@
+import { executeMoveAction } from './battle-core/move-action.mjs';
+import { checkMoveHit } from './battle-core/move-hit-check.mjs';
 import { selectSwitchSummon } from './battle-core/switch-command.mjs';
 import { finishSwitchSummon } from './battle-core/switch-finish.mjs';
 import { inspectLearnMove } from './battle-core/learn-command.mjs';
@@ -1927,150 +1929,8 @@ export class MovePhase extends BattlePhase {
 
   start() {
     super.start();
-
     console.log(Moves[this.move.moveId]);
-
-    if (!this.canMove()) {
-      if (this.move.moveId && this.pokemon.summonData.disabledMove === this.move.moveId)
-        this.scene.queueMessage(i18next.t("battle:moveDisabled", { moveName: (this.move.getName()) }));
-      return this.end();
-    }
-
-    if (!this.followUp) {
-      const abilityEffectsIgnored = new Utils.BooleanHolder(false);
-      this.scene.getField(true).map(p => applyAbAttrs(MoveAbilityBypassAbAttr, p, abilityEffectsIgnored));
-      if (abilityEffectsIgnored.value)
-        this.scene.arena.setIgnoreAbilities(true);
-    }
-
-    // Move redirection abilities (ie. Storm Drain) only support single target moves
-    const moveTarget = this.targets.length === 1
-      ? new Utils.IntegerHolder(this.targets[0])
-      : null;
-    if (moveTarget) {
-      this.scene.getField(true).filter(p => p !== this.pokemon).forEach(p => applyAbAttrs(RedirectMoveAbAttr, p, null, this.move.moveId, moveTarget));
-      this.targets[0] = moveTarget.value;
-    }
-
-    if (this.targets.length === 1 && this.targets[0] === BattlerIndex.ATTACKER) {
-      if (this.pokemon.turnData.attacksReceived.length) {
-        const attacker = this.pokemon.turnData.attacksReceived.length ? this.pokemon.scene.getPokemonById(this.pokemon.turnData.attacksReceived[0].sourceId) : null;
-        if (attacker?.isActive(true))
-          this.targets[0] = attacker.getBattlerIndex();
-      }
-      if (this.targets[0] === BattlerIndex.ATTACKER) {
-        this.cancel();
-        this.showMoveText();
-        this.showFailedText();
-      }
-    }
-
-    const targets = this.scene.getField(true).filter(p => {
-      if (this.targets.indexOf(p.getBattlerIndex()) > -1) {
-        const hiddenTag = p.getTag(HiddenTag);
-        if (hiddenTag && !this.move.getMove().getAttrs(HitsTagAttr).filter(hta => (hta as HitsTagAttr).tagType === hiddenTag.tagType).length)
-          return false;
-        return true;
-      }
-      return false;
-    });
-
-    const doMove = () => {
-      if (!this.followUp && this.canMove()) {
-        this.pokemon.lapseTags(BattlerTagLapseType.MOVE);
-        if (this.cancelled) {
-          this.pokemon.pushMoveHistory({ move: Moves.NONE, result: MoveResult.FAIL });
-          return this.end();
-        }
-      }
-
-      const moveQueue = this.pokemon.getMoveQueue();
-
-      this.scene.triggerPokemonFormChange(this.pokemon, SpeciesFormChangePreMoveTrigger);
-
-      if (this.move.moveId)
-        this.showMoveText();
-      
-      if ((moveQueue.length && moveQueue[0].move === Moves.NONE) || !targets.length) {
-        moveQueue.shift();
-        this.cancel();
-      }
-
-      if (this.cancelled) {
-        this.pokemon.pushMoveHistory({ move: Moves.NONE, result: MoveResult.FAIL });
-        return this.end();
-      }
-
-      if (!moveQueue.length || !moveQueue.shift().ignorePP) {
-        this.move.ppUsed++;
-        for (let opponent of this.pokemon.getOpponents()) {
-          if (this.move.ppUsed === this.move.getMove().pp)
-            break;
-          if (opponent.getAbility().id === Abilities.PRESSURE)
-            this.move.ppUsed = Math.min(this.move.ppUsed + 1, this.move.getMovePp());
-        }
-      }
-
-      if (!allMoves[this.move.moveId].getAttrs(CopyMoveAttr).length)
-        this.scene.currentBattle.lastMove = this.move.moveId;
-
-      // Assume conditions affecting targets only apply to moves with a single target
-      let success = this.move.getMove().applyConditions(this.pokemon, targets[0], this.move.getMove());
-      let failedText = null;
-      if (success && this.scene.arena.isMoveWeatherCancelled(this.move.getMove()))
-        success = false;
-      else if (success && this.scene.arena.isMoveTerrainCancelled(this.pokemon, this.move.getMove())) {
-        success = false;
-        failedText = getTerrainBlockMessage(targets[0], this.scene.arena.terrain.terrainType);
-      }
-      if (success)
-        this.scene.unshiftPhase(this.getEffectPhase());
-      else {
-        this.pokemon.pushMoveHistory({ move: this.move.moveId, targets: this.targets, result: MoveResult.FAIL, virtual: this.move.virtual });
-        this.showFailedText(failedText);
-      }
-      
-      this.end();
-    };
-
-    if (!this.followUp && this.pokemon.status && !this.pokemon.status.isPostTurn()) {
-      this.pokemon.status.incrementTurn();
-      let activated = false;
-      let healed = false;
-      
-      switch (this.pokemon.status.effect) {
-        case StatusEffect.PARALYSIS:
-          if (!this.pokemon.randSeedInt(4)) {
-            activated = true;
-            this.cancelled = true;
-          }
-          break;
-        case StatusEffect.SLEEP:
-          applyMoveAttrs(BypassSleepAttr, this.pokemon, null, this.move.getMove());
-          healed = this.pokemon.status.turnCount === this.pokemon.status.cureTurn;
-          activated = !healed && !this.pokemon.getTag(BattlerTagType.BYPASS_SLEEP);
-          this.cancelled = activated;
-          break;
-        case StatusEffect.FREEZE:
-          healed = !!this.move.getMove().findAttr(attr => attr instanceof HealStatusEffectAttr && attr.selfTarget && attr.isOfEffect(StatusEffect.FREEZE)) || !this.pokemon.randSeedInt(5);
-          activated = !healed;
-          this.cancelled = activated;
-          break;
-      }
-      if (activated) {
-        this.scene.queueMessage(getPokemonMessage(this.pokemon, getStatusEffectActivationText(this.pokemon.status.effect)));
-        this.scene.unshiftPhase(new CommonAnimPhase(this.scene, this.pokemon.getBattlerIndex(), undefined, CommonAnim.POISON + (this.pokemon.status.effect - 1)));
-        doMove();
-      } else {
-        if (healed) {
-          this.scene.queueMessage(getPokemonMessage(this.pokemon, getStatusEffectHealText(this.pokemon.status.effect)));
-          this.pokemon.resetStatus();
-          this.pokemon.updateInfo();
-        }
-        doMove();
-      }
-    } else
-      doMove();
+    executeMoveAction(this, { Abilities, BattlerIndex, BattlerTagLapseType, BattlerTagType, BypassSleepAttr, CommonAnim, CommonAnimPhase, CopyMoveAttr, HealStatusEffectAttr, HiddenTag, HitsTagAttr, MoveAbilityBypassAbAttr, MoveResult, Moves, RedirectMoveAbAttr, SpeciesFormChangePreMoveTrigger, StatusEffect, Utils, allMoves, applyAbAttrs, applyMoveAttrs, getPokemonMessage, getStatusEffectActivationText, getStatusEffectHealText, getTerrainBlockMessage, i18next });
   }
 
   getEffectPhase(): MoveEffectPhase {
@@ -2246,53 +2106,7 @@ export class MoveEffectPhase extends PokemonPhase {
   }
 
   hitCheck(target: Pokemon): boolean {
-    if (this.move.getMove().moveTarget === MoveTarget.USER)
-      return true;
-
-    // Hit check only calculated on first hit for multi-hit moves
-    if (this.getUserPokemon().turnData.hitsLeft < this.getUserPokemon().turnData.hitCount)
-      return true;
-
-    const hiddenTag = target.getTag(HiddenTag);
-    if (hiddenTag && !this.move.getMove().getAttrs(HitsTagAttr).filter(hta => (hta as HitsTagAttr).tagType === hiddenTag.tagType).length)
-      return false;
-
-    if (this.getUserPokemon().getTag(BattlerTagType.IGNORE_ACCURACY) && (this.getUserPokemon().getLastXMoves().find(() => true)?.targets || []).indexOf(target.getBattlerIndex()) > -1)
-      return true;
-
-    const moveAccuracy = new Utils.NumberHolder(this.move.getMove().accuracy);
-
-    applyMoveAttrs(VariableAccuracyAttr, this.getUserPokemon(), target, this.move.getMove(), moveAccuracy);
-
-    if (moveAccuracy.value === -1)
-      return true;
-
-    if (!this.move.getMove().getAttrs(OneHitKOAttr).length && this.scene.arena.getTag(ArenaTagType.GRAVITY))
-      moveAccuracy.value = Math.floor(moveAccuracy.value * 1.67);
-      
-    const userAccuracyLevel = new Utils.IntegerHolder(this.getUserPokemon().summonData.battleStats[BattleStat.ACC]);
-    const targetEvasionLevel = new Utils.IntegerHolder(target.summonData.battleStats[BattleStat.EVA]);
-    applyAbAttrs(IgnoreOpponentStatChangesAbAttr, target, null, userAccuracyLevel);
-    applyAbAttrs(IgnoreOpponentStatChangesAbAttr, this.getUserPokemon(), null, targetEvasionLevel);
-    this.scene.applyModifiers(TempBattleStatBoosterModifier, this.player, TempBattleStat.ACC, userAccuracyLevel);
-
-    const rand = this.getUserPokemon().randSeedInt(100, 1);
-
-    const accuracyMultiplier = new Utils.NumberHolder(1);
-    if (userAccuracyLevel.value !== targetEvasionLevel.value) {
-      accuracyMultiplier.value = userAccuracyLevel.value > targetEvasionLevel.value
-        ? (3 + Math.min(userAccuracyLevel.value - targetEvasionLevel.value, 6)) / 3
-        : 3 / (3 + Math.min(targetEvasionLevel.value - userAccuracyLevel.value, 6));
-    }
-
-    applyBattleStatMultiplierAbAttrs(BattleStatMultiplierAbAttr, this.getUserPokemon(), BattleStat.ACC, accuracyMultiplier);
-
-    const evasionMultiplier = new Utils.NumberHolder(1);
-    applyBattleStatMultiplierAbAttrs(BattleStatMultiplierAbAttr, this.getTarget(), BattleStat.EVA, evasionMultiplier);
-
-    accuracyMultiplier.value /= evasionMultiplier.value;
-
-    return rand <= moveAccuracy.value * accuracyMultiplier.value;
+    return checkMoveHit(this, target, { ArenaTagType, BattleStat, BattleStatMultiplierAbAttr, BattlerTagType, HiddenTag, HitsTagAttr, IgnoreOpponentStatChangesAbAttr, MoveTarget, OneHitKOAttr, TempBattleStat, TempBattleStatBoosterModifier, Utils, VariableAccuracyAttr, applyAbAttrs, applyBattleStatMultiplierAbAttrs, applyMoveAttrs });
   }
 
   getUserPokemon(): Pokemon {

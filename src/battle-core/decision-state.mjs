@@ -4,6 +4,7 @@ import { createLearnDecision } from './learn-command.mjs';
 import { restoreContinuation } from './phase-continuation.mjs';
 import { safeDecisionKinds } from './safe-decisions.mjs';
 import { captureTurnCommands, restoreTurnCommands } from './command-state.mjs';
+import {captureCommandTargetGroups,restoreCommandTargetGroups} from './command-target-state.mjs';
 import { copy, canonical, requireContract as check } from './coop-contract.mjs';
 import { RandomDataGenerator, readBattleRandomCheckpoint, shiftSeed } from './random.mjs';
 
@@ -121,13 +122,14 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
     check((b===null||Object.getPrototypeOf(b) === Battle.prototype) && Object.getPrototypeOf(a) === Arena.prototype, 'UNSUPPORTED_MODEL');
     if(b)check(Object.keys(b).every(k => battleCheckpointFields.includes(k)), 'UNKNOWN_BATTLE_FIELD');
     check(Object.keys(a).every(k => arenaCheckpointFields.includes(k)), 'UNKNOWN_ARENA_FIELD');
-    // Commands are explicit data; executable Phase queues remain excluded.
-    const snapshot = { version: 5, components: componentTable, modifierTypeGroups: [], roster: roster.capture(context.roster),
+    const savedCommands=b?captureTurnCommands(b.turnCommands):null;
+    // Commands and trusted Phase descriptors are data; executable stacks are excluded.
+    const snapshot = { version: 6, components: componentTable, modifierTypeGroups: [], commandTargetGroups:captureCommandTargetGroups(context),roster: roster.capture(context.roster),
       battle: b===null?null:{ ...Object.fromEntries(battleScalars.map(k => [k, b[k]])), gameMode: b.gameMode.modeId,
         trainer: optional(b, 'trainer', v => encodeComponent('trainer', v)), enemyLevels: copy(b.enemyLevels),
         enemyParty: b.enemyParty.map(p => { check(context.roster.entries.some(e => e.pokemon === p && e.owner === null), 'INVALID_ENEMY_REFERENCE'); return p.id; }),
         seenEnemyPartyMemberIds: [...b.seenEnemyPartyMemberIds], playerParticipantIds: [...b.playerParticipantIds],
-        turnCommands: captureTurnCommands(b.turnCommands), lastMove: optional(b, 'lastMove'),
+        turnCommands: savedCommands, lastMove: optional(b, 'lastMove'),
         postBattleLoot: b.postBattleLoot.map(v => encodeComponent('modifier', v)), random: b.captureRandomState() },
       arena: { ...Object.fromEntries(arenaScalars.map(k => [k, optional(a, k)])),
         weather: optional(a, 'weather', effects.captureWeatherState), terrain: optional(a, 'terrain', effects.captureTerrainState), tags: a.tags.map(effects.captureArenaTagState) },
@@ -146,8 +148,8 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
   }
   function restore(input) {
     const s = copy(input);
-    check(s?.version === 5, 'VERSION_MISMATCH');
-    exact(s, ['version','components','modifierTypeGroups','roster','battle','arena','scene','sceneRandom','modifierPools','players','enemyModifiers','decision','pendingEffects','continuation']);
+    check(s?.version === 6, 'VERSION_MISMATCH');
+    exact(s, ['version','components','modifierTypeGroups','commandTargetGroups','roster','battle','arena','scene','sceneRandom','modifierPools','players','enemyModifiers','decision','pendingEffects','continuation']);
     check(Array.isArray(s.components) && s.components.length <= 10000, 'INVALID_COMPONENT');
     const decoded = new Map();
     const decodeComponent = (kind, index) => {
@@ -223,6 +225,8 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
         else { check(current === state, 'INVALID_TYPE_ALIAS'); modifier.type = sharedType; }
       }
     }
+    restoreCommandTargetGroups(result,s.commandTargetGroups);
+    check(canonical(roster.capture(result.roster))===canonical(s.roster),'CONFLICTING_COMMAND_TARGET_ALIAS');
     result.continuation = readContinuation(s.continuation,result);
     validatePending(s.pendingEffects,result);
     const phaseIdentities=new Map();

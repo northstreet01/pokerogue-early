@@ -1,29 +1,14 @@
+import {appliedDecisionClients as connect} from './helpers/applied-decision-clients.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {codec,modifierCodec} from './helpers/decision-model.mjs';
+import {codec} from './helpers/decision-model.mjs';
 import {nativeSwitchContext,nativeSwitchStep} from './helpers/native-switch-model.mjs';
 import {safeAdapter} from './helpers/safe-model.mjs';
 import {formalFixture} from './helpers/formal-ws.mjs';
 import {createSnapshotConsumer} from '../src/battle-core/coop-client.mjs';
 import {copy} from '../src/battle-core/coop-contract.mjs';
 
-async function connect(f,adapter,identities){
-  const pair=[];
-  for(const seat of [0,1]){
-    const c=await f.client();pair.push(c);
-    c.send(identities?{type:'resumeSeat',roomId:identities[seat].roomId,resumeToken:identities[seat].resumeToken}
-      :seat===0?{type:'createRoom',name:'A'}:{type:'joinRoom',name:'B',roomId:pair[0].identity.roomId});
-    c.identity=await c.wait(m=>m.type==='welcome');c.acks=[];
-    c.consume=createSnapshotConsumer({versions:f.versions,isCurrent:e=>e===c.identity.connectionEpoch,send:m=>c.acks.push(m),adapter:{
-      applySnapshot(s){const saved=copy(s.shared),r=s.personal.resources;
-        saved.players[seat]={money:r.money,pokeballCounts:copy(r.pokeballCounts),modifiers:r.modifiers.map(state=>{const id=saved.components.length;saved.components.push({kind:'modifier',state});return id;})};
-        c.model=codec.restore(saved);
-      },captureAppliedState:()=>adapter.projectSnapshot(c.model,seat),async applyGrantsTransaction(g){assert.deepEqual(g,[]);}
-    }});
-  }
-  for(const c of pair){c.snapshot=await c.wait(m=>m.type==='snapshot');await c.consume(c.snapshot);}
-  return pair;
-}
+
 for(const baton of [false,true])for(const seat of [0,1])test(`real WS native switch resumes every boundary after restart, baton=${baton}, owner=${seat}`,async()=>{
   const adapter={...safeAdapter('ended'),rulesVersion:'native-switch-stages-test',
     createInitialContext:()=>nativeSwitchContext(baton,seat),

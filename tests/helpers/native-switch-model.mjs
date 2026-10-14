@@ -3,13 +3,14 @@ import {initialDecision,codec} from './decision-model.mjs';
 import {parse,evaluate,pokemon,arena,originalPokemon,installPokemonTestDependencies} from './original-model.mjs';
 import {originalPhases,phaseCodec,formModule,installPhaseTestDependencies} from './phase-model.mjs';
 import {modifiers} from './modifier-model.mjs';
+import {observeRulePromise} from '../../src/battle-core/rule-task-tracker.mjs';
 
 // Run actual switch methods with synchronous rendering hooks. Rule methods,
 // object swaps, source tags, onEnd and entry-ability dispatcher are original.
 const abilitySource=parse('data/ability.ts').statements.filter(n=>
   ts.isClassDeclaration(n)&&['AbAttr','PreSwitchOutAbAttr','PostSummonAbAttr'].includes(n.name.text)
   ||ts.isFunctionDeclaration(n)&&['applyAbAttrsInternal','applyPreSwitchOutAbAttrs','applyPostSummonAbAttrs','canApplyAttr','queueShowAbility'].includes(n.name?.text)).map(n=>n.getText()).join('\n');
-const abilities=evaluate(abilitySource);
+const abilities=evaluate(`import {observeRulePromise} from 'tasks'; ${abilitySource}`,{tasks:{observeRulePromise}});
 installPhaseTestDependencies({'./data/ability':abilities,'./data/pokemon-forms':formModule,'./modifier/modifier':modifiers,
   './data/arena-tag':arena,'./field/pokemon':pokemon,'./data/pokeball':{getPokeballTintColor:()=>0},'./ui/command-ui-handler':{Command:{POKEMON:2}}});
 installPokemonTestDependencies({'../modifier/modifier':modifiers});

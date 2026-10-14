@@ -1,4 +1,5 @@
 import { Moves } from "./enums/moves";
+import {observeRulePromise} from '../battle-core/rule-task-tracker.mjs';
 import { catalogName, catalogDescription } from '../system/localized-catalog';
 import { ChargeAnim, MoveChargeAnim, initMoveAnim, loadMoveAnimAssets } from "./battle-anims";
 import { BattleEndPhase, MovePhase, NewBattlePhase, PokemonHealPhase, StatChangePhase, SwitchSummonPhase } from "../phases";
@@ -2587,16 +2588,19 @@ const failOnBossCondition: MoveConditionFunc = (user, target, move) => !target.i
 export type MoveAttrFilter = (attr: MoveAttr) => boolean;
 
 function applyMoveAttrsInternal(attrFilter: MoveAttrFilter, user: Pokemon, target: Pokemon, move: Move, args: any[]): Promise<void> {
-  return new Promise(resolve => {
+  const promise = new Promise<void>(resolve => {
     const attrPromises: Promise<boolean>[] = [];
     const moveAttrs = move.attrs.filter(a => attrFilter(a));
     for (let attr of moveAttrs) {
       const result = attr.apply(user, target, move, args);
-      if (result instanceof Promise)
+      if (result instanceof Promise) {
+        observeRulePromise(user?.scene, result);
         attrPromises.push(result);
+      }
     }
     Promise.allSettled(attrPromises).then(() => resolve());
   });
+  return observeRulePromise(user?.scene, promise);
 }
 
 export function applyMoveAttrs(attrType: { new(...args: any[]): MoveAttr }, user: Pokemon, target: Pokemon, move: Move, ...args: any[]): Promise<void> {

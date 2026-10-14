@@ -1,4 +1,5 @@
 import Pokemon, { HitResult, PokemonMove } from "../field/pokemon";
+import {observeRulePromise} from '../battle-core/rule-task-tracker.mjs';
 import { catalogName, catalogDescription } from '../system/localized-catalog';
 import { Type } from "./type";
 import * as Utils from "../utils";
@@ -1488,7 +1489,7 @@ export class ProtectAbilityAbAttr extends AbAttr {
 
 function applyAbAttrsInternal<TAttr extends AbAttr>(attrType: { new(...args: any[]): TAttr },
   pokemon: Pokemon, applyFunc: AbAttrApplyFunc<TAttr>, args: any[], isAsync: boolean = false, showAbilityInstant: boolean = false, quiet: boolean = false): Promise<void> {
-  return new Promise(resolve => {
+  const promise = new Promise<void>(resolve => {
     if (!pokemon.canApplyAbility())
       return resolve();
 
@@ -1528,7 +1529,7 @@ function applyAbAttrsInternal<TAttr extends AbAttr>(attrType: { new(...args: any
       };
       const result = applyFunc(attr);
       if (result instanceof Promise) {
-        result.then(success => {
+        observeRulePromise(pokemon.scene, result).then(success => {
           if (success)
             onApplySuccess();
           applyNextAbAttr();
@@ -1541,6 +1542,7 @@ function applyAbAttrsInternal<TAttr extends AbAttr>(attrType: { new(...args: any
     };
     applyNextAbAttr();
   });
+  return observeRulePromise(pokemon.scene, promise);
 }
 
 export function applyAbAttrs(attrType: { new(...args: any[]): AbAttr }, pokemon: Pokemon, cancelled: Utils.BooleanHolder, ...args: any[]): Promise<void> {

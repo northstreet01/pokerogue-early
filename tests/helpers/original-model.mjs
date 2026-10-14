@@ -6,6 +6,7 @@ import ts from 'typescript';
 import { createEffectStateCodec, effectStateFields } from '../../src/battle-core/effect-state.mjs';
 import { nextBattleRandomInt, readBattleRandomCheckpoint } from '../../src/battle-core/random.mjs';
 import { createPokemonStateCodec } from '../../src/battle-core/pokemon-state.mjs';
+import {applyPokemonMove} from '../../src/battle-core/move-damage.mjs';
 
 const read = file => fs.readFileSync(new URL(`../../src/${file}`, import.meta.url), 'utf8');
 const parse = file => ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
@@ -13,7 +14,7 @@ function evaluate(source, dependencies = {}) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: {
     target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS
-  } }).outputText, { exports, require: name => {
+  } }).outputText, { exports, Promise, Object, require: name => {
     if (!Object.hasOwn(dependencies, name)) throw Error(`Unmocked browser dependency: ${name}`);
     return dependencies[name];
   } });
@@ -87,7 +88,8 @@ Object.assign(dependencies, {
   '../data/battle-stat': battleStats, '../utils': utils,
   '../data/pokemon-forms': { SpeciesFormChangePostMoveTrigger: class {} },
   '../system/achv': { achvs: { TRANSFER_MAX_BATTLE_STAT: 'TRANSFER_MAX_BATTLE_STAT' } },
-  '../battle-core/pokemon-state.mjs': { createPokemonStateCodec }
+  '../battle-core/pokemon-state.mjs': { createPokemonStateCodec },
+  '../battle-core/move-damage.mjs':{applyPokemonMove}
 });
 const pokemon = evaluate(read('field/pokemon.ts'), dependencies);
 export function installPokemonTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(dependencies[path],value);}

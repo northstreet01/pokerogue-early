@@ -19,8 +19,9 @@ const biomes=enumOf('data/enums/biome.ts','Biome'),times=enumOf('data/enums/time
 export const arenaPoolCodec=createArenaPoolStateCodec({hasBiome:id=>typeof biomes[id]==='string',hasTimeOfDay:id=>typeof times[id]==='string',hasSpecies:id=>typeof species[id]==='string',hasTrainer:id=>typeof trainers[id]==='string'});
 
 const classes = (file, names) => parse(file).statements.filter(n => ts.isClassDeclaration(n) && names.includes(n.name.text)).map(n => n.getText()).join('\n');
-export const Battle = evaluate(`import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; ${classes('battle.ts', ['Battle'])}`, { random: { nextBattleRandomInt, readBattleRandomCheckpoint } }).default;
-export const Arena = evaluate(classes('field/arena.ts', ['Arena'])).Arena;
+const battleUtils=evaluate(parse('utils.ts').statements.filter(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='getEnumValues').map(n=>n.getText()).join('\n'));
+export const Battle = evaluate(`import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; import * as Utils from 'utils'; import {BattlerIndex} from 'battler'; ${classes('battle.ts', ['Battle'])}`, { random: { nextBattleRandomInt, readBattleRandomCheckpoint },utils:battleUtils,battler:evaluate(parse('battle.ts').statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n')) }).default;
+export const Arena = evaluate(`import {ArenaTagSide} from 'arena'; ${classes('field/arena.ts', ['Arena'])}`,{arena}).Arena;
 const modes = { 0: { modeId: 0 } };
 export const Trainer = trainerModule.default;
 export { trainerCodec };

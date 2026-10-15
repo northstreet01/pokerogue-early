@@ -1,0 +1,4 @@
+{
+  "commit": "5c9f3e34",
+  "start": "start() {\n    super.start();\n\n    const eggsToHatch: Egg[] = [];\n\n    for (let egg of this.scene.gameData.eggs) {\n      if (--egg.hatchWaves < 1)\n        eggsToHatch.push(egg);\n    }\n\n    if (eggsToHatch.length)\n      this.scene.queueMessage(i18next.t(\"battle:eggHatching\"));\n\n    for (let egg of eggsToHatch)\n      this.scene.unshiftPhase(new EggHatchPhase(this.scene, egg));\n\n    this.end();\n  }"
+}

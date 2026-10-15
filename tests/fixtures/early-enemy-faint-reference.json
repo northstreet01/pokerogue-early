@@ -1,0 +1,7 @@
+{
+  "commit": "5c9f3e34",
+  "methods": {
+    "addFaintedEnemyScore": "addFaintedEnemyScore(enemy: EnemyPokemon): void {\n\t\tlet scoreIncrease = enemy.getSpeciesForm().getBaseExp() * (enemy.level / this.getMaxExpLevel()) * ((enemy.ivs.reduce((iv: integer, total: integer) => total += iv, 0) / 93) * 0.2 + 0.8);\n\t\tthis.findModifiers(m => m instanceof PokemonHeldItemModifier && m.pokemonId === enemy.id, false).map(m => scoreIncrease *= (m as PokemonHeldItemModifier).getScoreMultiplier());\n\t\tif (enemy.isBoss())\n\t\t\tscoreIncrease *= Math.sqrt(enemy.bossSegments);\n\t\tthis.currentBattle.battleScore += Math.ceil(scoreIncrease);\n\t}",
+    "getMaxExpLevel": "getMaxExpLevel(ignoreLevelCap?: boolean): integer {\n\t\tif (ignoreLevelCap)\n\t\t\treturn Number.MAX_SAFE_INTEGER;\n\t\tconst waveIndex = Math.ceil((this.currentBattle?.waveIndex || 1) / 10) * 10;\n\t\tconst difficultyWaveIndex = this.gameMode.getWaveForDifficulty(waveIndex);\n\t\treturn calculateMaxExpLevel(difficultyWaveIndex);\n\t}"
+  }
+}

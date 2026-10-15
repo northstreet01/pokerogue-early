@@ -1,3 +1,4 @@
+import { queueVictoryExperience } from './battle-core/victory-experience.mjs';
 import { executeMoveAction } from './battle-core/move-action.mjs';
 import { checkMoveHit } from './battle-core/move-hit-check.mjs';
 import { selectSwitchSummon } from './battle-core/switch-command.mjs';
@@ -8,6 +9,7 @@ import { prepareQueuedFight, selectEncoreFight } from './battle-core/forced-comm
 import { selectFightCommand } from './battle-core/fight-command.mjs';
 import { selectEnemyCommand } from './battle-core/enemy-command.mjs';
 import { getFieldOrder, getMoveOrder } from './battle-core/turn-order.mjs';
+import { queueFaintContinuation } from './battle-core/faint-queue.mjs';
 import i18next from './i18n';
 import BattleScene, { STARTER_FORM_OVERRIDE, STARTER_SPECIES_OVERRIDE, bypassLogin, startingWave } from "./battle-scene";
 import { default as Pokemon, PlayerPokemon, EnemyPokemon, PokemonMove, MoveResult, DamageResult, FieldPosition, HitResult, TurnMove } from "./field/pokemon";
@@ -1488,7 +1490,7 @@ export class CommandPhase extends FieldPhase {
 
     if (this.fieldIndex) {
       const allyCommand = this.scene.currentBattle.turnCommands[this.fieldIndex - 1];
-      if (allyCommand.command === Command.BALL || allyCommand.command === Command.RUN)
+      if (allyCommand?.command === Command.BALL || allyCommand?.command === Command.RUN)
         this.scene.currentBattle.turnCommands[this.fieldIndex] = { command: allyCommand.command, skip: true };
     }
 
@@ -2594,35 +2596,7 @@ export class FaintPhase extends PokemonPhase {
 
     this.scene.queueMessage(i18next.t('battle:fainted', { pokemonNameWithAffix: getPokemonNameWithAffix(pokemon) }), null, true);
 
-    if (this.player) {
-      const nonFaintedPartyMembers = this.scene.getParty().filter(p => !p.isFainted());
-      const nonFaintedPartyMemberCount = nonFaintedPartyMembers.length;
-      if (!nonFaintedPartyMemberCount)
-        this.scene.unshiftPhase(new GameOverPhase(this.scene));
-      else if (nonFaintedPartyMemberCount >= this.scene.currentBattle.getBattlerCount() || (this.scene.currentBattle.double && !nonFaintedPartyMembers[0].isActive(true)))
-        this.scene.pushPhase(new SwitchPhase(this.scene, this.fieldIndex, true, false));
-      if (nonFaintedPartyMemberCount === 1 && this.scene.currentBattle.double)
-        this.scene.unshiftPhase(new ToggleDoublePositionPhase(this.scene, true));
-    } else {
-      this.scene.unshiftPhase(new VictoryPhase(this.scene, this.battlerIndex));
-      if (this.scene.currentBattle.battleType === BattleType.TRAINER) {
-        const hasReservePartyMember = !!this.scene.getEnemyParty().filter(p => p.isActive() && !p.isOnField() && p.trainerSlot === (pokemon as EnemyPokemon).trainerSlot).length;
-        if (hasReservePartyMember)
-          this.scene.pushPhase(new SwitchSummonPhase(this.scene, this.fieldIndex, -1, false, false, false));
-      }
-    }
-
-    if (this.scene.currentBattle.double) {
-      const allyPokemon = pokemon.getAlly();
-      if (allyPokemon?.isActive(true)) {
-        let targetingMovePhase: MovePhase;
-        do {
-          targetingMovePhase = this.scene.findPhase(mp => mp instanceof MovePhase && mp.targets.length === 1 && mp.targets[0] === pokemon.getBattlerIndex()) as MovePhase;
-          if (targetingMovePhase && targetingMovePhase.targets[0] !== allyPokemon.getBattlerIndex())
-            targetingMovePhase.targets[0] = allyPokemon.getBattlerIndex();
-        } while (targetingMovePhase);
-      }
-    }
+    queueFaintContinuation(this, { GameOverPhase, SwitchPhase, ToggleDoublePositionPhase, VictoryPhase, SwitchSummonPhase, MovePhase, BattleType });
 
     pokemon.lapseTags(BattlerTagLapseType.FAINT);
     this.scene.getField(true).filter(p => p !== pokemon).forEach(p => p.removeTagsBySourceId(pokemon.id));
@@ -2683,83 +2657,20 @@ export class VictoryPhase extends PokemonPhase {
   start() {
     super.start();
 
+    this.recordDefeat();
+
+    this.queueExperience();
+
+    this.queueAftermath();
+  }
+
+  recordDefeat() {
     this.scene.gameData.gameStats.pokemonDefeated++;
+  }
 
-    const participantIds = this.scene.currentBattle.playerParticipantIds;
-    const party = this.scene.getParty();
-    const expShareModifier = this.scene.findModifier(m => m instanceof ExpShareModifier) as ExpShareModifier;
-    const expBalanceModifier = this.scene.findModifier(m => m instanceof ExpBalanceModifier) as ExpBalanceModifier;
-    const multipleParticipantExpBonusModifier = this.scene.findModifier(m => m instanceof MultipleParticipantExpBonusModifier) as MultipleParticipantExpBonusModifier;
-    const expPartyMembers = party.filter(p => p.hp && p.level < this.scene.getMaxExpLevel());
-    const partyMemberExp = [];
-
-    if (participantIds.size) {
-      let expValue = this.getPokemon().getExpValue();
-      if (this.scene.currentBattle.battleType === BattleType.TRAINER)
-        expValue = Math.floor(expValue * 1.5);
-      for (let partyMember of expPartyMembers) {
-        const pId = partyMember.id;
-        const participated = participantIds.has(pId);
-        if (participated) {
-          const friendshipIncrease = new Utils.IntegerHolder(2);
-          this.scene.applyModifier(PokemonFriendshipBoosterModifier, true, partyMember, friendshipIncrease);
-          partyMember.friendship = Math.min(partyMember.friendship + friendshipIncrease.value, 255);
-          if (partyMember.friendship === 255)
-            this.scene.validateAchv(achvs.MAX_FRIENDSHIP);
-        }
-        else if (!expShareModifier) {
-          partyMemberExp.push(0);
-          continue;
-        }
-        let expMultiplier = 0;
-        if (participated) {
-          expMultiplier += (1 / participantIds.size);
-          if (participantIds.size > 1 && multipleParticipantExpBonusModifier)
-            expMultiplier += multipleParticipantExpBonusModifier.getStackCount() * 0.2;
-        } else if (expShareModifier)
-          expMultiplier += (expShareModifier.getStackCount() * 0.2) / participantIds.size;
-        if (partyMember.pokerus)
-          expMultiplier *= 1.5;
-        const pokemonExp = new Utils.NumberHolder(expValue * expMultiplier);
-        this.scene.applyModifiers(PokemonExpBoosterModifier, true, partyMember, pokemonExp);
-        partyMemberExp.push(Math.floor(pokemonExp.value));
-      }
-
-      if (expBalanceModifier) {
-        let totalLevel = 0;
-        let totalExp = 0;
-        expPartyMembers.forEach((expPartyMember, epm) => {
-          totalExp += partyMemberExp[epm];
-          totalLevel += expPartyMember.level;
-        });
-
-        const medianLevel = Math.floor(totalLevel / expPartyMembers.length);
-
-        const recipientExpPartyMemberIndexes = [];
-        expPartyMembers.forEach((expPartyMember, epm) => {
-          if (expPartyMember.level <= medianLevel)
-            recipientExpPartyMemberIndexes.push(epm);
-        });
-
-        const splitExp = Math.floor(totalExp / recipientExpPartyMemberIndexes.length);
-
-        expPartyMembers.forEach((_partyMember, pm) => {
-          partyMemberExp[pm] = Phaser.Math.Linear(partyMemberExp[pm], recipientExpPartyMemberIndexes.indexOf(pm) > -1 ? splitExp : 0, 0.2 * expBalanceModifier.getStackCount());
-        });
-      }
-
-      for (let pm = 0; pm < expPartyMembers.length; pm++) {
-        const exp = partyMemberExp[pm];
-
-        if (exp) {
-          const partyMemberIndex = party.indexOf(expPartyMembers[pm]);
-          this.scene.unshiftPhase(expPartyMembers[pm].isOnField() ? new ExpPhase(this.scene, partyMemberIndex, exp) : new ShowPartyExpBarPhase(this.scene, partyMemberIndex, exp));
-          if (expPartyMembers[pm].isOnField())
-            applyPostVictoryAbAttrs(PostVictoryAbAttr, expPartyMembers[pm]);
-        }
-      }
-    }
-
+  // Original post-experience segment. Recovery resumes this segment rather
+  // than replaying start and granting experience again.
+  queueAftermath() {
     if (!this.scene.getEnemyParty().find(p => this.scene.currentBattle.battleType ? !p?.isFainted(true) : p.isOnField())) {
       this.scene.pushPhase(new BattleEndPhase(this.scene));
       if (this.scene.currentBattle.battleType === BattleType.TRAINER)
@@ -2796,6 +2707,11 @@ export class VictoryPhase extends PokemonPhase {
 
     this.end();
   }
+
+  queueExperience(baseExp?: number) {
+    queueVictoryExperience(this, { ExpShareModifier, ExpBalanceModifier, MultipleParticipantExpBonusModifier, PokemonFriendshipBoosterModifier, PokemonExpBoosterModifier, BattleType, Utils, achvs, ExpPhase, ShowPartyExpBarPhase, applyPostVictoryAbAttrs, PostVictoryAbAttr, Phaser }, baseExp);
+  }
+
 }
 
 export class TrainerVictoryPhase extends BattlePhase {
@@ -3217,17 +3133,7 @@ export class LearnMovePhase extends PlayerPartyMemberPokemonPhase {
                       noHandler();
                       return;
                     }
-                    this.scene.ui.setMode(messageMode).then(() => {
-                      this.scene.ui.showText('@d{32}1, @d{15}2, and@d{15}… @d{15}… @d{15}… @d{15}@s{pb_bounce_1}Poof!', null, () => {
-                        this.scene.ui.showText(i18next.t("battle:learnMoveForgetSuccess", { pokemonName: (pokemon.name), moveName: (pokemon.moveset[moveIndex].getName()) }), null, () => {
-                          this.scene.ui.showText(i18next.t("battle:learnMoveAnd"), null, () => {
-                            pokemon.setMove(moveIndex, Moves.NONE);
-                            this.scene.unshiftPhase(new LearnMovePhase(this.scene, this.partyMemberIndex, this.moveId));
-                            this.end();
-                          }, null, true);
-                        }, null, true);
-                      }, null, true);
-                    });
+                    this.forgetMove(moveIndex, messageMode);
                   });
                 }, null, true);
               }, noHandler);
@@ -3236,6 +3142,23 @@ export class LearnMovePhase extends PlayerPartyMemberPokemonPhase {
         }, null, true);
       });
     }
+  }
+
+  // Named continuation of the original confirmed replacement callback. A
+  // restored cooperative choice resumes here without restarting the prompt.
+  forgetMove(moveIndex: integer, messageMode: Mode): Promise<void> {
+    const pokemon = this.getPokemon();
+    return this.scene.ui.setMode(messageMode).then(() => {
+      this.scene.ui.showText('@d{32}1, @d{15}2, and@d{15}… @d{15}… @d{15}… @d{15}@s{pb_bounce_1}Poof!', null, () => {
+        this.scene.ui.showText(i18next.t("battle:learnMoveForgetSuccess", { pokemonName: (pokemon.name), moveName: (pokemon.moveset[moveIndex].getName()) }), null, () => {
+          this.scene.ui.showText(i18next.t("battle:learnMoveAnd"), null, () => {
+            pokemon.setMove(moveIndex, Moves.NONE);
+            this.scene.unshiftPhase(new LearnMovePhase(this.scene, this.partyMemberIndex, this.moveId));
+            this.end();
+          }, null, true);
+        }, null, true);
+      }, null, true);
+    });
   }
 }
 
@@ -3641,12 +3564,18 @@ export class SelectModifierPhase extends BattlePhase {
       this.updateSeed();
 
     const party = this.scene.getParty();
-    regenerateModifierPoolThresholds(party, this.getPoolType());
+    regenerateModifierPoolThresholds(party, this.getPoolType(), this.getExcludedModifierIds());
     const modifierCount = new Utils.IntegerHolder(3);
     if (this.isPlayer())
       this.scene.applyModifiers(ExtraModifierModifier, true, modifierCount);
     const typeOptions: ModifierTypeOption[] = this.getModifierTypeOptions(modifierCount.value);
 
+    const modifierSelectCallback = this.createModifierSelectCallback(typeOptions);
+    this.scene.ui.setMode(Mode.MODIFIER_SELECT, this.isPlayer(), typeOptions, modifierSelectCallback, this.getRerollCost());
+  }
+
+  createModifierSelectCallback(typeOptions: ModifierTypeOption[]): (rowCursor: integer, cursor: integer) => boolean {
+    const party = this.scene.getParty();
     const modifierSelectCallback = (rowCursor: integer, cursor: integer) => {
       if (rowCursor < 0 || cursor < 0) {
         this.scene.ui.showText(i18next.t("battle:skipItemQuestion"), null, () => {
@@ -3761,7 +3690,7 @@ export class SelectModifierPhase extends BattlePhase {
 
       return !cost;
     };
-    this.scene.ui.setMode(Mode.MODIFIER_SELECT, this.isPlayer(), typeOptions, modifierSelectCallback, this.getRerollCost());
+    return modifierSelectCallback;
   }
 
   updateSeed(): void {
@@ -3778,6 +3707,10 @@ export class SelectModifierPhase extends BattlePhase {
   
   getPoolType(): ModifierPoolType {
     return ModifierPoolType.PLAYER;
+  }
+
+  getExcludedModifierIds(): readonly string[] {
+    return [];
   }
 
   getModifierTypeOptions(modifierCount: integer): ModifierTypeOption[] {

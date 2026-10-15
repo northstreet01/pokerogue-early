@@ -64,6 +64,11 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       check(typeof decision.id === 'string' && decision.id.length > 0 && decision.id.length <= 128, 'INVALID_SWITCH_DECISION');
       const expected = createForcedSwitchDecision(decision.id,candidate,decision.requiredSeats);
       check(canonical(expected) === canonical(decision), 'INVALID_SWITCH_DECISION');
+      const active=candidate.continuation?.currentPhase;
+      if(active?.remaining==='wait-switch')check(candidate.continuation.standbyPhase===null
+        &&phaseState?.isPhase(active.phase)&&phaseState.capture(active.phase,candidate).type==='SwitchPhase'
+        &&decision.requiredSeats.length===1&&decision.requiredSeats[0]===active.phase.fieldIndex,
+        'INVALID_SWITCH_DECISION');
       return;
     }
     if (decision.kind === 'learn-move') {
@@ -98,9 +103,22 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
         && new Set(t.targets).size === t.targets.length && t.targets.every(n => Number.isInteger(n) && n >= 0 && n <= 3 && candidate.roster.field[n] !== null), 'INVALID_TARGET_DECISION');
       const options = [...t.targets, -1].map(target => ({kind:'target',pokemonId:t.pokemonId,target}));
       check(canonical(options) === canonical(decision.options[t.fieldIndex]), 'INVALID_TARGET_DECISION');
+      const active=candidate.continuation?.currentPhase;
+      if(active?.remaining==='wait-target')check(candidate.continuation.standbyPhase===null
+        &&active.phase.fieldIndex===t.fieldIndex,'INVALID_TARGET_DECISION');
       return;
     }
     const living = [0, 1].filter(seat => candidate.roster.entries.some(e => e.pokemon.id === candidate.roster.field[seat] && e.pokemon.hp > 0) && candidate.battle.turnCommands[seat] === null);
+    const active=candidate.continuation?.currentPhase;
+    // The original Command UI may be suspended before a later seat's forced
+    // action is processed. Reuse its registered M2 remaining stage; only that
+    // current, first unfilled seat can supply this serial input boundary.
+    if(decision.requiredSeats.length===1&&active?.kind==='original-phase'&&active.remaining==='wait-actions'
+      &&candidate.continuation.standbyPhase===null&&phaseState?.isPhase(active.phase)
+      &&phaseState.capture(active.phase,candidate).type==='CommandPhase'){
+      check(decision.requiredSeats[0]===active.phase.fieldIndex&&active.phase.fieldIndex===living[0], 'INVALID_DECISION');
+      return;
+    }
     check(canonical([...decision.requiredSeats].sort()) === canonical(living), 'INVALID_DECISION');
   }
   function capture(context) {
@@ -110,7 +128,9 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       if (componentIds.has(value)) { const index = componentIds.get(value); check(componentTable[index].kind === kind, 'COMPONENT_TYPE_MISMATCH'); return index; }
       const index = componentTable.length; componentIds.set(value, index); componentTable.push({ kind, state: encodeRaw(kind, value) }); return index;
     };
-    exact(context, ['roster','battle','arena','scene','players','enemyModifiers','sceneRandom','modifierPools','decision','pendingEffects','continuation']);
+    const withEggs=Object.hasOwn(context,'eggState');
+    exact(context, ['roster','battle','arena','scene','players','enemyModifiers','sceneRandom','modifierPools','decision','pendingEffects','continuation',...(withEggs?['eggState']:[])]);
+    if(withEggs)check(components?.eggs?.capture&&components?.eggs?.restore,'EGG_CODEC_UNAVAILABLE');
     exact(context.scene,[...sceneFields,'gameMode',...(Object.hasOwn(context.scene,'lastEnemyTrainer')?['lastEnemyTrainer']:[])]);
     for(const descriptor of Object.values(Object.getOwnPropertyDescriptors(context.scene)))check('value'in descriptor,'MODEL_ACCESSOR');
     const encodePhaseGraph=phaseState?.createGraph(),decodePhaseGraph=phaseState?.createGraph();
@@ -124,7 +144,7 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
     check(Object.keys(a).every(k => arenaCheckpointFields.includes(k)), 'UNKNOWN_ARENA_FIELD');
     const savedCommands=b?captureTurnCommands(b.turnCommands):null;
     // Commands and trusted Phase descriptors are data; executable stacks are excluded.
-    const snapshot = { version: 6, components: componentTable, modifierTypeGroups: [], commandTargetGroups:captureCommandTargetGroups(context),roster: roster.capture(context.roster),
+    const snapshot = { version: withEggs?7:6,...(withEggs?{eggState:components.eggs.capture(context.eggState)}:{}), components: componentTable, modifierTypeGroups: [], commandTargetGroups:captureCommandTargetGroups(context),roster: roster.capture(context.roster),
       battle: b===null?null:{ ...Object.fromEntries(battleScalars.map(k => [k, b[k]])), gameMode: b.gameMode.modeId,
         trainer: optional(b, 'trainer', v => encodeComponent('trainer', v)), enemyLevels: copy(b.enemyLevels),
         enemyParty: b.enemyParty.map(p => { check(context.roster.entries.some(e => e.pokemon === p && e.owner === null), 'INVALID_ENEMY_REFERENCE'); return p.id; }),
@@ -148,8 +168,8 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
   }
   function restore(input) {
     const s = copy(input);
-    check(s?.version === 6, 'VERSION_MISMATCH');
-    exact(s, ['version','components','modifierTypeGroups','commandTargetGroups','roster','battle','arena','scene','sceneRandom','modifierPools','players','enemyModifiers','decision','pendingEffects','continuation']);
+    check(s?.version === 6||s?.version===7, 'VERSION_MISMATCH');
+    exact(s, ['version','components','modifierTypeGroups','commandTargetGroups','roster','battle','arena','scene','sceneRandom','modifierPools','players','enemyModifiers','decision','pendingEffects','continuation',...(s.version===7?['eggState']:[])]);
     check(Array.isArray(s.components) && s.components.length <= 10000, 'INVALID_COMPONENT');
     const decoded = new Map();
     const decodeComponent = (kind, index) => {
@@ -162,6 +182,7 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
     exact(s.arena, [...arenaScalars,'weather','terrain','tags']); exact(s.scene, [...sceneFields,'gameMode','lastEnemyTrainer']);
     check(typeof s.scene.seed === 'string' && typeof s.scene.waveSeed === 'string' && uint(s.scene.waveCycleOffset) && typeof s.scene.offsetGym === 'boolean' && uint(s.scene.score), 'INVALID_SCENE');
     const result = { roster: roster.restore(s.roster), battle: s.battle===null?null:Object.create(Battle.prototype), arena: Object.create(Arena.prototype), scene: Object.fromEntries(sceneFields.map(k=>[k,s.scene[k]])), players: [], enemyModifiers: [], sceneRandom: new SceneRandom(s.sceneRandom), modifierPools: restoreModifierPoolState(s.modifierPools), decision: s.decision, pendingEffects: s.pendingEffects };
+    if(s.version===7){check(components?.eggs?.restore,'EGG_CODEC_UNAVAILABLE');result.eggState=components.eggs.restore(s.eggState);}
     result.scene.gameMode=getGameMode(s.scene.gameMode);check(result.scene.gameMode&&result.scene.gameMode.modeId===s.scene.gameMode,'UNKNOWN_GAME_MODE');
     restoreOptional(result.scene,'lastEnemyTrainer',s.scene.lastEnemyTrainer,v=>decodeComponent('trainer',v));
     const b = result.battle, a = result.arena;
@@ -202,11 +223,17 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       exact(p, ['money','pokeballCounts','modifiers']); check(uint(p.money), 'INVALID_MONEY'); exact(p.pokeballCounts, ['0','1','2','3','4']);
       check(Object.values(p.pokeballCounts).every(uint) && Array.isArray(p.modifiers), 'INVALID_INVENTORY');
       const modifiers = p.modifiers.map(v => decodeComponent('modifier', v));
-      for (const m of modifiers) if (m.pokemonId != null && m.pokemonId !== -1) check(byId.get(m.pokemonId)?.owner === seat, 'INVALID_MODIFIER_OWNER');
+      for (const m of modifiers) {
+        check(m.pokemonId!==null,'INVALID_MODIFIER_OWNER');
+        if (m.pokemonId != null && m.pokemonId !== -1) check(byId.get(m.pokemonId)?.owner === seat, 'INVALID_MODIFIER_OWNER');
+      }
       return { money: p.money, pokeballCounts: p.pokeballCounts, modifiers };
     });
     check(Array.isArray(s.enemyModifiers), 'INVALID_INVENTORY'); result.enemyModifiers = s.enemyModifiers.map(v => decodeComponent('modifier', v));
-    for (const m of result.enemyModifiers) if (m.pokemonId != null && m.pokemonId !== -1) check(byId.has(m.pokemonId) && byId.get(m.pokemonId).owner === null, 'INVALID_MODIFIER_OWNER');
+    for (const m of result.enemyModifiers) {
+      if(m.pokemonId===null)check(b?.postBattleLoot.includes(m),'UNSTAGED_ENEMY_LOOT');
+      else if (m.pokemonId != null && m.pokemonId !== -1) check(byId.has(m.pokemonId) && byId.get(m.pokemonId).owner === null, 'INVALID_MODIFIER_OWNER');
+    }
     const owners = new Map();
     for (const [owner, modifiers] of [result.players[0].modifiers,result.players[1].modifiers,result.enemyModifiers].entries()) for (const modifier of modifiers) {
       check(!owners.has(modifier) || owners.get(modifier) === owner, 'SHARED_PERSONAL_MODIFIER'); owners.set(modifier, owner);

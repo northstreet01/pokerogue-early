@@ -27,11 +27,17 @@ import {TimeOfDay} from './data/enums/time-of-day';
 import {getPokemonSpecies} from './data/pokemon-species';
 import {trainerConfigs} from './data/trainer-config';
 import {createArenaPoolStateCodec} from './battle-core/arena-pool-state.mjs';
+import {EggHatchPhase} from './egg-hatch-phase';
+import {Egg,EGG_SEED,GachaType} from './data/egg';
+import {EggTier} from './data/enums/egg-type';
+import {createOwnedEggStateCodec} from './battle-core/egg-state.mjs';
 
 // Loaded explicitly by an original-model adapter. It does not mount a runner or
 // change the single-player/experimental entry point. Catalog closures remain
 // trusted original objects; constructors/condition predicates never run on load.
-const allPhases = { ...phases, ...evolutionPhases, ...formPhases };
+const allPhases = { ...phases, ...evolutionPhases, ...formPhases,EggHatchPhase };
+export const originalOwnedEggStateCodec=createOwnedEggStateCodec({Egg,seed:EGG_SEED,
+  gachaTypes:[GachaType.MOVE,GachaType.LEGENDARY,GachaType.SHINY],tiers:[EggTier.COMMON,EggTier.GREAT,EggTier.ULTRA,EggTier.MASTER]});
 export const evolutionReferenceCodec = createCatalogReferenceCodec(pokemonEvolutions);
 export const formChangeReferenceCodec = createCatalogReferenceCodec(pokemonFormChanges);
 export const originalPhaseStateCodec = createPhaseStateCodec({
@@ -57,6 +63,7 @@ export const originalDecisionStateCodec = createDecisionStateCodec({
   arenaPools:createArenaPoolStateCodec({hasBiome:id=>typeof Biome[id]==='string',hasTimeOfDay:id=>typeof TimeOfDay[id]==='string',
     hasSpecies:id=>!!getPokemonSpecies(id),hasTrainer:id=>Object.prototype.hasOwnProperty.call(trainerConfigs,id)}),
   components: {
+    eggs:originalOwnedEggStateCodec,
     trainer: { capture: captureTrainerState, restore: restoreTrainerState },
     modifier: { capture: captureModifierState, restore: restoreModifierState, captureType: captureModifierTypeState }
   }

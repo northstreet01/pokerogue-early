@@ -7,20 +7,22 @@ import { createDecisionStateCodec, SceneRandom } from '../../src/battle-core/dec
 import { RandomDataGenerator, nextBattleRandomInt, readBattleRandomCheckpoint } from '../../src/battle-core/random.mjs';
 import { copy, requireContract as check } from '../../src/battle-core/coop-contract.mjs';
 import { trainerCodec, trainerModule, originalTrainer } from './trainer-model.mjs';
-import { modifierCodec, originalModifier } from './modifier-model.mjs';
+import { modifierCodec, originalModifier, modifiers } from './modifier-model.mjs';
 import { getFieldOrder } from '../../src/battle-core/turn-order.mjs';
 import { selectEnemyCommand } from '../../src/battle-core/enemy-command.mjs';
 import {phaseCodec,evolutionCodec} from './phase-model.mjs';
 import {createSafeDecisionCodec} from '../../src/battle-core/safe-decisions.mjs';
 import {types} from './modifier-model.mjs';
 import {createArenaPoolStateCodec} from '../../src/battle-core/arena-pool-state.mjs';
+import {eggCodec} from './egg-model.mjs';
 const enumOf=(file,name)=>evaluate(parse(file).statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n'))[name];
 const biomes=enumOf('data/enums/biome.ts','Biome'),times=enumOf('data/enums/time-of-day.ts','TimeOfDay'),species=enumOf('data/enums/species.ts','Species'),trainers=enumOf('data/enums/trainer-type.ts','TrainerType');
 export const arenaPoolCodec=createArenaPoolStateCodec({hasBiome:id=>typeof biomes[id]==='string',hasTimeOfDay:id=>typeof times[id]==='string',hasSpecies:id=>typeof species[id]==='string',hasTrainer:id=>typeof trainers[id]==='string'});
 
 const classes = (file, names) => parse(file).statements.filter(n => ts.isClassDeclaration(n) && names.includes(n.name.text)).map(n => n.getText()).join('\n');
 const battleUtils=evaluate(parse('utils.ts').statements.filter(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='getEnumValues').map(n=>n.getText()).join('\n'));
-export const Battle = evaluate(`import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; import * as Utils from 'utils'; import {BattlerIndex} from 'battler'; ${classes('battle.ts', ['Battle'])}`, { random: { nextBattleRandomInt, readBattleRandomCheckpoint },utils:battleUtils,battler:evaluate(parse('battle.ts').statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n')) }).default;
+export const battleTestGlobals={Phaser:{},console:{log(){}}};
+export const Battle = evaluate(`import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; import * as Utils from 'utils'; import {BattlerIndex} from 'battler'; import {PokemonHeldItemModifier} from 'modifier'; ${classes('battle.ts', ['Battle'])}`, { modifier:modifiers,random: { nextBattleRandomInt, readBattleRandomCheckpoint },utils:battleUtils,battler:evaluate(parse('battle.ts').statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n')) },battleTestGlobals).default;
 export const Arena = evaluate(`import {ArenaTagSide} from 'arena'; ${classes('field/arena.ts', ['Arena'])}`,{arena}).Arena;
 const modes = { 0: { modeId: 0 } };
 export const Trainer = trainerModule.default;
@@ -28,7 +30,7 @@ export { trainerCodec };
 export const initialTrainer = originalTrainer;
 export { modifierCodec };
 export const safeCodec=createSafeDecisionCodec({evolution:evolutionCodec,modifierType:{restore:types.restoreModifierTypeState},hasBiome:id=>Number.isInteger(id)&&id>=0&&id<=50,hasMove:id=>!!moveCatalog[id]});
-export const codec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], hasMove: id => !!moveCatalog[id], safeDecisions:safeCodec,phaseState:phaseCodec,arenaPools:arenaPoolCodec,components: { modifier: modifierCodec } });
+export const codec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], hasMove: id => !!moveCatalog[id], safeDecisions:safeCodec,phaseState:phaseCodec,arenaPools:arenaPoolCodec,components: { modifier: modifierCodec,eggs:eggCodec } });
 export const trainerDecisionCodec = createDecisionStateCodec({ roster: createRosterStateCodec(pokemon), effects: { ...arena, ...weather, ...terrain }, Battle, Arena, getGameMode: id => modes[id], hasMove: id => !!moveCatalog[id],safeDecisions:safeCodec,phaseState:phaseCodec,arenaPools:arenaPoolCodec, components: { modifier: modifierCodec, trainer: trainerCodec } });
 export function initialDecision(seed = 'room-seed') {
   const entries = [0,1,2].map(i => ({ owner: i < 2 ? i : null, group: i < 2 ? 'party' : 'enemy', index: 0, pokemon: originalPokemon(100+i, i === 2) }));

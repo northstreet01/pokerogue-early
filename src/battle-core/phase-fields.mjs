@@ -1,6 +1,13 @@
 // Explicit original rule fields. AST coverage rejects source drift; UI phases are excluded.
-export const excludedPhaseTypes = Object.freeze(["LoginPhase","TitlePhase","ConsolidateDataPhase","SelectGenderPhase","EggHatchPhase","MoveAnimTestPhase","TrainerMessageTestPhase","TestMessagePhase"]);
+export const excludedPhaseTypes = Object.freeze(["LoginPhase","TitlePhase","ConsolidateDataPhase","SelectGenderPhase","MoveAnimTestPhase","TrainerMessageTestPhase","TestMessagePhase"]);
 export const phaseStateFields = Object.freeze({
+  "EggHatchPhase": {
+    "base": "Phase",
+    "fields": {"egg":"egg","pokemon":"hatch-pokemon","eggMoveIndex":"int","canSkip":"bool","skipped":"bool"},
+    "required": ["egg"],
+    "display": ["eggHatchContainer","eggHatchBg","eggHatchOverlay","eggContainer","eggSprite","eggCrackSprite","eggLightraysOverlay","pokemonSprite","pokemonShinySparkle","infoContainer","evolutionBgm"],
+    "abstract": false
+  },
   "SelectStarterPhase": {
     "base": "Phase",
     "fields": {},

@@ -1143,7 +1143,7 @@ const getModifierPools = () => ruleModifierPools(() => browserModifierPools);
 
 const tierWeights = [ 769 / 1024, 192 / 1024, 48 / 1024, 12 / 1024, 1 / 1024 ];
 
-export function regenerateModifierPoolThresholds(party: Pokemon[], poolType: ModifierPoolType) {
+export function regenerateModifierPoolThresholds(party: Pokemon[], poolType: ModifierPoolType, excludedModifierIds: readonly string[] = []) {
   let pool: ModifierPool;
   switch (poolType) {
     case ModifierPoolType.PLAYER:
@@ -1176,7 +1176,7 @@ export function regenerateModifierPoolThresholds(party: Pokemon[], poolType: Mod
       const itemModifierType = weightedModifierType.modifierType instanceof ModifierTypeGenerator
         ? weightedModifierType.modifierType.generateType(party)
         : weightedModifierType.modifierType;
-      const weight = !existingModifiers.length
+      const weight = excludedModifierIds.includes(weightedModifierType.modifierType.id) ? 0 : !existingModifiers.length
         || itemModifierType instanceof PokemonHeldItemModifierType
         || itemModifierType instanceof FormChangeItemModifierType
         || existingModifiers.find(m => m.stackCount < m.getMaxStackCount(party[0].scene, true))

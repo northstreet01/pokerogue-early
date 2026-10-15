@@ -1,0 +1,5 @@
+{
+  "revision": "5c9f3e34",
+  "file": "src/modifier/modifier.ts",
+  "apply": "apply(args: any[]): boolean {\n    const pokemon = args[0] as PlayerPokemon;\n    const levelCount = new Utils.IntegerHolder(1);\n    pokemon.scene.applyModifiers(LevelIncrementBoosterModifier, true, levelCount);\n\n    pokemon.level += levelCount.value;\n    if (pokemon.level <= pokemon.scene.getMaxExpLevel(true)) {\n      pokemon.exp = getLevelTotalExp(pokemon.level, pokemon.species.growthRate);\n      pokemon.levelExp = 0;\n    }\n\n    const friendshipIncrease = new Utils.IntegerHolder(5);\n    pokemon.scene.applyModifier(PokemonFriendshipBoosterModifier, true, pokemon, friendshipIncrease);\n    pokemon.friendship = Math.min(pokemon.friendship + friendshipIncrease.value, 255);\n\n    pokemon.scene.unshiftPhase(new LevelUpPhase(pokemon.scene, pokemon.scene.getParty().indexOf(pokemon), pokemon.level - levelCount.value, pokemon.level));\n\n    return true;\n  }"
+}

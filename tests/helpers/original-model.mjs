@@ -10,11 +10,11 @@ import {applyPokemonMove} from '../../src/battle-core/move-damage.mjs';
 
 const read = file => fs.readFileSync(new URL(`../../src/${file}`, import.meta.url), 'utf8');
 const parse = file => ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
-function evaluate(source, dependencies = {}) {
+function evaluate(source, dependencies = {}, globals = {}) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: {
     target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS
-  } }).outputText, { exports, Promise, Object, require: name => {
+  } }).outputText, { ...globals, exports, Promise, Object, require: name => {
     if (!Object.hasOwn(dependencies, name)) throw Error(`Unmocked browser dependency: ${name}`);
     return dependencies[name];
   } });
@@ -67,7 +67,7 @@ const arena = evaluate(read('data/arena-tag.ts'), {
 // Catalog fixtures exercise reference identity, not catalog/content compatibility.
 // All executed Pokemon methods below are the actual source, unmodified.
 const species = new Map([1, 2, 4, 7].map(id => [id, { speciesId: id, formIndex: 0, forms: [], baseExp: 64,
-  baseStats:[45,49,49,65,65,45],getName:()=>`Species ${id}`,getAbilityCount:()=>1,getAbility:()=>0,ability1:0,type1:0,type2:null }]));
+  baseStats:[45,49,49,65,65,45],growthRate:2,getName:()=>`Species ${id}`,getBaseExp(){return this.baseExp;},getAbilityCount:()=>1,getAbility:()=>0,ability1:0,type1:0,type2:null }]));
 species.get(4).forms = [{ speciesId: 4, formIndex: 0 }, { speciesId: 4, formIndex: 1 }];
 const moveIds=new Set(Object.values(moves.Moves).filter(v=>typeof v==='number'));
 const moveCatalog = new Proxy({ 0: { id: 0, pp: -1 }, 33: { id: 33, pp: 35 }, 57: { id: 57, pp: 15 } },{get:(target,id)=>Object.hasOwn(target,id)?target[id]

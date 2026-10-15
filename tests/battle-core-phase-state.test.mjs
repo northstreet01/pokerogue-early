@@ -8,19 +8,22 @@ import {phaseStateFields,excludedPhaseTypes} from '../src/battle-core/phase-fiel
 import {createOriginalQueueStateCodec} from '../src/battle-core/original-queue-state.mjs';
 import {copy} from '../src/battle-core/coop-contract.mjs';
 import {checkpointRuleProjection} from '../src/battle-core/rule-projection.mjs';
+import {eggs} from './helpers/egg-model.mjs';
 
 function schema(type){const spec=phaseStateFields[type];return {...(phaseStateFields[spec.base]?schema(spec.base):{}),...spec.fields};}
 function make(type,c){
+  if(type==='EggHatchPhase')c.eggState={players:[[new eggs.Egg(123,0,0,0)],[]]};
   const phase=Object.create(phaseConstructors[type].prototype);
   for(const [key,rule]of Object.entries(schema(type)))phase[key]=rule==='bool'?true:rule==='number'?1.5:rule==='int'?0:rule==='ints'?[2]
-    :rule==='pokemon'?c.roster.entries[0].pokemon:rule==='move'?c.roster.entries[0].pokemon.moveset[0]:rule==='weather'?c.arena.weather
+    :rule==='egg'?c.eggState.players[0][0]:rule==='pokemon'?c.roster.entries[0].pokemon:rule==='move'?c.roster.entries[0].pokemon.moveset[0]:rule==='weather'?c.arena.weather
       :rule==='modifierType'?c.players[0].modifiers[0].type:rule==='evolution'?evolutionRule:rule==='formChange'?formRule:'';
   if(Object.hasOwn(phase,'moveId'))phase.moveId=33;
+  if(type==='EggHatchPhase'){phase.pokemon=originalPokemon(900);phase.eggMoveIndex=0;}
   phase.scene={unexpected:'renderer excluded'};return phase;
 }
 test('explicit manifest covers every original Phase declaration, inherited fields and exclusions',()=>{
   const names=[];
-  for(const file of ['phases.ts','evolution-phase.ts','form-change-phase.ts'])for(const c of parse(file).statements.filter(ts.isClassDeclaration)){
+  for(const file of ['phases.ts','evolution-phase.ts','form-change-phase.ts','egg-hatch-phase.ts'])for(const c of parse(file).statements.filter(ts.isClassDeclaration)){
     const name=c.name.text;if(excludedPhaseTypes.includes(name))continue;names.push(name);
     const spec=phaseStateFields[name];assert.ok(spec,name);
     assert.equal(spec.base,c.heritageClauses[0].types[0].expression.getText());

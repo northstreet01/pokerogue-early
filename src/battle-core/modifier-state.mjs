@@ -12,7 +12,11 @@ export function createModifierStateCodec({ constructors, typeCodec, enums }) {
   const names = Object.keys(modifierFields).filter(n => !modifierFields[n].abstract);
   check(names.every(n => typeof constructors[n] === 'function'), 'INCOMPLETE_MODIFIER_REGISTRY');
   const byPrototype = new Map(names.map(n => [constructors[n].prototype, n]));
-  function scalar(key, type, value) {
+  const heldItem=name=>name==='PokemonHeldItemModifier'||!!modifierFields[name]?.parent&&heldItem(modifierFields[name].parent);
+  function scalar(key, type, value, nullableHeldItem) {
+    // Original Battle.addPostBattleLoot clears the defeated holder before the
+    // same item is staged for later allocation. Other modifier IDs stay numeric.
+    if(key==='pokemonId'&&value===null&&nullableHeldItem)return null;
     if (type === 'boolean') check(typeof value === 'boolean', 'INVALID_MODIFIER_FIELD');
     else {
       check(typeof value === 'number' && Number.isFinite(value), 'INVALID_MODIFIER_FIELD');
@@ -38,7 +42,7 @@ export function createModifierStateCodec({ constructors, typeCodec, enums }) {
         const d = Object.getOwnPropertyDescriptor(p, key); check(!d || 'value' in d, 'MODIFIER_ACCESSOR');
       }
       if (field.presence !== 'absent') Object.defineProperty(result, key, { enumerable: true, writable: true, configurable: true,
-        value: field.presence === 'undefined' ? undefined : key === 'type' ? typeCodec.restore(field.value) : scalar(key, type, field.value) });
+        value: field.presence === 'undefined' ? undefined : key === 'type' ? typeCodec.restore(field.value) : scalar(key, type, field.value,heldItem(s.type)) });
     }
     return result;
   }

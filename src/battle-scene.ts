@@ -1,3 +1,4 @@
+import { addFaintedEnemyScore } from './battle-core/faint-score.mjs';
 import Phaser from 'phaser';
 import { pushPhase, prependPhase, selectNextPhase, populatePhaseQueue } from './battle-core/phase-queue.mjs';
 import { ruleSeedOffset } from './battle-core/random-context.mjs';
@@ -1193,11 +1194,7 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	addFaintedEnemyScore(enemy: EnemyPokemon): void {
-		let scoreIncrease = enemy.getSpeciesForm().getBaseExp() * (enemy.level / this.getMaxExpLevel()) * ((enemy.ivs.reduce((iv: integer, total: integer) => total += iv, 0) / 93) * 0.2 + 0.8);
-		this.findModifiers(m => m instanceof PokemonHeldItemModifier && m.pokemonId === enemy.id, false).map(m => scoreIncrease *= (m as PokemonHeldItemModifier).getScoreMultiplier());
-		if (enemy.isBoss())
-			scoreIncrease *= Math.sqrt(enemy.bossSegments);
-		this.currentBattle.battleScore += Math.ceil(scoreIncrease);
+		addFaintedEnemyScore(this, enemy, { PokemonHeldItemModifier });
 	}
 
 	getMaxExpLevel(ignoreLevelCap?: boolean): integer {

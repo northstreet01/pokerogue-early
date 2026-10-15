@@ -45,7 +45,32 @@ export function createPhaseStateCodec({constructors, evolution, formChange, modi
       value=value.value;
     }
     let result;
-    if(rule==='pokemon') {
+    if(rule==='egg'){
+      const rows=context.eggState?.players;check(Array.isArray(rows)&&rows.length===2,'EGG_STATE_UNAVAILABLE');
+      if(restoring){
+        check(value&&Object.keys(value).sort().join(',')==='id,seat'&&[0,1].includes(value.seat),'INVALID_EGG_REFERENCE');
+        result=rows[value.seat].find(egg=>egg.id===value.id);check(result,'UNKNOWN_PHASE_EGG');
+      }else{
+        const owners=rows.flatMap((row,seat)=>row.includes(value)?[seat]:[]);check(owners.length===1,'UNKNOWN_PHASE_EGG');
+        result={seat:owners[0],id:value.id};
+      }
+    }else if(rule==='hatch-pokemon') {
+      // A hatch result belongs to this personal Phase, never to a party slot or
+      // the retired battler table. Numeric Pokemon IDs may legitimately collide.
+      check(pokemon?.capturePokemon&&pokemon?.restorePokemon,'PHASE_COMPONENT_UNAVAILABLE');
+      if(restoring){
+        check(value&&Object.keys(value).join(',')==='state','INVALID_HATCH_POKEMON');
+        result=pokemon.restorePokemon(value.state);
+      }else{
+        const captured=pokemon.capturePokemon(value);
+        check(value?.isPlayer()===true&&!context.roster.entries.some(e=>e.pokemon===value),'INVALID_HATCH_POKEMON');
+        const nodes=new Set([...pokemonRuleNodes(value).values()].filter(v=>v&&typeof v==='object'));
+        for(const {pokemon:p}of context.roster.entries)for(const node of pokemonRuleNodes(p).values())
+          check(!nodes.has(node),'SHARED_HATCH_POKEMON');
+        result={state:captured};
+      }
+      check((restoring?result:value).isPlayer()===true,'INVALID_HATCH_POKEMON');
+    }else if(rule==='pokemon') {
       if(restoring&&value&&typeof value==='object') {
         check(Object.hasOwn(value,'retired')&&Object.hasOwn(value,'bindings')&&Object.keys(value).every(k=>['retired','bindings','alias'].includes(k))
           &&pokemon?.restorePokemon,'UNKNOWN_PHASE_POKEMON');
@@ -137,6 +162,11 @@ export function createPhaseStateCodec({constructors, evolution, formChange, modi
   }
   function verify(type,values,context,scope) {
     check(scope===null||scope===0||scope===1,'INVALID_PHASE_SCOPE');
+    if(type==='EggHatchPhase'){
+      check([0,1].includes(scope)&&context.eggState?.players[scope]?.includes(values.egg),'INVALID_EGG_OWNER');
+      if(values.pokemon!==undefined)check(values.pokemon!==null&&values.egg.hatchWaves<=0
+        &&Number.isInteger(values.eggMoveIndex)&&values.eggMoveIndex>=0&&values.eggMoveIndex<=3,'INVALID_HATCH_RESULT');
+    }
     if(Object.hasOwn(values,'fieldIndex'))check(Number.isInteger(values.fieldIndex)&&values.fieldIndex>=0&&values.fieldIndex<=1,'INVALID_PHASE_FIELD');
     if(Object.hasOwn(values,'moveId'))check(Number.isSafeInteger(values.moveId)&&hasMove?.(values.moveId),'UNKNOWN_MOVE');
     if(values.partyMemberIndex!==undefined) {
@@ -157,7 +187,7 @@ export function createPhaseStateCodec({constructors, evolution, formChange, modi
     const spec=schema(s.type);
     check(s.fields&&Object.keys(s.fields).every(k=>Object.hasOwn(spec.fields,k))&&spec.required.every(k=>Object.hasOwn(s.fields,k)),'INVALID_PHASE_FIELD');
     const values=Object.fromEntries(Object.entries(s.fields).map(([key,value])=>[key,encode(value,spec.fields[key],context,true,graph)]));
-    for(const key of spec.required)if(['pokemon','move','ints','weather','modifierType','formChange','bool'].includes(spec.fields[key]))
+    for(const key of spec.required)if(['pokemon','move','ints','weather','modifierType','formChange','bool','egg'].includes(spec.fields[key]))
       check(values[key]!=null,'INVALID_PHASE_FIELD');
     check(s.presentation&&Object.keys(s.presentation).every(k=>spec.display.includes(k)&&k!=='scene'&&!rendererFields.has(k)),'INVALID_PHASE_PRESENTATION');
     for(const [key,value]of Object.entries(s.presentation)){

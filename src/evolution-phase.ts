@@ -175,7 +175,7 @@ export class EvolutionPhase extends Phase {
 
                           SoundFade.fadeOut(this.scene, evolutionBgm, 100);
 
-                          this.scene.unshiftPhase(new EndEvolutionPhase(this.scene));
+                          this.queueEndEvolution();
 
                           this.scene.ui.showText(`${preName} stopped evolving.`, null, () => {
                             this.scene.ui.showText(`Would you like to pause evolutions for ${preName}?\nEvolutions can be re-enabled from the party screen.`, null, () => {
@@ -204,12 +204,7 @@ export class EvolutionPhase extends Phase {
                         this.scene.time.delayedCall(900, () => {
                           evolutionHandler.canCancel = false;
 
-                          this.pokemon.evolve(this.evolution).then(() => {
-                            const levelMoves = this.pokemon.getLevelMoves(this.lastLevel + 1, true);
-                            for (let lm of levelMoves)
-                              this.scene.unshiftPhase(new LearnMovePhase(this.scene, this.scene.getParty().indexOf(this.pokemon), lm[1]));  
-                            this.scene.unshiftPhase(new EndEvolutionPhase(this.scene));
-
+                          this.applyEvolution().then(() => {
                             this.scene.playSound('shine');
                             this.doSpray();
                             this.scene.tweens.add({
@@ -261,6 +256,21 @@ export class EvolutionPhase extends Phase {
         });
       });
     }, 1000);
+  }
+
+  // Original successful evolution rule segment, shared with explicit recovery
+  // after the cooperative evolution decision. Animation remains in doEvolution.
+  applyEvolution(): Promise<void> {
+    return this.pokemon.evolve(this.evolution).then(() => {
+      const levelMoves = this.pokemon.getLevelMoves(this.lastLevel + 1, true);
+      for (let lm of levelMoves)
+        this.scene.unshiftPhase(new LearnMovePhase(this.scene, this.scene.getParty().indexOf(this.pokemon), lm[1]));
+      this.queueEndEvolution();
+    });
+  }
+
+  queueEndEvolution(): void {
+    this.scene.unshiftPhase(new EndEvolutionPhase(this.scene));
   }
 
   doSpiralUpward() {

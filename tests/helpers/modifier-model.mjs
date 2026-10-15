@@ -12,13 +12,17 @@ const utils = { toReadableString: s => s.toLowerCase(), padInt: v => String(v).p
   randSeedInt() { throw Error('RNG during restore'); }, randSeedItem() { throw Error('RNG during restore'); },
   IntegerHolder: class {constructor(value){this.value=value;}} };
 const types = {}, dependencies = deps('modifier/modifier.ts');
+export function installModifierTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(dependencies[path],value);}
 Object.assign(dependencies, { './modifier-type':types, '../battle-core/modifier-state.mjs':{createModifierStateCodec},
   '../utils':utils, '../field/pokemon':pokemon, '../data/pokemon-stat':enums('data/pokemon-stat.ts'),
   '../data/pokeball':enums('data/pokeball.ts'), '../system/voucher':enums('system/voucher.ts'),
   '../data/temp-battle-stat':enums('data/temp-battle-stat.ts'), '../data/type':enums('data/type.ts'),
   '../data/berry':enums('data/berry.ts'), '../data/pokemon-forms':enums('data/pokemon-forms.ts'), '../data/status-effect':status });
-export const modifiers = evaluate(`const Phaser = { GameObjects: { Container: class { constructor(){throw Error('renderer');} } } };\n${read('modifier/modifier.ts')}`,dependencies);
+// Catalog baseStats and restored codec arrays are host-realm arrays. Keep the
+// original vitamin instanceof Array check in that same test realm.
+export const modifiers = evaluate(`const Phaser = { GameObjects: { Container: class { constructor(){throw Error('renderer');} } } };\n${read('modifier/modifier.ts')}`,dependencies,{Array});
 const typeDependencies = deps('modifier/modifier-type.ts');
+export function installModifierTypeTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(typeDependencies[path],value);}
 Object.assign(typeDependencies, {
   '../battle-core/modifier-pool-state.mjs':{createModifierPoolState}, '../battle-core/random-context.mjs':{ruleModifierPools},
   './modifier':modifiers, '../battle-core/modifier-type-state.mjs':{createModifierTypeStateCodec}, '../utils':utils,

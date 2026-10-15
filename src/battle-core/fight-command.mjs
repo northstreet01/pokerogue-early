@@ -1,4 +1,4 @@
-import { copy, requireContract as check } from './coop-contract.mjs';
+import { copy, canonical, requireContract as check } from './coop-contract.mjs';
 import { selectEncoreFight } from './forced-command.mjs';
 
 // Original CommandPhase FIGHT selection. Trusted internal args retain early's
@@ -35,4 +35,43 @@ export function resolveFightIntent(pokemon, fieldIndex, input, rules) {
     selected.command.targets = [intent.target];
   } else check(intent.target === null, 'UNEXPECTED_MOVE_TARGET');
   return copy(selected.command);
+}
+
+// Collect the required seats before the trusted adapter starts or resumes the
+// original Command/SelectTarget phases. Queue order and command rules stay there;
+// this boundary only isolates, validates and commits a model.
+export async function advanceCollectedFightCommands(context,inputs,codec,driver,{decisionId}={}) {
+  check(typeof decisionId==='string'&&decisionId.length>0&&decisionId.length<=128
+    &&decisionId!==context.decision.id,'INVALID_COMMAND_DECISION_ID');
+  check(driver&&typeof driver.validateInput==='function'&&driver.validateInput.constructor.name!=='AsyncFunction'
+    &&typeof driver.executeCollected==='function','COMMAND_DRIVER_UNAVAILABLE');
+  const candidate=codec.restore(codec.capture(context)),state=candidate.continuation;
+  const inputKind=candidate.decision.kind;
+  check(['wait-actions','wait-target'].includes(inputKind)&&state.standbyPhase===null
+    &&(state.currentPhase===null&&inputKind==='wait-actions'||state.currentPhase?.kind==='original-phase'
+      &&state.currentPhase.remaining===inputKind),'UNSAFE_COMMAND_BOUNDARY');
+  const actions=copy(inputs),seats=candidate.decision.requiredSeats;
+  check(actions&&typeof actions==='object'&&!Array.isArray(actions)
+    &&canonical(Object.keys(actions).sort())===canonical(seats.map(String).sort()),'INCOMPLETE_COMMAND_INPUTS');
+  const before=canonical(codec.capture(candidate));
+  for(const seat of seats){
+    check(actions[seat]?.kind===(inputKind==='wait-target'?'target':'fight'),'UNSUPPORTED_COMMAND_INPUT');
+    codec.validateAction(candidate,seat,actions[seat]);
+    const validation=driver.validateInput(candidate,seat,copy(actions[seat]));
+    check(!validation?.then,'ASYNC_COMMAND_VALIDATOR');
+  }
+  check(canonical(codec.capture(candidate))===before,'VALIDATOR_MUTATED_STATE');
+  const decision={id:decisionId,kind:'continuing',requiredSeats:[],reason:'effects'};
+  candidate.decision=copy(decision);
+  const result=await driver.executeCollected(candidate,copy(actions));
+  check(result?.completed===true&&result.pendingTasks===0&&Array.isArray(result.events)&&Array.isArray(result.grants),'INCOMPLETE_COMMAND_PHASES');
+  check(candidate.continuation===state&&state.standbyPhase===null,'INVALID_COMMAND_RESULT');
+  if(result.suspended===true){
+    check(state.currentPhase?.kind==='original-phase'&&state.currentPhase.remaining===candidate.decision.kind
+      &&['wait-actions','wait-target'].includes(candidate.decision.kind)&&candidate.decision.id===decisionId,'INVALID_COMMAND_RESULT');
+  }else{
+    check(state.currentPhase===null&&canonical(candidate.decision)===canonical(decision),'INVALID_COMMAND_RESULT');
+  }
+  codec.capture(candidate);
+  return {context:candidate,events:copy(result.events),grants:copy(result.grants)};
 }

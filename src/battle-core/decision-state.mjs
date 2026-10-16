@@ -1,5 +1,5 @@
 import { captureModifierPoolState, restoreModifierPoolState } from './modifier-pool-state.mjs';
-import { createForcedSwitchDecision } from './switch-command.mjs';
+import { createForcedSwitchDecision,createPreBattleSwitchDecision } from './switch-command.mjs';
 import { createLearnDecision } from './learn-command.mjs';
 import { restoreContinuation } from './phase-continuation.mjs';
 import { safeDecisionKinds } from './safe-decisions.mjs';
@@ -55,6 +55,17 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
     if (saved.presence !== 'absent') Object.defineProperty(target, key, { value: saved.presence === 'undefined' ? undefined : saved.value === null ? null : decode(saved.value), writable: true, enumerable: true, configurable: true });
   }
   function validateDecision(decision, candidate) {
+    if(['switch-confirm','switch-select'].includes(decision.kind)){
+      const seat=decision.requiredSeats?.[0],active=candidate.continuation?.currentPhase;
+      check(decision.requiredSeats?.length===1&&canonical(createPreBattleSwitchDecision(decision.id,candidate,seat,decision.kind))===canonical(decision),
+        'INVALID_PRE_BATTLE_SWITCH');
+      check(active?.kind==='original-phase'&&active.remaining===decision.kind&&candidate.continuation.standbyPhase===null
+        &&phaseState?.isPhase(active.phase),'INVALID_PRE_BATTLE_SWITCH');
+      const p=phaseState.capture(active.phase,candidate);
+      check(p.scope===seat&&p.type===(decision.kind==='switch-confirm'?'CheckSwitchPhase':'SwitchPhase')
+        &&active.phase.fieldIndex===seat&&(decision.kind==='switch-confirm'||active.phase.isModal===false&&active.phase.doReturn===true),
+        'INVALID_PRE_BATTLE_SWITCH');return;
+    }
     if (safeDecisionKinds.includes(decision.kind)) {
       check(safeDecisions?.validate,'SAFE_DECISION_CODEC_UNAVAILABLE');safeDecisions.validate(decision,candidate);return;
     }

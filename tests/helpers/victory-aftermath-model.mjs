@@ -45,6 +45,8 @@ const personal=(c,seat)=>c.roster.entries.filter(e=>e.owner===seat&&e.group==='p
 export function bindOriginalModifierUpdates(scene,tasks,reference=false){
   for(const name of ['findModifiers','removeModifier','updatePartyForModifiers'])
     scene[name]=sceneMethods[name][reference?'reference':'live'].bind(scene);
+  const updateParty=scene.updatePartyForModifiers;
+  scene.updatePartyForModifiers=(...args)=>tasks.add(updateParty(...args));
   scene.updateModifiers=(player,instant)=>tasks.add(sceneMethods.updateModifiers[reference?'reference':'live'].call(scene,player,instant));
 }
 

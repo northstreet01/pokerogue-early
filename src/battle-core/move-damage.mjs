@@ -42,7 +42,7 @@ export function applyPokemonMove(target, source, battlerMove, rules) {
                 applyMoveAttrs(VariablePowerAttr, source, target, move, power);
                 if (!typeless) {
                     target.scene.arena.applyTags(WeakenMoveTypeTag, move.type, power);
-                    target.scene.applyModifiers(AttackTypeBoosterModifier, source.isPlayer(), source, power);
+                    source.scene.applyModifiers(AttackTypeBoosterModifier, source.isPlayer(), source, power);
                 }
                 if (source.getTag(HelpingHandTag))
                     power.value *= 1.5;
@@ -54,7 +54,7 @@ export function applyPokemonMove(target, source, battlerMove, rules) {
                 else {
                     const critLevel = new Utils.IntegerHolder(0);
                     applyMoveAttrs(HighCritAttr, source, target, move, critLevel);
-                    target.scene.applyModifiers(TempBattleStatBoosterModifier, source.isPlayer(), TempBattleStat.CRIT, critLevel);
+                    source.scene.applyModifiers(TempBattleStatBoosterModifier, source.isPlayer(), TempBattleStat.CRIT, critLevel);
                     if (source.getTag(BattlerTagType.CRIT_BOOST))
                         critLevel.value += 2;
                     const critChance = Math.ceil(16 / Math.pow(2, critLevel.value));
@@ -148,7 +148,7 @@ export function applyPokemonMove(target, source, battlerMove, rules) {
                     const attackResult = { move: move.id, result: result, damage: damage.value, critical: isCritical, sourceId: source.id };
                     target.turnData.attacksReceived.unshift(attackResult);
                     if (source.isPlayer() && !target.isPlayer())
-                        target.scene.applyModifiers(DamageMoneyRewardModifier, true, source, damage);
+                        source.scene.applyModifiers(DamageMoneyRewardModifier, true, source, damage);
                 }
                 if (source.turnData.hitsLeft === 1) {
                     switch (result) {

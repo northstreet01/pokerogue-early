@@ -30,6 +30,7 @@ export async function advanceQueuedRulePhase(context,codec,driver,{decisionId}={
     const stop=driver.suspendBoundary(candidate,descriptor.phase,decisionId,result);
     check(stop&&!stop.then&&stop.decision?.id===decisionId
       &&(['wait-actions','wait-target','wait-switch'].includes(stop.remaining)&&stop.decision.kind===stop.remaining
+        ||['switch-confirm','switch-select'].includes(stop.remaining)&&stop.decision.kind===stop.remaining
         ||stop.remaining==='learn-apply'&&stop.decision.kind==='learn-move'
         ||stop.remaining==='evolution-apply'&&stop.decision.kind==='evolution'
         ||switchStages.includes(stop.remaining)&&stop.decision.kind==='continuing'&&stop.decision.reason==='switch'),

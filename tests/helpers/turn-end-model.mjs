@@ -27,13 +27,14 @@ export function cleanupContext(seat=0,{disabledTurns=2,fieldEffects=false}={}){
   c.decision.id='cleanup-0';c.battle.randSeedInt(100);return codec.restore(codec.capture(c));
 }
 
-export function cleanupDriver(useReference=false,onBind){return {
+export function cleanupDriver(useReference=false,onBind,bindModifiers){return {
   supports:(_c,p)=>[originalPhases.MoveEndPhase.prototype,originalPhases.TurnEndPhase.prototype].includes(Object.getPrototypeOf(p)),
   async execute(c,phase){const b=bindAction(c,phase),tasks=createRuleTaskTracker(b.scene);
-    try{onBind?.(c,phase,b,tasks);
+    let modifierBinding;
+    try{modifierBinding=bindModifiers?.(c,phase,b,tasks);onBind?.(c,phase,b,tasks);
       if(useReference)reference[phase.constructor.name].call(phase);else phase.start();
-      await tasks.drain();return {completed:b.ended,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
-    }finally{tasks.close();b.dispose();}
+      await (modifierBinding?.drain()??tasks.drain());return {completed:b.ended,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
+    }finally{modifierBinding?.dispose();tasks.close();b.dispose();}
   }};
 }
 export const advanceCleanup=(c,options={})=>advanceQueuedRulePhase(c,codec,cleanupDriver(options.reference,options.onBind),

@@ -41,14 +41,16 @@ export function runDamage(c,seat=0,reference=false){
   finally{binding.dispose();}
 }
 
-export async function runEffect(context,{reference=false,clone=true,onBind}={}){
+export async function runEffect(context,{reference=false,clone=true,onBind,bindModifiers}={}){
   const c=clone?codec.restore(codec.capture(context)):context,descriptor=selectNextPhase(c.continuation,()=>{throw Error('Empty effect queue');}).phase,phase=descriptor.phase,b=bindAction(c,phase);
   let finish;const ended=new Promise(resolve=>{finish=resolve;});b.scene.shiftPhase=()=>finish();b.scene.ruleTasks=createRuleTaskTracker(b.scene);
   installPhaseTestDependencies({'./data/battle-anims':{MoveAnim:class{play(_scene,done){done();}}}});
   if(reference)Object.defineProperty(phase,'end',{value:originalEffectEnd,configurable:true});
-  try{onBind?.(c,phase,b);if(reference)originalEffectStart.call(phase);else phase.start();await ended;
-    await b.scene.ruleTasks.drain();
-  }finally{if(reference)delete phase.end;delete phase.hitCheck;b.scene.ruleTasks.close();b.dispose();}
+  let modifierBinding;
+  try{modifierBinding=bindModifiers?.(c,phase,b,b.scene.ruleTasks);onBind?.(c,phase,b);
+    if(reference)originalEffectStart.call(phase);else phase.start();await ended;
+    await (modifierBinding?.drain()??b.scene.ruleTasks.drain());
+  }finally{modifierBinding?.dispose();if(reference)delete phase.end;delete phase.hitCheck;b.scene.ruleTasks.close();b.dispose();}
   c.continuation.currentPhase=null;c.decision.id='effect-after';codec.capture(c);return {context:c,events:b.events,grants:[]};
 }
 
@@ -60,10 +62,13 @@ export function actionEffectContext(seat=0){
 }
 
 export const nativeEffectDriver={supports:(_c,p)=>Object.getPrototypeOf(p)===originalPhases.MoveEffectPhase.prototype,
-  async execute(c,phase){const b=bindAction(c,phase);let finish;const ended=new Promise(resolve=>{finish=resolve;});
+  async execute(c,phase,{bindModifiers}={}){const b=bindAction(c,phase);let finish;const ended=new Promise(resolve=>{finish=resolve;});
     b.scene.shiftPhase=()=>finish();b.scene.ruleTasks=createRuleTaskTracker(b.scene);
     installPhaseTestDependencies({'./data/battle-anims':{MoveAnim:class{play(_scene,done){done();}}}});
-    try{phase.start();await ended;await b.scene.ruleTasks.drain();return {completed:true,pendingTasks:b.scene.ruleTasks.pendingTasks,events:b.events,grants:[]};}
-    finally{b.scene.ruleTasks.close();b.dispose();}
+    let modifierBinding;
+    try{modifierBinding=bindModifiers?.(c,phase,b,b.scene.ruleTasks);phase.start();await ended;
+      await (modifierBinding?.drain()??b.scene.ruleTasks.drain());
+      return {completed:true,pendingTasks:b.scene.ruleTasks.pendingTasks,events:b.events,grants:[]};}
+    finally{modifierBinding?.dispose();b.scene.ruleTasks.close();b.dispose();}
   }};
 export const advanceEffect=c=>advanceQueuedMoveEffect(c,codec,nativeEffectDriver);

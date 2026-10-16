@@ -1,5 +1,6 @@
 import * as ModifierTypes from './modifier-type';
 import { createModifierStateCodec } from '../battle-core/modifier-state.mjs';
+import { observeRulePromise } from '../battle-core/rule-task-tracker.mjs';
 import { LearnMovePhase, LevelUpPhase, PokemonHealPhase } from "../phases";
 import BattleScene from "../battle-scene";
 import { getLevelTotalExp } from "../data/exp";
@@ -1700,10 +1701,10 @@ export abstract class HeldItemTransferModifier extends PokemonHeldItemModifier {
       }));
     }
 
-    Promise.all(heldItemTransferPromises).then(() => {
+    observeRulePromise(pokemon.scene, Promise.all(heldItemTransferPromises).then(() => {
       for (let mt of transferredModifierTypes)
         pokemon.scene.queueMessage(this.getTransferMessage(pokemon, targetPokemon, mt));
-    });
+    }));
 
     return !!transferredModifierTypes.length;
   }

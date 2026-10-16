@@ -12,6 +12,7 @@ import { getFieldOrder, getMoveOrder } from './battle-core/turn-order.mjs';
 import { queueFaintContinuation } from './battle-core/faint-queue.mjs';
 import i18next from './i18n';
 import BattleScene, { STARTER_FORM_OVERRIDE, STARTER_SPECIES_OVERRIDE, bypassLogin, startingWave } from "./battle-scene";
+import { observeRulePromise } from './battle-core/rule-task-tracker.mjs';
 import { default as Pokemon, PlayerPokemon, EnemyPokemon, PokemonMove, MoveResult, DamageResult, FieldPosition, HitResult, TurnMove } from "./field/pokemon";
 import * as Utils from './utils';
 import { getCaptureThreshold, advanceCaptureCheck } from './battle-core/capture.mjs';
@@ -663,7 +664,7 @@ export class EncounterPhase extends BattlePhase {
       }
     }
 
-    Promise.all(loadEnemyAssets).then(() => {
+    observeRulePromise(this.scene, Promise.all(loadEnemyAssets).then(() => {
       battle.enemyParty.forEach((enemyPokemon, e) => {
         if (e < (battle.double ? 2 : 1)) {
           if (battle.battleType === BattleType.WILD) {
@@ -687,17 +688,17 @@ export class EncounterPhase extends BattlePhase {
         this.scene.generateEnemyModifiers();
       }
 
-      this.scene.ui.setMode(Mode.MESSAGE).then(() => {
+      return this.scene.ui.setMode(Mode.MESSAGE).then(() => {
         if (!this.loaded) {
-          this.scene.gameData.saveSystem().then(success => {
+          return this.scene.gameData.saveSystem().then(success => {
             if (!success)
               return this.scene.reset(true);
-            this.scene.gameData.saveSession(this.scene, true).then(() => this.doEncounter());
+            return this.scene.gameData.saveSession(this.scene, true).then(() => this.doEncounter());
           });
         } else
           this.doEncounter();
       });
-    });
+    }));
   }
 
   doEncounter() {
@@ -1410,15 +1411,23 @@ export class CheckSwitchPhase extends BattlePhase {
     }
 
     this.scene.ui.showText(i18next.t("battle:switchQuestion", { pokemonName: (this.useName ? pokemon.name : 'Pokémon') }), null, () => {
-      this.scene.ui.setMode(Mode.CONFIRM, () => {
+      const { accept, cancel } = this.createSwitchConfirmCallbacks();
+      this.scene.ui.setMode(Mode.CONFIRM, accept, cancel);
+    });
+  }
+
+  createSwitchConfirmCallbacks() {
+    return {
+      accept: () => {
         this.scene.ui.setMode(Mode.MESSAGE);
         this.scene.unshiftPhase(new SwitchPhase(this.scene, this.fieldIndex, false, true));
         this.end();
-      }, () => {
+      },
+      cancel: () => {
         this.scene.ui.setMode(Mode.MESSAGE);
         this.end();
-      });
-    });
+      }
+    };
   }
 }
 
@@ -2946,12 +2955,16 @@ export class SwitchPhase extends BattlePhase {
     // Override field index to 0 in case of double battle where 2/3 remaining party members fainted at once
     const fieldIndex = this.scene.currentBattle.getBattlerCount() === 1 || this.scene.getParty().filter(p => !p.isFainted()).length > 1 ? this.fieldIndex : 0;
 
-    this.scene.ui.setMode(Mode.PARTY, this.isModal ? PartyUiMode.FAINT_SWITCH : PartyUiMode.POST_BATTLE_SWITCH, fieldIndex, (slotIndex: integer, option: PartyOption) => {
+    this.scene.ui.setMode(Mode.PARTY, this.isModal ? PartyUiMode.FAINT_SWITCH : PartyUiMode.POST_BATTLE_SWITCH, fieldIndex, this.createSwitchSelectCallback(fieldIndex), PartyUiHandler.FilterNonFainted);
+  }
+
+  createSwitchSelectCallback(fieldIndex: integer) {
+    return (slotIndex: integer, option: PartyOption) => {
       const summon = selectSwitchSummon(fieldIndex, slotIndex, this.scene.currentBattle.getBattlerCount(), this.doReturn, option, PartyOption.PASS_BATON);
       if (summon)
         this.scene.unshiftPhase(new SwitchSummonPhase(this.scene, summon.fieldIndex, summon.slotIndex, summon.doReturn, summon.batonPass));
       this.scene.ui.setMode(Mode.MESSAGE).then(() => super.end());
-    }, PartyUiHandler.FilterNonFainted);
+    };
   }
 }
 

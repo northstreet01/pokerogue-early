@@ -3,7 +3,7 @@ import {codec} from './decision-model.mjs';
 import {pokemon,moves,battler,parse,evaluate} from './original-model.mjs';
 import {originalPhases,installPhaseTestDependencies,phaseCodec} from './phase-model.mjs';
 import {effectContext,damageRules} from './move-effect-model.mjs';
-import {bindAction,compileReference,common,moveRules,originalMoveStart,nativeMoveDriver} from './move-execution-model.mjs';
+import {bindAction,compileReference,common,moveRules,originalMoveStart} from './move-execution-model.mjs';
 import {postDamageDriver,nextPostPhase,BattleSpec} from './post-damage-model.mjs';
 import {cleanupDriver} from './turn-end-model.mjs';
 import {getFieldOrder,getMoveOrder} from '../../src/battle-core/turn-order.mjs';
@@ -73,8 +73,8 @@ export function roundContext({seat=0,move=moves.Moves.TACKLE,seed='round-loop',d
   c.decision.id='round-0';return codec.restore(codec.capture(c));
 }
 
-export function roundDriver({reference:useReference=false,onBind,onFinish}={}){
-  const post=postDamageDriver({reference:useReference}),cleanup=cleanupDriver(useReference);
+export function roundDriver({reference:useReference=false,onBind,onFinish,bindModifiers}={}){
+  const post=postDamageDriver({reference:useReference,bindModifiers}),cleanup=cleanupDriver(useReference,undefined,bindModifiers);
   return {
     supports:(c,p)=>c.battle.battleSpec===BattleSpec.DEFAULT&&
       ([originalPhases.MovePhase.prototype,...[...structural].map(n=>originalPhases[n].prototype)].includes(Object.getPrototypeOf(p))
@@ -83,18 +83,20 @@ export function roundDriver({reference:useReference=false,onBind,onFinish}={}){
       const name=p.constructor.name;
       if(post.supports(c,p))return post.execute(c,p);
       if(cleanup.supports(c,p))return cleanup.execute(c,p);
-      if(name==='MovePhase'&&!useReference)return {...nativeMoveDriver.execute(c,p),pendingTasks:0};
       const b=bindAction(c,p),tasks=createRuleTaskTracker(b.scene),patched=[];
+      let modifierBinding;
       try{
         // Only the original MessagePhase's presentation callback is immediate.
         b.scene.ui={showText:(text,_arg,done)=>{b.events.push({kind:'message-display',text});done();}};
         b.scene.abilityBar={shown:false};
+        modifierBinding=bindModifiers?.(c,p,b,tasks);
         onBind?.(c,p,b,tasks);
         if(useReference&&name!=='MovePhase')for(const [method,fn]of Object.entries(reference[name])){
           patched.push(method);Object.defineProperty(p,method,{value:fn,configurable:true});}
-        if(name==='MovePhase')originalMoveStart.call(p);else p.start();
-        await tasks.drain();return {completed:b.ended,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
-      }finally{for(const method of patched)delete p[method];tasks.close();b.dispose();}
+        if(name==='MovePhase'&&useReference)originalMoveStart.call(p);else p.start();
+        await (modifierBinding?.drain()??tasks.drain());
+        return {completed:b.ended,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
+      }finally{modifierBinding?.dispose();for(const method of patched)delete p[method];tasks.close();b.dispose();}
     },
     finishBoundary(c,p,id){const decision=finishRoundBoundary(c,p,id);onFinish?.(c,p,decision);return decision;}
   };

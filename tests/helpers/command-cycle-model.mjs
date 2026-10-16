@@ -44,13 +44,15 @@ const playerPhase=p=>!!p&&[originalPhases.CommandPhase.prototype,originalPhases.
 
 // Execute the real Command/Target/Enemy phase, substituting only the UI boundary
 // with already validated intents. Native Command.end's Promise is retained.
-export function commandPhaseDriver({reference:useReference=false,inputs={},onBind,allowSuspend=false}={}){
+export function commandPhaseDriver({reference:useReference=false,inputs={},onBind,allowSuspend=false,bindModifiers}={}){
 const consumed=new Set(),targeted=new Set();return {
   supports:(_c,p)=>playerPhase(p)||Object.getPrototypeOf(p)===originalPhases.EnemyCommandPhase.prototype,
   async execute(c,p,{resume=false}={}){const b=bindAction(c,p),tasks=createRuleTaskTracker(b.scene),patched=[],used=[];let waiting=null;
+    let modifierBinding;
     const patch=(object,name,fn)=>{patched.push([object,name,Object.getOwnPropertyDescriptor(object,name)]);
       Object.defineProperty(object,name,{value:fn,configurable:true});};
     try{
+      modifierBinding=bindModifiers?.(c,p,b,tasks);
       b.scene.ui={setMode(mode,seat,_move,callback){
         if(mode===Mode.COMMAND){if(!p.checkFightOverride()){
           const action=inputs[seat];
@@ -80,7 +82,7 @@ const consumed=new Set(),targeted=new Set();return {
           applyTargetSelection(c.battle.turnCommands,seat,action.target,{ballCommand:Command.BALL,
             requeueCommand:index=>b.scene.unshiftPhase(new originalPhases.CommandPhase(b.scene,index))});p.end();}
       }
-      await tasks.drain();await Promise.resolve();
+      await (modifierBinding?.drain()??tasks.drain());await Promise.resolve();
       if(p.constructor===originalPhases.EnemyCommandPhase){
         // Native getNextMove returns a data literal in the test VM. Rehome only
         // that plain record, preserving its targets/queue references. Production
@@ -89,7 +91,7 @@ const consumed=new Set(),targeted=new Set();return {
         if(move){check(Object.getPrototypeOf(move)?.constructor.name==='Object','INVALID_VM_QUEUED_MOVE');Object.setPrototypeOf(move,Object.prototype);}
       }
       return {completed:b.ended,suspended:!b.ended&&waiting!==null,pendingTasks:tasks.pendingTasks,events:b.events,grants:[],used};
-    }finally{for(const [object,name,descriptor]of patched.reverse()){
+    }finally{modifierBinding?.dispose();for(const [object,name,descriptor]of patched.reverse()){
       if(descriptor)Object.defineProperty(object,name,descriptor);else delete object[name];}tasks.close();b.dispose();}
   }
 };}

@@ -1,0 +1,15 @@
+{
+  "commit": "3ce98d72",
+  "methods": {
+    "BerryPhase": {
+      "start": "start() {\n    let berryModifiers: BerryModifier[];\n\n    if ((berryModifiers = this.scene.applyModifiers(BerryModifier, this.player, this.getPokemon()) as BerryModifier[])) {\n      for (let berryModifier of berryModifiers) {\n        if (berryModifier.consumed) {\n          if (!--berryModifier.stackCount)\n            this.scene.removeModifier(berryModifier);\n          else\n            berryModifier.consumed = false;\n          this.scene.updateModifiers(this.player);\n        }\n      }\n      return super.start();\n    }\n\n    this.end();\n  }"
+    },
+    "PokemonHealPhase": {
+      "start": "start() {\n    if (!this.skipAnim && (this.revive || this.getPokemon().hp) && this.getPokemon().getHpRatio() < 1)\n      super.start();\n    else\n      this.end();\n  }",
+      "end": "end() {\n    const pokemon = this.getPokemon();\n    \n    if (!pokemon.isOnField() || (!this.revive && !pokemon.isActive())) {\n      super.end();\n      return;\n    }\n\n    const fullHp = pokemon.getHpRatio() >= 1;\n\n    const hasMessage = !!this.message;\n    let lastStatusEffect = StatusEffect.NONE;\n\n    if (!fullHp) {\n      const hpRestoreMultiplier = new Utils.IntegerHolder(1);\n      if (!this.revive)\n        this.scene.applyModifiers(HealingBoosterModifier, this.player, hpRestoreMultiplier);\n      const healAmount = new Utils.NumberHolder(Math.floor(this.hpHealed * hpRestoreMultiplier.value));\n      healAmount.value = pokemon.heal(healAmount.value);\n      if (healAmount.value)\n        this.scene.damageNumberHandler.add(pokemon, healAmount.value, HitResult.HEAL);\n      if (pokemon.isPlayer()) {\n        this.scene.validateAchvs(HealAchv, healAmount);\n        if (healAmount.value > this.scene.gameData.gameStats.highestHeal)\n          this.scene.gameData.gameStats.highestHeal = healAmount.value;\n      }\n      if (this.healStatus && !this.revive && pokemon.status) {\n        lastStatusEffect = pokemon.status.effect;\n        pokemon.resetStatus();\n      }\n      pokemon.updateInfo().then(() => super.end());\n    } else if (this.healStatus && !this.revive && pokemon.status) {\n        lastStatusEffect = pokemon.status.effect;\n        pokemon.resetStatus();\n        pokemon.updateInfo().then(() => super.end());\n    } else if (this.showFullHpMessage)\n      this.message = getPokemonMessage(pokemon, `'s\\nHP is full!`);\n\n    if (this.message)\n      this.scene.queueMessage(this.message);\n\n    if (this.healStatus && lastStatusEffect && !hasMessage)\n      this.scene.queueMessage(getPokemonMessage(pokemon, getStatusEffectHealText(lastStatusEffect)));\n\n    if (fullHp && !lastStatusEffect)\n      super.end();\n  }"
+    },
+    "CommonAnimPhase": {
+      "start": "start() {\n    new CommonBattleAnim(this.anim, this.getPokemon(), this.targetIndex !== undefined ? (this.player ? this.scene.getEnemyField() : this.scene.getPlayerField())[this.targetIndex] : this.getPokemon()).play(this.scene, () => {\n      this.end();\n    });\n  }"
+    }
+  }
+}

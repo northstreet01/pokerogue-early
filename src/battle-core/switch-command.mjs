@@ -32,3 +32,18 @@ export function resolveForcedSwitchIntent(context, seat, action) {
   const entry=context.roster.entries.find(e=>e.pokemon.id===action.pokemonId);
   return {fieldIndex:seat,pokemonId:entry.pokemon.id,partyIndex:entry.index,doReturn:false,batonPass:false};
 }
+
+// Voluntary pre-battle choices are distinct from a forced faint replacement.
+// Each personal party has one active slot; wire intents retain stable IDs.
+export function createPreBattleSwitchDecision(id,context,seat,kind){
+  check(typeof id==='string'&&id.length>0&&id.length<=128&&[0,1].includes(seat)
+    &&['switch-confirm','switch-select'].includes(kind),'INVALID_PRE_BATTLE_SWITCH');
+  const active=context.roster.entries.find(e=>e.pokemon.id===context.roster.field[seat]);
+  check(active?.owner===seat&&active.group==='party'&&active.index===0&&!active.pokemon.isFainted(),'INVALID_PRE_BATTLE_SWITCH');
+  const reserves=context.roster.entries.filter(e=>e.owner===seat&&e.group==='party'&&e.index>0
+    &&!e.pokemon.isFainted()&&!context.roster.field.includes(e.pokemon.id)).sort((a,b)=>a.index-b.index);
+  check(reserves.length>0,'NO_SWITCH_AVAILABLE');
+  const options=kind==='switch-confirm'?[true,false].map(accept=>({kind,pokemonId:active.pokemon.id,accept}))
+    :[...reserves.map(e=>({kind,pokemonId:e.pokemon.id})),{kind,pokemonId:null}];
+  return {id,kind,requiredSeats:[seat],options:{[seat]:options},switch:{outgoing:{[seat]:active.pokemon.id}}};
+}

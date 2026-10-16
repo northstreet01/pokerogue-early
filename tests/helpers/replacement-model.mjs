@@ -22,7 +22,7 @@ installPhaseTestDependencies({'./data/ability':abilityRules});
 const enumOf=(file,name)=>evaluate(parse(file).statements.filter(n=>n.name?.text===name).map(n=>n.getText()).join('\n'))[name];
 const Mode=enumOf('ui/ui.ts','Mode'),PartyOption=enumOf('ui/party-ui-handler.ts','PartyOption');
 const frozen=JSON.parse(fs.readFileSync(new URL('../fixtures/early-replacement-reference.json',import.meta.url),'utf8'));
-const rules={...damageRules,...originalPhases,...abilityRules,Mode,PartyOption};
+const rules={...damageRules,...originalPhases,...abilityRules,Mode,PartyOption,getPokeballTintColor:()=>0};
 const referenceSummonOnEnd=compileReference(frozen.methods.SummonPhase.onEnd,'',rules);
 const oldFinish=JSON.parse(fs.readFileSync(new URL('../fixtures/early-continuation-reference.json',import.meta.url),'utf8'));
 const referenceSwitchOnEnd=compileReference(oldFinish.finish.replace('super.onEnd()','referenceSummonOnEnd.call(this)'),'',
@@ -51,8 +51,9 @@ export async function replacementContext({seat=0,both=false,reserves=2,lethalRou
   check(c.decision.kind==='wait-switch','MISSING_SWITCH_BOUNDARY');return c;
 }
 
-export function forcedSwitchDriver({reference=false,onSwitchBind}={}){return {
+export function forcedSwitchDriver({reference=false,onSwitchBind,bindModifiers}={}){return {
   async resumeSwitch(c,p,intent){const {seat,partyIndex}=intent,b=bindAction(c,p),tasks=createRuleTaskTracker(b.scene);
+    let modifierBinding;
     try{
       // The original menu callback uses one local active slot in this seat's
       // personal party. The global seat stays on Switch and in the phase scope.
@@ -60,7 +61,7 @@ export function forcedSwitchDriver({reference=false,onSwitchBind}={}){return {
       b.scene.currentBattle.getBattlerCount=()=>1;
       b.scene.unshiftPhase=q=>queueOwnedPhase(c,q,seat,true);
       b.scene.ui={setMode(mode){check(mode===Mode.MESSAGE,'UNSUPPORTED_SWITCH_UI');const task=Promise.resolve();tasks.add(task);return task;}};
-      onSwitchBind?.(c,p,b,tasks,{stage:'wait-switch'});
+      modifierBinding=bindModifiers?.(c,p,b,tasks);onSwitchBind?.(c,p,b,tasks,{stage:'wait-switch'});
       if(reference)referenceCallback.call(p,partyIndex,PartyOption.SEND_OUT,0);
       else{
         const summon=selectSwitchSummon(0,partyIndex,1,false,PartyOption.SEND_OUT,PartyOption.PASS_BATON);
@@ -68,41 +69,44 @@ export function forcedSwitchDriver({reference=false,onSwitchBind}={}){return {
         b.scene.unshiftPhase(new originalPhases.SwitchSummonPhase(b.scene,summon.fieldIndex,summon.slotIndex,summon.doReturn,summon.batonPass));
         b.scene.ui.setMode(Mode.MESSAGE).then(()=>p.end());
       }
-      await tasks.drain();await Promise.resolve();return {completed:b.ended,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
-    }finally{tasks.close();b.dispose();}
+      await (modifierBinding?.drain()??tasks.drain());await Promise.resolve();return {completed:b.ended,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
+    }finally{modifierBinding?.dispose();tasks.close();b.dispose();}
   }
 };}
 
 export function replacementDriver(options={}){const faint=faintDriver(options);return {
   supports:(c,p)=>c.battle.battleSpec===BattleSpec.DEFAULT&&(faint.supports(c,p)
-    ||is(p,'PostSummonPhase')||is(p,'SwitchSummonPhase')&&p.player===true&&p.doReturn===false&&p.batonPass===false),
+    ||is(p,'PostSummonPhase')||is(p,'SwitchSummonPhase')&&p.player===true&&p.doReturn===(options.preBattleReturn===true)&&p.batonPass===false),
   async execute(c,p){
     if(is(p,'SwitchSummonPhase'))return runStage(c,p);
     if(!is(p,'PostSummonPhase'))return faint.execute(c,p);
     const b=bindAction(c,p),tasks=createRuleTaskTracker(b.scene);
-    try{options.onSwitchBind?.(c,p,b,tasks,{stage:'post-summon'});
+    let modifierBinding;
+    try{modifierBinding=options.bindModifiers?.(c,p,b,tasks);options.onSwitchBind?.(c,p,b,tasks,{stage:'post-summon'});
       if(options.reference)referencePost.call(p);else p.start();
-      await tasks.drain();await Promise.resolve();return {completed:b.ended,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
-    }finally{tasks.close();b.dispose();}
+      await (modifierBinding?.drain()??tasks.drain());await Promise.resolve();return {completed:b.ended,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
+    }finally{modifierBinding?.dispose();tasks.close();b.dispose();}
   },
   resume:runStage,
   finishBoundary:faint.finishBoundary,
   suspendBoundary(c,p,id,result){
     if(!is(p,'SwitchSummonPhase'))return faint.suspendBoundary(c,p,id,result);
-    check(['summon-initialize','summon-finish'].includes(result.remaining),'INVALID_SWITCH_STAGE');
+    check(['summon-initialize','summon-finish',...(options.preBattleReturn?['switch-swap']:[])].includes(result.remaining),'INVALID_SWITCH_STAGE');
     return {remaining:result.remaining,decision:{id,kind:'continuing',requiredSeats:[],reason:'switch'}};
   }
 };
   async function runStage(c,p){
-    check(is(p,'SwitchSummonPhase')&&p.player&&p.doReturn===false&&p.batonPass===false,'UNSUPPORTED_SWITCH_RESUME');
+    check(is(p,'SwitchSummonPhase')&&p.player&&p.doReturn===(options.preBattleReturn===true)&&p.batonPass===false,'UNSUPPORTED_SWITCH_RESUME');
     const seat=phaseCodec.capture(p,c).scope;check(seat===0||seat===1,'INVALID_SWITCH_SCOPE');
     const party=c.roster.entries.filter(e=>e.owner===seat&&e.group==='party').sort((a,b)=>a.index-b.index),stage=c.continuation.currentPhase.remaining;
-    check(p.partyMemberIndex===0&&party[0]?.pokemon.id===c.roster.field[seat],'INVALID_SWITCH_PARTY');
-    if(stage==='start')check(p.fieldIndex===0&&party[0].pokemon.isFainted()&&p.slotIndex>0
+    check(p.partyMemberIndex===0&&(stage==='switch-swap'&&options.preBattleReturn
+      ?c.roster.field[seat]===null:party[0]?.pokemon.id===c.roster.field[seat]),'INVALID_SWITCH_PARTY');
+    if(stage==='start'||stage==='switch-swap'&&options.preBattleReturn)check(p.fieldIndex===0
+      &&party[0].pokemon.isFainted()!==!!options.preBattleReturn&&p.slotIndex>0
       &&party[p.slotIndex]&&!party[p.slotIndex].pokemon.isFainted(),'INVALID_SWITCH_PARTY');
     else check(['summon-initialize','summon-finish'].includes(stage)&&p.fieldIndex===seat
-      &&party[p.slotIndex]?.pokemon===p.lastPokemon&&p.lastPokemon.isFainted()&&!party[0].pokemon.isFainted(),'INVALID_SWITCH_PARTY');
-    const result=await nativeSwitchStep(c,seat,false,{managed:true,onBind:options.onSwitchBind,
+      &&party[p.slotIndex]?.pokemon===p.lastPokemon&&p.lastPokemon.isFainted()!==!!options.preBattleReturn&&!party[0].pokemon.isFainted(),'INVALID_SWITCH_PARTY');
+    const result=await nativeSwitchStep(c,seat,false,{managed:true,onBind:options.onSwitchBind,bindModifiers:options.bindModifiers,
       patchPhase:options.reference?phase=>patchMethods(phase,referenceMethods):undefined});
     return {completed:result.completed,suspended:result.suspended,remaining:result.remaining,pendingTasks:result.pendingTasks,events:result.events,grants:[]};
   }

@@ -69,8 +69,10 @@ export async function nativeSwitchStep(context,seat=0,clone=true,options={}) {
     phase.fieldIndex=seat;descriptor.remaining='summon-initialize';
   },configurable:true});
   let unpatch=()=>{};
+  let modifierBinding;
   try {
     unpatch=options.patchPhase?.(phase)??unpatch;
+    modifierBinding=options.bindModifiers?.(c,phase,{scene,events},tasks);
     options.onBind?.(c,phase,{scene,events},tasks,{stage:descriptor.remaining});
     if(descriptor.remaining==='start'&&options.managed)phase.start();
     else if(descriptor.remaining==='switch-return')phase.preSummon();
@@ -83,9 +85,9 @@ export async function nativeSwitchStep(context,seat=0,clone=true,options={}) {
       const seats=[0,1].filter(s=>c.battle.turnCommands[s]===null);
       c.decision={id:'switch-native-done',kind:'wait-actions',requiredSeats:seats,options:Object.fromEntries(seats.map(s=>[s,[{kind:'test-continue',pokemonId:c.roster.field[s]}]]))};}
     } else throw Error('Unsupported native fixture stage');
-    await tasks.drain();await Promise.resolve();
+    await (modifierBinding?.drain()??tasks.drain());await Promise.resolve();
   } finally {
-    unpatch();tasks.close();
+    modifierBinding?.dispose();unpatch();tasks.close();
     delete phase.summon;delete phase.scene;
     for(const {pokemon:p}of c.roster.entries){delete p.scene;delete p.hideInfo;delete p.tint;delete p.setVisible;}
   }

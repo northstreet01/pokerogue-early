@@ -24,7 +24,7 @@ export function restoreContinuation(input, roster, validateOriginalPhase) {
       exact(p,['kind','phaseId','phase','remaining']);
       check(Number.isSafeInteger(p.phaseId)&&p.phaseId>=0&&p.phaseId<100000,'INVALID_CONTINUATION');
       check(['start','switch-return','switch-swap','summon-initialize','summon-finish','switch-finish','post-summon','evolution-apply',
-        'evolution-pause','learn-apply','form-change','reward-select','map-select','starter-ready','wait-actions','wait-target','wait-switch','victory-aftermath','hatch-commit','ended'].includes(p.remaining),'INVALID_CONTINUATION');
+        'evolution-pause','learn-apply','form-change','reward-select','map-select','starter-ready','wait-actions','wait-target','wait-switch','switch-confirm','switch-select','victory-aftermath','hatch-commit','ended'].includes(p.remaining),'INVALID_CONTINUATION');
       const owners={
         'switch-return':['SwitchSummonPhase','ReturnPhase'],'switch-swap':['SwitchSummonPhase'],
         'summon-initialize':['SummonPhase','SwitchSummonPhase','SummonMissingPhase'],'summon-finish':['SummonPhase','SwitchSummonPhase','SummonMissingPhase'],
@@ -33,6 +33,7 @@ export function restoreContinuation(input, roster, validateOriginalPhase) {
         'form-change':['FormChangePhase','QuietFormChangePhase'],'reward-select':['SelectModifierPhase'],
         'map-select':['SelectBiomePhase'],'starter-ready':['SelectStarterPhase'],
         'wait-actions':['TurnInitPhase','CommandPhase'],'wait-target':['CommandPhase','SelectTargetPhase'],'wait-switch':['SwitchPhase'],
+        'switch-confirm':['CheckSwitchPhase'],'switch-select':['SwitchPhase'],
         'victory-aftermath':['VictoryPhase'],'hatch-commit':['EggHatchPhase'],'ended':['GameOverPhase']};
       check(p.remaining==='start'||owners[p.remaining]?.includes(p.phase?.type),'INVALID_PHASE_BOUNDARY');
       if(p.phase?.type==='EggHatchPhase')check((p.phase.fields.pokemon?.presence==='value')===(p.remaining==='hatch-commit'),'INVALID_HATCH_BOUNDARY');

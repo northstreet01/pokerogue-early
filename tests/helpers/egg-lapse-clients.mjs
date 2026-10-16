@@ -11,6 +11,14 @@ const lists=['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue'];
 export function projectEggSnapshot(model,seat){
   const client=model.eggView!==undefined,c=client?model.context:model;
   const ownResources=c.players[seat],raw=codec.capture({...c,players:c.players.map(()=>({money:0,pokeballCounts:{0:0,1:0,2:0,3:0,4:0},modifiers:[]}))});
+  const full=codec.capture(c),resources={money:ownResources.money,pokeballCounts:copy(ownResources.pokeballCounts),
+    modifiers:full.players[seat].modifiers.map(index=>full.components[index].state)};
+  // A v6 model has no egg inventory. Keep that absence through the client
+  // projection and restoration instead of upgrading it to an empty v7 model.
+  if(raw.version===6){
+    check(!client,'INVALID_EGG_VIEW_VERSION');
+    return {shared:{battle:raw},personal:{resources}};
+  }
   const eggState=raw.eggState;delete raw.eggState;raw.version=6;
   const counts=client?[...model.eggView.counts]:eggState.players.map(row=>row.length);counts[seat]=c.eggState.players[seat].length;
   const hatches=[];
@@ -40,12 +48,14 @@ export function projectEggSnapshot(model,seat){
   check(!raw.pendingEffects.some(p=>p.phase.type==='EggHatchPhase'),'UNSUPPORTED_HATCH_VIEW_STAGE');
   // Match the existing personal modifier projection, independent from the
   // empty resource rows in the shared view.
-  const full=codec.capture(c);
-  return {shared:{battle:raw,eggCounts:counts},personal:{resources:{money:ownResources.money,pokeballCounts:copy(ownResources.pokeballCounts),
-    modifiers:full.players[seat].modifiers.map(index=>full.components[index].state)},eggs:eggCodec.capture(c.eggState).players[seat],hatches}};
+  return {shared:{battle:raw,eggCounts:counts},personal:{resources,eggs:eggCodec.capture(c.eggState).players[seat],hatches}};
 }
 export function restoreEggView(snapshot){
   const seat=snapshot.seat,raw=copy(snapshot.shared.battle),templates={},owned=new Map(),records=[];
+  const withEggs=Object.hasOwn(snapshot.shared,'eggCounts');
+  check(raw.version===6&&!Object.hasOwn(raw,'eggState')
+    &&withEggs===Object.hasOwn(snapshot.personal,'eggs')&&withEggs===Object.hasOwn(snapshot.personal,'hatches'),
+    'INVALID_EGG_VIEW_VERSION');
   for(const key of lists){templates[key]=raw.continuation[key].map(d=>d.kind==='owned-egg-hatch'?copy(d):null);
     records.push(...raw.continuation[key].filter(d=>d.kind==='owned-egg-hatch'));
     raw.continuation[key]=raw.continuation[key].filter(d=>d.kind!=='owned-egg-hatch');}
@@ -57,6 +67,7 @@ export function restoreEggView(snapshot){
   raw.players[seat]={money:r.money,pokeballCounts:copy(r.pokeballCounts),modifiers:r.modifiers.map(state=>{
     const index=raw.components.length;raw.components.push({kind:'modifier',state:copy(state)});return index;
   })};
+  if(!withEggs){check(records.length===0,'INVALID_EGG_VIEW_VERSION');return codec.restore(raw);}
   const context=codec.restore(raw),rows=[[],[]];rows[seat]=copy(snapshot.personal.eggs);context.eggState=eggCodec.restore({players:rows});
   for(const record of records)if(record.seat===seat){
     const egg=context.eggState.players[seat][record.index];check(egg,'UNKNOWN_PERSONAL_EGG');

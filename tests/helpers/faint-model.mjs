@@ -63,14 +63,15 @@ function finishBoundary(c,_p,id){
 export function faintDriver({reference:useReference=false,onFaintBind,cooperative=true,allowEnemy=false,onEnemyBind,...options}={}){
   const cycle=cycleDriver({...options,reference:useReference,allowSuspend:true});return {
     supports:(c,p)=>c.battle.battleSpec===BattleSpec.DEFAULT&&
-      ((is(p,'FaintPhase')&&c.players.every(s=>s.modifiers.length===0)
-        &&(p.player===true&&c.enemyModifiers.length===0||allowEnemy&&p.player===false&&c.battle.battleType===0))
+      ((is(p,'FaintPhase')&&(!!options.bindModifiers||c.players.every(s=>s.modifiers.length===0))
+        &&(p.player===true&&(!!options.bindModifiers||c.enemyModifiers.length===0)||allowEnemy&&p.player===false&&c.battle.battleType===0))
         ||is(p,'SwitchPhase')||cycle.supports(c,p)),
     async execute(c,p){
       if(!is(p,'FaintPhase')&&!is(p,'SwitchPhase'))return cycle.execute(c,p);
       const b=bindAction(c,p),tasks=createRuleTaskTracker(b.scene),temporary=[],callbacks=[];
       const define=(o,k,value)=>{temporary.push([o,k,Object.getOwnPropertyDescriptor(o,k)]);Object.defineProperty(o,k,{value,writable:true,configurable:true});};
       let unbind=()=>{},waiting=false;
+      let modifierBinding;
       try{
         const seat=p.fieldIndex,party=c.roster.entries.filter(e=>e.owner===seat&&e.group==='party').sort((a,b)=>a.index-b.index).map(e=>e.pokemon);
         b.scene.getParty=()=>party;
@@ -94,12 +95,13 @@ export function faintDriver({reference:useReference=false,onFaintBind,cooperativ
             b.scene.findPhase=()=>null;}
         }else if(is(p,'FaintPhase')&&cooperative)unbind=bindCoopFaint(p,c);
         if(is(p,'FaintPhase')&&!p.player)onEnemyBind?.(c,p,b,tasks,callbacks);
+        modifierBinding=options.bindModifiers?.(c,p,b,tasks);
         onFaintBind?.(c,p,b,tasks,callbacks);
         p.start();let count=0;
         while(callbacks.length){check(++count<20,'FAINT_CALLBACK_LIMIT');callbacks.shift()();}
-        await tasks.drain();await Promise.resolve();
+        await (modifierBinding?.drain()??tasks.drain());await Promise.resolve();
         return {completed:b.ended,suspended:waiting,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
-      }finally{unbind();for(const [o,k,d]of temporary.reverse()){if(d)Object.defineProperty(o,k,d);else delete o[k];}tasks.close();b.dispose();}
+      }finally{modifierBinding?.dispose();unbind();for(const [o,k,d]of temporary.reverse()){if(d)Object.defineProperty(o,k,d);else delete o[k];}tasks.close();b.dispose();}
     },
     finishBoundary,
     suspendBoundary(c,p,id){if(!is(p,'SwitchPhase'))return cycle.suspendBoundary(c,p,id);

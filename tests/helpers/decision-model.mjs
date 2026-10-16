@@ -15,6 +15,7 @@ import {createSafeDecisionCodec} from '../../src/battle-core/safe-decisions.mjs'
 import {types} from './modifier-model.mjs';
 import {createArenaPoolStateCodec} from '../../src/battle-core/arena-pool-state.mjs';
 import {eggCodec} from './egg-model.mjs';
+import {getWildLevel,gaussianLevelOffset} from '../../src/battle-core/levels.mjs';
 const enumOf=(file,name)=>evaluate(parse(file).statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n'))[name];
 const biomes=enumOf('data/enums/biome.ts','Biome'),times=enumOf('data/enums/time-of-day.ts','TimeOfDay'),species=enumOf('data/enums/species.ts','Species'),trainers=enumOf('data/enums/trainer-type.ts','TrainerType');
 export const arenaPoolCodec=createArenaPoolStateCodec({hasBiome:id=>typeof biomes[id]==='string',hasTimeOfDay:id=>typeof times[id]==='string',hasSpecies:id=>typeof species[id]==='string',hasTrainer:id=>typeof trainers[id]==='string'});
@@ -22,7 +23,9 @@ export const arenaPoolCodec=createArenaPoolStateCodec({hasBiome:id=>typeof biome
 const classes = (file, names) => parse(file).statements.filter(n => ts.isClassDeclaration(n) && names.includes(n.name.text)).map(n => n.getText()).join('\n');
 const battleUtils=evaluate(parse('utils.ts').statements.filter(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='getEnumValues').map(n=>n.getText()).join('\n'));
 export const battleTestGlobals={Phaser:{},console:{log(){}}};
-export const Battle = evaluate(`import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; import * as Utils from 'utils'; import {BattlerIndex} from 'battler'; import {PokemonHeldItemModifier} from 'modifier'; ${classes('battle.ts', ['Battle'])}`, { modifier:modifiers,random: { nextBattleRandomInt, readBattleRandomCheckpoint },utils:battleUtils,battler:evaluate(parse('battle.ts').statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n')) },battleTestGlobals).default;
+export function installBattleTestUtils(values){Object.assign(battleUtils,values);}
+export const Battle = evaluate(`import {getWildLevel,gaussianLevelOffset} from 'levels'; import {BattleSpec} from 'spec'; import { nextBattleRandomInt, readBattleRandomCheckpoint } from 'random'; import * as Utils from 'utils'; import {BattlerIndex,BattleType} from 'battler'; import {PokemonHeldItemModifier} from 'modifier'; ${classes('battle.ts', ['Battle'])}`, { levels:{getWildLevel,gaussianLevelOffset},spec:enumsSpec(),modifier:modifiers,random: { nextBattleRandomInt, readBattleRandomCheckpoint },utils:battleUtils,battler:evaluate(parse('battle.ts').statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n')) },battleTestGlobals).default;
+function enumsSpec(){return evaluate(parse('enums/battle-spec.ts').statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n'));}
 export const Arena = evaluate(`import {ArenaTagSide} from 'arena'; ${classes('field/arena.ts', ['Arena'])}`,{arena}).Arena;
 const modes = { 0: { modeId: 0 } };
 export const Trainer = trainerModule.default;

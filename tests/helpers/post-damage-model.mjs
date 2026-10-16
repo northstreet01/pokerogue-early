@@ -36,21 +36,22 @@ export async function postEffectContext(seat=0,move=moves.Moves.TACKLE,{faint=fa
 
 // Only these declared branches are exercised. Faint and final-boss transitions
 // require separate ownership/victory decisions and must not run here.
-export function postDamageDriver({reference:useReference=false,onBind}={}){return {
+export function postDamageDriver({reference:useReference=false,onBind,bindModifiers}={}){return {
   supports:(c,p)=>c.battle.battleSpec!==BattleSpec.FINAL_BOSS&&
     [originalPhases.DamagePhase.prototype,originalPhases.StatChangePhase.prototype,
       originalPhases.MoveEffectPhase.prototype].includes(Object.getPrototypeOf(p)),
   async execute(c,phase){
     if(Object.getPrototypeOf(phase)===originalPhases.MoveEffectPhase.prototype){
-      if(!useReference)return nativeEffectDriver.execute(c,phase);
+      if(!useReference)return nativeEffectDriver.execute(c,phase,{bindModifiers});
       // runEffect selects the Phase itself; preserve selection for its live reference path.
       const descriptor=c.continuation.currentPhase;c.continuation.currentPhase=null;
       c.continuation.phaseQueue.unshift(descriptor);
-      const result=await runEffect(c,{reference:true,clone:false});
+      const result=await runEffect(c,{reference:true,clone:false,bindModifiers});
       c.continuation.currentPhase=descriptor;
       return {completed:true,pendingTasks:0,events:result.events,grants:[]};
     }
     const b=bindAction(c,phase),tasks=createRuleTaskTracker(b.scene),callbacks=[];
+    let modifierBinding;
     const temporary=[];
     const defer=fn=>callbacks.push(fn);
     const define=(object,key,value)=>{temporary.push([object,key,Object.getOwnPropertyDescriptor(object,key)]);
@@ -74,14 +75,16 @@ export function postDamageDriver({reference:useReference=false,onBind}={}){retur
           const task=Promise.resolve();tasks.add(task);return task;});
       }
       if(useReference)for(const [name,method]of Object.entries(reference[phase.constructor.name]))define(phase,name,method);
+      modifierBinding=bindModifiers?.(c,phase,b,tasks);
       onBind?.(c,phase,{...b,tasks,callbacks});
       phase.start();
       // Presentation callbacks are explicit queued work, never persisted or used as rule clocks.
       let steps=0;
       while(callbacks.length){if(++steps>100)throw Error('Presentation did not settle');callbacks.shift()();}
-      await tasks.drain();await Promise.resolve();
+      await (modifierBinding?.drain()??tasks.drain());await Promise.resolve();
       return {completed:b.ended,pendingTasks:tasks.pendingTasks,events:b.events,grants:[]};
     }finally{
+      modifierBinding?.dispose();
       for(const [object,key,descriptor]of temporary.reverse()){if(descriptor)Object.defineProperty(object,key,descriptor);else delete object[key];}
       tasks.close();b.dispose();
     }

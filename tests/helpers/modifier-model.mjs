@@ -1,5 +1,6 @@
 import { createModifierPoolState } from '../../src/battle-core/modifier-pool-state.mjs';
 import { ruleModifierPools } from '../../src/battle-core/random-context.mjs';
+import { observeRulePromise } from '../../src/battle-core/rule-task-tracker.mjs';
 import ts from 'typescript';
 import { parse, evaluate, read, pokemon, status } from './original-model.mjs';
 import { createModifierStateCodec } from '../../src/battle-core/modifier-state.mjs';
@@ -14,6 +15,7 @@ const utils = { toReadableString: s => s.toLowerCase(), padInt: v => String(v).p
 const types = {}, dependencies = deps('modifier/modifier.ts');
 export function installModifierTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(dependencies[path],value);}
 Object.assign(dependencies, { './modifier-type':types, '../battle-core/modifier-state.mjs':{createModifierStateCodec},
+  '../battle-core/rule-task-tracker.mjs':{observeRulePromise},
   '../utils':utils, '../field/pokemon':pokemon, '../data/pokemon-stat':enums('data/pokemon-stat.ts'),
   '../data/pokeball':enums('data/pokeball.ts'), '../system/voucher':enums('system/voucher.ts'),
   '../data/temp-battle-stat':enums('data/temp-battle-stat.ts'), '../data/type':enums('data/type.ts'),

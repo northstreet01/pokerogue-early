@@ -5,6 +5,7 @@ import { ruleSeedOffset } from './battle-core/random-context.mjs';
 import { getMaxExpLevel as calculateMaxExpLevel } from './battle-core/levels.mjs';
 import UI, { Mode } from './ui/ui';
 import { NextEncounterPhase, NewBiomeEncounterPhase, SelectBiomePhase, MessagePhase, TurnInitPhase, ReturnPhase, LevelCapPhase, ShowTrainerPhase, LoginPhase, ConsolidateDataPhase, MovePhase, TitlePhase } from './phases';
+import CoopPlayPhase from './coop/play-phase';
 import Pokemon, { PlayerPokemon, EnemyPokemon } from './field/pokemon';
 import PokemonSpecies, { PokemonSpeciesFilter, allSpecies, getPokemonSpecies, initSpecies } from './data/pokemon-species';
 import * as Utils from './utils';
@@ -463,7 +464,8 @@ export default class BattleScene extends Phaser.Scene {
 		
 		populateAnims();
 
-		this.load.plugin('rextexteditplugin', 'https://raw.githubusercontent.com/rexrainbow/phaser3-rex-notes/master/dist/rextexteditplugin.min.js', true);
+		if (!(window as any).__COOP_PLAY__)
+			this.load.plugin('rextexteditplugin', 'https://raw.githubusercontent.com/rexrainbow/phaser3-rex-notes/master/dist/rextexteditplugin.min.js', true);
 	}
 
 	create() {
@@ -641,7 +643,10 @@ export default class BattleScene extends Phaser.Scene {
 			this.pushPhase(new LoginPhase(this));
 			if (!bypassLogin)
 				this.pushPhase(new ConsolidateDataPhase(this)); // TODO: Remove
-			this.pushPhase(new TitlePhase(this));
+			if ((window as any).__COOP_PLAY__)
+				this.pushPhase(new CoopPlayPhase(this));
+			else
+				this.pushPhase(new TitlePhase(this));
 
 			this.shiftPhase();
 		});
@@ -1273,6 +1278,9 @@ export default class BattleScene extends Phaser.Scene {
 		else if (this.isButtonPressed(Button.CANCEL)) {
 			inputSuccess = this.ui.processInput(Button.CANCEL);
 		} else if (this.isButtonPressed(Button.MENU)) {
+			// Until cooperative menu ports exist, do not enter solo save/gacha flows.
+			if (this.getCurrentPhase() instanceof CoopPlayPhase)
+				return;
 			switch (this.ui?.getMode()) {
 				case Mode.MESSAGE:
 					if (!(this.ui.getHandler() as MessageUiHandler).pendingPrompt)

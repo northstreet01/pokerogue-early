@@ -165,6 +165,11 @@ async function syncBoth(env, a, b, sa, sb) {
   let snapA = sa, snapB = sb;
   for (let budget = 0; budget < 60; budget++) {
     await Promise.all([applyAndAck(env, a, snapA), applyAndAck(env, b, snapB)]);
+    if (snapA.shared.stage === 'battle') {
+      assert.ok(Number.isInteger(snapA.shared.waveCycleOffset));
+      assert.equal(snapA.shared.waveCycleOffset, snapB.shared.waveCycleOffset);
+      assert.equal(snapA.shared.biome, snapB.shared.biome);
+    }
     if (requiresInput(snapA)) return { sa: snapA, sb: snapB };
     const revision = snapA.revision;
     [snapA, snapB] = await Promise.all([a.waitRevisionAfter(revision), b.waitRevisionAfter(revision)]);
@@ -648,3 +653,82 @@ test('VS-02 corrupted envelope version or run ownership is rejected without rewr
     }
   } finally { if (env) await env.close(); await disk.cleanup(); }
 });
+
+for (const [seed, catalogId] of [['mvp-native-entry', 'GREAT_BALL'], ['potion-d', 'POTION']]) {
+  test(`VS-02B-06 ${catalogId}: real WS durable reward failure, retry, restart, duplicate and room isolation`, { timeout: 120000 }, async () => {
+    const disk = await temporaryStore(); let env;
+    const fixture = { seed, identity: { trainerId: 1, secretId: 2 },
+      parties: [[1, 4, 7], [906, 909, 912]], eggState: { players: [[], []] } };
+    try {
+      let rejectRevision = null;
+      const store = { load: () => disk.store.load(), save: room => {
+        if (room.revision === rejectRevision) throw Error('reward candidate disk failure');
+        return disk.store.save(room);
+      } };
+      env = await startEnv({ fixture, store });
+      const room = await createRoom(env);
+      let state = await reachPreparation(env, room, await syncBoth(env, room.a, room.b, room.sa, room.sb));
+      const isolated = await createRoom(env);
+      const isolatedBefore = canonical(env.service.rooms.get(isolated.roomId).checkpoint);
+      const snapshot = state.sa, peerBefore = state.sb;
+      const option = snapshot.personal.decision.players.rewards.find(o => o.type.catalogId === catalogId);
+      assert.ok(option, `${seed} must draw ${catalogId}`);
+      const target = catalogId === 'POTION' ? snapshot.personal.party.find(e => e.pokemon.fields.hp > 0
+        && e.pokemon.fields.hp < e.pokemon.fields.stats[0]) : null;
+      if (catalogId === 'POTION') assert.ok(target, 'real damaged own target required');
+      const action = { kind: 'preparation', operation: 'reward', optionId: option.id,
+        pokemonId: target?.id ?? null, moveIndex: null, fusionId: null };
+      const envelope = { type: 'submitAction', roomId: room.roomId, runId: room.runId,
+        decisionId: snapshot.decisionId, expectedRevision: snapshot.revision, actionId: `reward-${catalogId}`, action };
+      const before = canonical(env.service.rooms.get(room.roomId).checkpoint);
+      const tokens = [room.a, room.b].map(c => c.messages.find(m => m.type === 'welcome' && m.roomId).resumeToken);
+      rejectRevision = snapshot.revision + 1;
+      const failure = room.a.next(m => m.type === 'error');
+      room.a.send(envelope);
+      const receipt = await room.a.wait(m => m.type === 'actionReceipt' && m.actionId === envelope.actionId);
+      assert.equal(receipt.accepted, true); assert.equal((await failure).code, 'STORAGE_FAILED');
+      const failed = (await disk.store.load()).find(r => r.roomId === room.roomId);
+      assert.equal(failed.revision, snapshot.revision); assert.equal(canonical(failed.checkpoint), before);
+      assert.deepEqual(failed.inputs, { 0: action });
+      assert.equal(room.a.latestSnapshot().revision, snapshot.revision);
+      rejectRevision = null;
+      const counts = [room.a.snapshots.length, room.b.snapshots.length];
+      room.a.send({ type: 'requestSnapshot', roomId: room.roomId, runId: room.runId,
+        knownRevision: snapshot.revision, reason: 'retry-reward-save' });
+      await syncBoth(env, room.a, room.b,
+        await room.a.waitSnapshotCount(counts[0]), await room.b.waitSnapshotCount(counts[1]));
+      state = await syncBoth(env, room.a, room.b,
+        await room.a.waitRevisionAfter(snapshot.revision), await room.b.waitRevisionAfter(snapshot.revision));
+      assert.equal(state.sa.revision, snapshot.revision + 1);
+      assert.equal(state.sa.personal.decision.players.rewardResolved, true);
+      assert.deepEqual(state.sb.personal.resources, peerBefore.personal.resources);
+      assert.deepEqual(state.sb.personal.party, peerBefore.personal.party);
+      if (target) {
+        const hp = state.sa.personal.party.find(e => e.id === target.id).pokemon.fields.hp;
+        assert.equal(hp, Math.min(target.pokemon.fields.stats[0], target.pokemon.fields.hp + 20));
+      } else assert.equal(state.sa.personal.resources.pokeballs[1], (snapshot.personal.resources.pokeballs[1] ?? 0) + 5);
+      assert.equal(canonical(env.service.rooms.get(isolated.roomId).checkpoint), isolatedBefore);
+      const committed = canonical(env.service.rooms.get(room.roomId).checkpoint);
+      const hashes = [state.sa.personalHash, state.sb.personalHash];
+      await env.close(); env = null;
+      env = await startEnv({ fixture, store: new FormalRoomStore(disk.directory) });
+      const clients = [await connect(env, 'reward-resume-A'), await connect(env, 'reward-resume-B')];
+      for (const [seat, client] of clients.entries()) {
+        client.send({ type: 'resumeSeat', roomId: room.roomId, resumeToken: tokens[seat] });
+        await client.wait(m => m.type === 'snapshot');
+        assert.equal(client.latestSnapshot().personalHash, hashes[seat]);
+      }
+      const [a, b] = clients;
+      await syncBoth(env, a, b, a.latestSnapshot(), b.latestSnapshot());
+      a.send(envelope);
+      assert.deepEqual(await a.wait(m => m.type === 'actionReceipt' && m.actionId === envelope.actionId), receipt);
+      const fresh = a.next(m => m.type === 'snapshot');
+      a.send({ type: 'requestSnapshot', roomId: room.roomId, runId: room.runId,
+        knownRevision: state.sa.revision, reason: 'reward-duplicate-barrier' });
+      assert.equal((await fresh).revision, state.sa.revision);
+      const restored = (await disk.store.load()).find(r => r.roomId === room.roomId);
+      assert.equal(canonical(restored.checkpoint), committed); assert.deepEqual(restored.inputs, {});
+      assert.equal(canonical((await disk.store.load()).find(r => r.roomId === isolated.roomId).checkpoint), isolatedBefore);
+    } finally { if (env) await env.close(); await disk.cleanup(); }
+  });
+}

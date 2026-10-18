@@ -203,3 +203,34 @@ test('unknown queued production phase fails closed and encounter IO remains an e
   assert.equal(r.intents.filter(i => i.kind === 'encounter-persistence-pending').length, 1);
   assert.ok(!r.intents.some(i => ['save-system', 'save-session', 'caught', 'hatch-commit'].includes(i.kind)));
 });
+
+test('real Worker Growl masks are display-only; original StatChange survives phase-by-phase restart', async t => {
+  const h = await host(t);
+  const c = (await h.request('native-open-to-input', selection)).checkpoint;
+  const own = c.roster.entries.find(e => e.pokemon.fields.id === c.roster.field[0]).pokemon.fields;
+  const cursor = own.moveset.findIndex(m => m.fields.moveId === 45); // Original Moves.GROWL.
+  assert.ok(cursor >= 0, 'fixture must really have Growl');
+  const actions = inputs(c);
+  actions[0] = c.decision.options[0].find(a => a.cursor === cursor);
+  assert.ok(actions[0]);
+  const before = structuredClone(c);
+  const submitted = await h.request('native-submit', { checkpoint: c, inputs: actions });
+  const continuous = await h.request('native-run-to-boundary', submitted.checkpoint);
+  assert.deepEqual(c, before);
+  assert.ok(continuous.events.some(e => e.kind === 'stat-change-display'));
+  assert.equal(continuous.checkpoint.decision.kind, 'wait-actions');
+  let recovered = submitted.checkpoint, changes = 0, restarted;
+  const events = [];
+  for (let n = 0; recovered.decision.kind !== 'wait-actions'; n++) {
+    assert.ok(n < 150);
+    if (phase(recovered) === 'StatChangePhase') {
+      changes++;
+      await restarted?.close(); restarted = await host(t);
+    }
+    const result = await (restarted ?? h).request('native-step', JSON.parse(JSON.stringify(recovered)));
+    recovered = result.checkpoint; events.push(...result.events);
+  }
+  assert.ok(changes > 0);
+  assert.deepEqual(semantic(recovered), semantic(continuous.checkpoint));
+  assert.deepEqual(events, continuous.events);
+});

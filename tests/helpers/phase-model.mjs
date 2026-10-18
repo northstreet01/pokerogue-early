@@ -9,6 +9,7 @@ import {executeMoveAction} from '../../src/battle-core/move-action.mjs';
 import {checkMoveHit} from '../../src/battle-core/move-hit-check.mjs';
 import {queueFaintContinuation} from '../../src/battle-core/faint-queue.mjs';
 import {queueVictoryExperience} from '../../src/battle-core/victory-experience.mjs';
+import {presentOnHost} from '../../src/battle-core/presentation-port.mjs';
 import {eggs} from './egg-model.mjs';
 
 const declarations=file=>parse(file).statements.filter(n=>ts.isClassDeclaration(n)||ts.isEnumDeclaration(n)||ts.isImportDeclaration(n)).map(n=>n.getText()).join('\n');
@@ -17,7 +18,8 @@ class Phase{constructor(scene){this.scene=scene;}start(){}end(){this.scene.shift
 const deps=dependencies('phases.ts');
 Object.assign(deps,{'./phase':{Phase},'./battle-core/switch-command.mjs':{selectSwitchSummon},'./battle-core/switch-finish.mjs':{finishSwitchSummon},
   './battle-core/move-action.mjs':{executeMoveAction},'./battle-core/move-hit-check.mjs':{checkMoveHit},
-  './battle-core/faint-queue.mjs':{queueFaintContinuation},'./battle-core/victory-experience.mjs':{queueVictoryExperience}});
+  './battle-core/faint-queue.mjs':{queueFaintContinuation},'./battle-core/victory-experience.mjs':{queueVictoryExperience},
+  './battle-core/presentation-port.mjs':{presentOnHost}});
 // Rendering-only mask constructor; actual stat rules still execute in the original Phase.
 export const phaseRenderGlobals={Phaser:{Display:{Masks:{BitmapMask:class{}}},Math:{Linear:(a,b,t)=>(b-a)*t+a}},
   setTimeout:callback=>Promise.resolve().then(callback)};

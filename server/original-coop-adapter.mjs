@@ -4,7 +4,7 @@ import { ContractError, canonical, requireContract as check } from '../src/battl
 // VS-02 bridge. The legacy fixture.parties mode is retained only for the
 // accepted VS-01 seam tests; production/VS-02 initialization uses the lobby
 // envelope (no fixed parties), selected by fixture.lobby.
-export const ADAPTER_FORMAT_VERSION = 2;
+export const ADAPTER_FORMAT_VERSION = 3;
 const DEFAULT_FIXTURE = Object.freeze({
   seed: 'vs01-original-coop',
   identities: [{ trainerId: 1, secretId: 2 }, { trainerId: 3, secretId: 4 }],
@@ -29,9 +29,25 @@ function stageOf(context) {
 const frontPhase = checkpoint =>
   (checkpoint.continuation.phaseQueuePrepend.at(-1) ?? checkpoint.continuation.phaseQueue[0])?.phase?.type ?? null;
 const lobbyId = context => `lobby-${context.runId}-${context.lobby.step}`;
+const PROFILE_FORMAT = 3;
+const SHARED_BUDGET = 14;
+const PERSONAL_BUDGET = 10;
+const PROFILE_KEYS = ['kind', 'profile', 'ready'];
+const budgetOf = players => players.reduce((sum, player) => sum + (player.priced?.total ?? 0), 0);
+function profileLobbyState(players = null) {
+  return {
+    mode: 'profile-v1',
+    step: 0,
+    budget: { personal: PERSONAL_BUDGET, shared: SHARED_BUDGET },
+    players: players ?? [
+      { profile: null, priced: null, ready: false },
+      { profile: null, priced: null, ready: false },
+    ],
+  };
+}
 
 export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFactory = createOriginalRuleHost,
-  rulesVersion = 'early-vs02', contentHash = 'vs02-original-coop' } = {}) {
+  seedFactory = null, rulesVersion = 'early-vs02', contentHash = 'vs02-original-coop' } = {}) {
   const rooms = new Map();
   const failed = new Set();
 
@@ -49,10 +65,17 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       throw error;
     }
   }
-  async function roomFor(runId, provisioning) {
+  async function roomFor(runId, provisioning, profileMode = false) {
     check(!failed.has(runId), 'ROOM_WORKER_FAILED');
     let room = rooms.get(runId);
-    if (room) check(canonical(room.provisioning) === canonical(provisioning), 'ROOM_PROVISIONING_MISMATCH');
+    if (room && canonical(room.provisioning) !== canonical(provisioning)) {
+      // Profile import may replace bootstrap identities. The cache is disposable:
+      // both a candidate and its uncommitted predecessor must remain restorable.
+      check(profileMode && room.provisioning.seed === provisioning.seed, 'ROOM_PROVISIONING_MISMATCH');
+      rooms.delete(runId);
+      await room.host.close();
+      room = null;
+    }
     if (!room) room = await createRoom(runId, provisioning);
     return room;
   }
@@ -84,9 +107,10 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       return room.host.request(operation, payload);
     }
   }
-  function contextFor(room, lobby, checkpoint, intents) {
+  function contextFor(room, lobby, checkpoint, intents, formatVersion = 2) {
     return { runId: room.runId, provisioning: clone(room.provisioning), lobby: lobby ? clone(lobby) : null,
-      checkpoint: checkpoint ? clone(checkpoint) : null, intents: intents ? clone(intents) : [] };
+      checkpoint: checkpoint ? clone(checkpoint) : null, intents: intents ? clone(intents) : [],
+      formatVersion, profileLobby: formatVersion === PROFILE_FORMAT && !!lobby };
   }
   function normalizeIntents(checkpoint, existing, incoming) {
     const byId = new Map((existing ?? []).map(intent => [intent.id, intent]));
@@ -137,7 +161,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       else if (frontPhase(checkpoint) === 'SelectModifierPhase') await apply('native-preparation');
       else await apply('native-run-to-boundary');
     }
-    return { context: contextFor(room, null, checkpoint, intents), events, intents, grants: [] };
+    return { context: contextFor(room, null, checkpoint, intents, context.formatVersion), events, intents, grants: [] };
   }
   async function validateLobbyAction(room, action) {
     check(action && typeof action === 'object' && Object.keys(action).sort().join(',') === 'eggs,kind,ready,starters'
@@ -147,6 +171,62 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       'INVALID_POKEMON_SELECTION');
     check(Array.isArray(action.eggs), 'INVALID_EGG_STATE');
     await request(room, 'native-validate-eggs', { players: [clone(action.eggs), []] });
+  }
+  async function normalizeProfileAction(room, action) {
+    check(action && typeof action === 'object' && Object.keys(action).sort().join(',') === PROFILE_KEYS.join(',')
+      && action.kind === 'profile-ready' && typeof action.ready === 'boolean', 'INVALID_PROFILE_ACTION');
+    const normalized = await request(room, 'normalize-profile', action.profile);
+    check(normalized && normalized.profile && normalized.priced, 'INVALID_PROFILE');
+    check(normalized.priced.total <= PERSONAL_BUDGET, 'PERSONAL_BUDGET_EXCEEDED');
+    return { profile: normalized.profile, priced: normalized.priced, ready: action.ready };
+  }
+  function withProfilePlayers(context, seat, candidate) {
+    const players = context.lobby.players.map((player, index) => index === seat ? candidate : player);
+    check(budgetOf(players) <= SHARED_BUDGET, 'SHARED_BUDGET_EXCEEDED');
+    return players;
+  }
+  function checkProfileIdentity(context, seat, normalized) {
+    const player = context.lobby.players[seat], current = player.profile;
+    check(!current || canonical(current.trainer) === canonical(normalized.profile.trainer), 'PROFILE_IDENTITY_MISMATCH');
+    check(!player.ready || !normalized.ready || canonical(current) === canonical(normalized.profile),
+      'PROFILE_READY_SELECTION_LOCKED');
+  }
+  async function validateProfileCheckpoint(checkpoint) {
+    check(checkpoint.provisioning && checkpoint.provisioning.identities
+      && checkpoint.provisioning.identities.length === 2, 'INVALID_CHECKPOINT');
+    if (checkpoint.nativeCheckpoint === null) {
+      check(checkpoint.stage === 'lobby' && checkpoint.lobby, 'INVALID_CHECKPOINT');
+      const lobby = checkpoint.lobby;
+      check(Object.keys(lobby).sort().join(',') === 'budget,mode,players,step' && lobby.mode === 'profile-v1'
+        && Number.isSafeInteger(lobby.step) && lobby.step >= 0
+        && Object.keys(lobby.budget).sort().join(',') === 'personal,shared'
+        && lobby.budget.personal === PERSONAL_BUDGET && lobby.budget.shared === SHARED_BUDGET
+        && Array.isArray(lobby.players) && lobby.players.length === 2, 'INVALID_CHECKPOINT');
+      const room = await roomFor(checkpoint.runId, checkpoint.provisioning, true);
+      for (const player of lobby.players) {
+        check(player && Object.keys(player).sort().join(',') === 'priced,profile,ready'
+          && typeof player.ready === 'boolean', 'INVALID_CHECKPOINT');
+        if (player.profile === null) {
+          check(player.priced === null && player.ready === false, 'INVALID_CHECKPOINT');
+          continue;
+        }
+        const normalized = await request(room, 'normalize-profile', player.profile);
+        check(canonical(normalized.profile) === canonical(player.profile)
+          && canonical(normalized.priced) === canonical(player.priced), 'INVALID_CHECKPOINT');
+        check(player.priced.total <= PERSONAL_BUDGET, 'PERSONAL_BUDGET_EXCEEDED');
+        if (player.ready) check(player.profile !== null, 'INVALID_CHECKPOINT');
+      }
+      check(budgetOf(lobby.players) <= SHARED_BUDGET, 'SHARED_BUDGET_EXCEEDED');
+      check(!lobby.players.every(player => player.ready), 'INVALID_CHECKPOINT');
+      return true;
+    }
+    check(checkpoint.lobby === null && checkpoint.nativeCheckpoint
+      && checkpoint.stage === stageOf({ checkpoint: checkpoint.nativeCheckpoint })
+      && !['unknown', 'initializing'].includes(checkpoint.stage)
+      && checkpoint.nativeCheckpoint.scene?.seed === checkpoint.provisioning.seed, 'INVALID_CHECKPOINT');
+    const room = await roomFor(checkpoint.runId, checkpoint.provisioning, true);
+    await request(room, 'native-validate-checkpoint', checkpoint.nativeCheckpoint);
+    return true;
   }
 
   return Object.freeze({
@@ -160,8 +240,16 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         ? [fixture.identity, { trainerId: (fixture.identity.trainerId + 1) % 65536,
           secretId: (fixture.identity.secretId + 1) % 65536 }] : null);
       check(Array.isArray(fixtureIdentities) && fixtureIdentities.length === 2, 'INVALID_TRAINER_IDENTITY');
-      const provisioning = { seed: fixture.seed, identities: clone(fixtureIdentities) };
+      const seed = fixture.profileLobby && typeof seedFactory === 'function' ? seedFactory() : fixture.seed;
+      check(typeof seed === 'string' && seed.length > 0, 'INVALID_ROOM_SEED');
+      const provisioning = { seed, identities: clone(fixtureIdentities) };
       const room = await roomFor(runId, provisioning);
+      if (fixture.profileLobby) {
+        const context = contextFor(room, profileLobbyState(), null, []);
+        context.formatVersion = PROFILE_FORMAT;
+        context.profileLobby = true;
+        return context;
+      }
       if (fixture.lobby) {
         const lobby = { step: 0, players: [
           { starters: null, eggs: [], ready: false }, { starters: null, eggs: [], ready: false },
@@ -194,7 +282,13 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
 
     async validateAction(context, seat, action) {
       check(seat === 0 || seat === 1, 'INVALID_SEAT');
-      const room = await roomFor(context.runId, context.provisioning);
+      const room = await roomFor(context.runId, context.provisioning, context.formatVersion === PROFILE_FORMAT);
+      if (context.profileLobby) {
+        const normalized = await normalizeProfileAction(room, action);
+        checkProfileIdentity(context, seat, normalized);
+        withProfilePlayers(context, seat, normalized);
+        return;
+      }
       if (context.lobby) { await validateLobbyAction(room, action); return; }
       const decision = context.checkpoint.decision;
       if (decision.kind === 'wait-actions') {
@@ -214,7 +308,39 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
     },
 
     async advanceToDecision(context, inputs) {
-      const room = await roomFor(context.runId, context.provisioning);
+      const room = await roomFor(context.runId, context.provisioning, context.formatVersion === PROFILE_FORMAT);
+      if (context.profileLobby) {
+        const seats = Object.keys(inputs ?? {});
+        check(seats.length === 1 && (seats[0] === '0' || seats[0] === '1'), 'INCOMPLETE_PROFILE_INPUTS');
+        const seat = Number(seats[0]);
+        const normalized = await normalizeProfileAction(room, inputs[seat]);
+        checkProfileIdentity(context, seat, normalized);
+        const players = withProfilePlayers(context, seat, normalized);
+        const nextLobby = { ...clone(context.lobby), step: context.lobby.step + 1, players };
+        if (players.every(player => player.ready && player.profile)) {
+          const identities = players.map(player => clone(player.profile.trainer));
+          const candidateRoom = await roomFor(context.runId, { ...context.provisioning, identities }, true);
+          const opened = await request(candidateRoom, 'native-open-selected-to-input', {
+            starterSelections: players.map(player => clone(player.profile.starters)),
+            identities: clone(identities),
+            eggState: { players: players.map(player => clone(player.profile.eggs)) },
+          });
+          const battle = contextFor(candidateRoom, null, opened.checkpoint, [], PROFILE_FORMAT);
+          battle.formatVersion = PROFILE_FORMAT;
+          battle.profileLobby = false;
+          battle.intents = normalizeIntents(opened.checkpoint, context.intents, opened.intents);
+          const events = (opened.events ?? []).map(event => scopeEvent(event, opened.checkpoint));
+          return { context: battle, events, intents: battle.intents, grants: [] };
+        }
+        const next = contextFor(room, nextLobby, null, context.intents);
+        next.formatVersion = PROFILE_FORMAT;
+        next.profileLobby = true;
+        return {
+          context: next,
+          events: [{ kind: 'profile-ready', seat, ready: normalized.ready, scope: 'shared' }],
+          intents: context.intents, grants: [],
+        };
+      }
       if (context.lobby) {
         const seats = Object.keys(inputs ?? {});
         check(seats.length === 1 && (seats[0] === '0' || seats[0] === '1'), 'INCOMPLETE_LOBBY_INPUTS');
@@ -260,7 +386,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         check(inputs && Object.keys(inputs).length === 1, 'INCOMPLETE_SWITCH_INPUTS');
         await apply('native-switch', { checkpoint, inputs: COPY(inputs) });
       } else check(decision.kind === 'continuing', 'UNSAFE_ADVANCE');
-      const intermediate = contextFor(room, null, checkpoint, intents);
+      const intermediate = contextFor(room, null, checkpoint, intents, context.formatVersion);
       const result = await runToStable(room, intermediate);
       result.events = [...events, ...result.events];
       result.intents = result.context.intents;
@@ -269,7 +395,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
 
     async captureCheckpoint(context) {
       return {
-        formatVersion: ADAPTER_FORMAT_VERSION,
+        formatVersion: context.formatVersion ?? 2,
         runId: context.runId,
         stage: stageOf(context),
         provisioning: COPY(context.provisioning),
@@ -283,7 +409,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       check(checkpoint && typeof checkpoint === 'object' && !Array.isArray(checkpoint), 'INVALID_CHECKPOINT');
       canonical(checkpoint);
       check(Object.keys(checkpoint).sort().join(',') === 'formatVersion,intents,lobby,nativeCheckpoint,provisioning,runId,stage', 'INVALID_CHECKPOINT');
-      check(checkpoint.formatVersion === ADAPTER_FORMAT_VERSION && typeof checkpoint.runId === 'string'
+      check([2, 3].includes(checkpoint.formatVersion) && typeof checkpoint.runId === 'string'
         && checkpoint.runId.length > 0, 'INVALID_CHECKPOINT');
       check(checkpoint.provisioning && Object.keys(checkpoint.provisioning).sort().join(',') === 'identities,seed'
         && typeof checkpoint.provisioning.seed === 'string' && checkpoint.provisioning.seed.length > 0
@@ -303,6 +429,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
           && intent.payload.kind === intent.type, 'INVALID_CHECKPOINT');
         intentIds.add(intent.id);
       }
+      if (checkpoint.formatVersion === 3) return validateProfileCheckpoint(checkpoint);
       if (checkpoint.nativeCheckpoint === null) {
         check(checkpoint.stage === 'lobby' && checkpoint.lobby, 'INVALID_CHECKPOINT');
         check(Object.keys(checkpoint.lobby).sort().join(',') === 'players,step'
@@ -332,16 +459,34 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
 
     async restoreCheckpoint(checkpoint) {
       await this.validateCheckpoint(checkpoint);
-      const room = await roomFor(checkpoint.runId, checkpoint.provisioning);
+      const room = await roomFor(checkpoint.runId, checkpoint.provisioning, checkpoint.formatVersion === PROFILE_FORMAT);
       // restore is also used for uncommitted candidates by the formal service.
       // This cache is diagnostic only; it is never a source for restoration.
       room.diagnosticCheckpoint = checkpoint.nativeCheckpoint;
-      return contextFor(room, checkpoint.lobby, checkpoint.nativeCheckpoint, checkpoint.intents);
+      const context = contextFor(room, checkpoint.lobby, checkpoint.nativeCheckpoint, checkpoint.intents);
+      context.formatVersion = checkpoint.formatVersion;
+      context.profileLobby = checkpoint.formatVersion === 3 && checkpoint.lobby !== null;
+      return context;
     },
 
     async projectSnapshot(context, seat) {
       check(seat === 0 || seat === 1, 'INVALID_SEAT');
-      const room = await roomFor(context.runId, context.provisioning);
+      const room = await roomFor(context.runId, context.provisioning, context.formatVersion === PROFILE_FORMAT);
+      if (context.profileLobby) {
+        const id = lobbyId(context);
+        const used = budgetOf(context.lobby.players);
+        return {
+          shared: { format: 3, stage: 'lobby', decision: { id, kind: 'lobby', requiredSeats: [0, 1] },
+            ready: context.lobby.players.map(player => player.ready),
+            budget: { shared: SHARED_BUDGET, personal: PERSONAL_BUDGET, used, remaining: SHARED_BUDGET - used } },
+          personal: { format: 3, stage: 'lobby', seat,
+            profile: context.lobby.players[seat].profile ? clone(context.lobby.players[seat].profile) : null,
+            priced: context.lobby.players[seat].priced ? clone(context.lobby.players[seat].priced) : null,
+            party: [], eggs: context.lobby.players[seat].profile
+              ? clone(context.lobby.players[seat].profile.eggs) : null, resources: null,
+            decision: { id, kind: 'lobby', requiredSeats: [0, 1], options: null, players: null, switch: null } },
+        };
+      }
       if (context.lobby) {
         const id = lobbyId(context);
         return {

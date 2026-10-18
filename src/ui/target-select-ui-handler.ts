@@ -34,7 +34,10 @@ export default class TargetSelectUiHandler extends UiHandler {
     this.move = args[1] as Moves;
     this.targetSelectCallback = args[2] as TargetSelectCallback;
 
-    this.targets = getMoveTargets(this.scene.getPlayerField()[this.fieldIndex], this.move).targets;
+    // Cooperative targets have already been authorized by the server.
+    // Solo retains the original target computation.
+    this.targets = args.length > 3 ? [...args[3]]
+      : getMoveTargets(this.scene.getPlayerField()[this.fieldIndex], this.move).targets;
 
     if (!this.targets.length)
       return false;

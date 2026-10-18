@@ -11,7 +11,8 @@ import { Mode } from '../ui/ui';
 import { GameData } from '../system/game-data';
 import { GameStats } from '../system/game-stats';
 import { BattleAnim } from '../data/battle-anims';
-import { createOriginalRuntime, constructOriginalPokemon, capturePokemonState } from './original-runtime';
+import { createOriginalRuntime, constructOriginalPokemon, constructSelectedStarterInstance, capturePokemonState } from './original-runtime';
+import { restoreStarterSelection } from '../coop/original-starter-selection';
 import { originalDecisionStateCodec as codec, originalPhaseStateCodec as phases } from '../original-phase-checkpoints';
 import { originalOwnedEggStateCodec } from '../original-phase-checkpoints';
 import { createRuleTaskTracker, observeRulePromise } from '../battle-core/rule-task-tracker.mjs';
@@ -27,14 +28,16 @@ import { advanceCollectedFightCommands } from '../battle-core/fight-command.mjs'
 import { bindCoopModifierScope } from '../battle-core/modifier-scope.mjs';
 import { bindCoopFaint } from '../battle-core/faint-queue.mjs';
 import { openPreparation, advancePreparation, validatePreparationAction, coopRewardExclusions } from '../battle-core/preparation-runner.mjs';
+import { advancePreparationEffect, validatePreparationEffect } from '../battle-core/preparation-effects-runner.mjs';
 import { advanceNextBattle } from '../battle-core/next-battle-runner.mjs';
 import { originalSafeDecisionCodec } from '../original-phase-checkpoints';
-import { captureModifierTypeState, getPlayerShopModifierTypeOptionsForWave, modifierTypes } from '../modifier/modifier-type';
+import { captureModifierTypeState, getPlayerShopModifierTypeOptionsForWave, modifierTypes,
+  ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
 import { fixedBattles } from '../battle';
 import { advancePreBattleSwitch } from '../battle-core/pre-battle-switch-runner.mjs';
 import { createPreBattleSwitchDecision } from '../battle-core/switch-command.mjs';
 import { PartyOption } from '../ui/party-ui-handler';
-import { PokemonHeldItemModifier } from '../modifier/modifier';
+import { PokemonHeldItemModifier, AddPokeballModifier, PokemonHpRestoreModifier } from '../modifier/modifier';
 import { EncoreTag } from '../data/battler-tags';
 import { Command } from '../ui/command-ui-handler';
 import { Moves } from '../data/enums/moves';
@@ -226,6 +229,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     c.continuation.phaseQueuePrependSpliceIndex = root.phaseQueuePrependSpliceIndex;
   }
   return { root, views, events, intents, bindPhase, sync,
+    drainTasks: () => Promise.all(trackers.map(tracker => tracker.drain())),
     async execute(p, resume?) {
       ended = 0; waiting = null; const scope = bindPhase(p); root.currentPhase = p;
       const changes = [];
@@ -372,6 +376,51 @@ export async function openNativeBattle(runtime, payload) {
   } finally { binding.dispose(); }
 }
 
+// Selected-entry counterpart of openNativeBattle. It consumes the complete v2
+// starter descriptions (not species IDs), binds each owner's trainer identity,
+// and runs the same NewBattle/Encounter phases as the numeric fixture.
+export async function openNativeSelectedBattle(runtime, payload) {
+  check(payload && Object.keys(payload).sort().join(',') === 'eggState,identities,starterSelections',
+    'INVALID_NATIVE_SELECTED_ENTRY');
+  check(Array.isArray(payload.identities) && payload.identities.length === 2
+    && payload.identities.every(identity => identity && !Array.isArray(identity)
+      && Object.keys(identity).sort().join(',') === 'secretId,trainerId' && Number.isInteger(identity.trainerId)
+      && identity.trainerId >= 0 && identity.trainerId < 65536 && Number.isInteger(identity.secretId)
+      && identity.secretId >= 0 && identity.secretId < 65536), 'INVALID_TRAINER_IDENTITY');
+  check(Array.isArray(payload.starterSelections) && payload.starterSelections.length === 2
+    && payload.starterSelections.every(party => Array.isArray(party) && party.length >= 1 && party.length <= 6),
+    'INVALID_STARTER_SELECTION');
+  // Validate every description before touching a candidate runtime.
+  const selections = payload.starterSelections.map(party => party.map(selection => restoreStarterSelection(selection)));
+  check(selections.every(party => new Set(party.map(selection => selection.species.speciesId)).size === party.length),
+    'INVALID_STARTER_SELECTION');
+  const eggState = originalOwnedEggStateCodec.restore(payload.eggState);
+  check(eggState && Array.isArray(eggState.players) && eggState.players.length === 2
+    && eggState.players.every(player => player === null || Array.isArray(player)), 'INVALID_EGG_STATE');
+
+  const fork = createOriginalRuntime(runtime.scene.seed, runtime.scene.gameData, runtime.context.sceneRandom.capture());
+  const root: any = fork.scene; root.initializeRunResources();
+  const entries = withOriginalRules(fork.context, () => selections.flatMap((party, owner) =>
+    party.map((selection, index) => {
+      root.gameData.trainerId = payload.identities[owner].trainerId;
+      root.gameData.secretId = payload.identities[owner].secretId;
+      return { owner, group: 'party', index, pokemon: constructSelectedStarterInstance(fork, selection) };
+    })));
+  root.gameData.trainerId = payload.identities[0].trainerId;
+  root.gameData.secretId = payload.identities[0].secretId;
+  const c: any = { ...fork.context, roster: { entries, field: [null, null, null, null], retiredIds: [] }, battle: null, arena: root.arena,
+    scene: { seed: root.seed, waveSeed: root.waveSeed, waveCycleOffset: root.waveCycleOffset, offsetGym: root.offsetGym, score: 0, gameMode: root.gameMode },
+    players: [0, 1].map(() => ({ money: root.money, pokeballCounts: structuredClone(root.pokeballCounts), modifiers: [] })),
+    enemyModifiers: [], decision: { id: 'native-1-0', kind: 'continuing', requiredSeats: [], reason: 'effects' },
+    pendingEffects: [], continuation: emptyContinuation(), eggState };
+  const binding = bindNativeScene(c, runtime.scene.gameData);
+  try {
+    await binding.execute(new NewBattlePhase(binding.root));
+    await binding.execute(new EncounterPhase(binding.root));
+    return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
+  } finally { binding.dispose(); }
+}
+
 export async function stepNativeEntry(runtime, checkpoint) {
   const input = codec.restore(checkpoint);
   let intents = [];
@@ -434,8 +483,8 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
 
 // Normal uninterrupted server entry. It calls the same complete original
 // phases; per-phase execution above is the recovery/diagnostic counterpart.
-export async function openNativeBattleToInput(runtime, payload) {
-  const opened = await openNativeBattle(runtime, payload), c = codec.restore(opened.checkpoint);
+async function runOpenedToInput(runtime, opened) {
+  const c = codec.restore(opened.checkpoint);
   const binding = bindNativeScene(c, runtime.scene.gameData);
   try {
     for (let index = 0; index < 100; index++) {
@@ -451,6 +500,14 @@ export async function openNativeBattleToInput(runtime, payload) {
     }
     throw new Error('NATIVE_ENTRY_PHASE_BUDGET_EXCEEDED');
   } finally { binding.dispose(); }
+}
+
+export async function openNativeBattleToInput(runtime, payload) {
+  return runOpenedToInput(runtime, await openNativeBattle(runtime, payload));
+}
+
+export async function openNativeSelectedBattleToInput(runtime, payload) {
+  return runOpenedToInput(runtime, await openNativeSelectedBattle(runtime, payload));
 }
 
 export function validateNativeAction(runtime, payload) {
@@ -531,9 +588,92 @@ export async function openNativePreparation(runtime, checkpoint) {
   return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
 }
 
+function preparationEffectDriver(runtime) {
+  return {
+    validate(c, seat, action) {
+      if (['skip-reward', 'ready', 'unready'].includes(action.operation)) return;
+      check(action.operation === 'reward', 'PREPARATION_EFFECT_UNAVAILABLE');
+      const row = c.decision.players[seat];
+      const option = row.rewards.find(o => o.id === action.optionId);
+      check(option, 'INVALID_PREPARATION_OPTION');
+      const type = restoreModifierTypeState(option.type);
+      check(!(type instanceof PokemonReviveModifierType), 'PREPARATION_EFFECT_UNAVAILABLE');
+      if (type instanceof PokemonHpRestoreModifierType) {
+        check(action.pokemonId !== null && action.moveIndex === null && action.fusionId === null,
+          'INVALID_PREPARATION_TARGET');
+        const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
+          && e.pokemon.id === action.pokemonId);
+        check(entry, 'INVALID_PREPARATION_OWNER');
+        check(type.selectFilter(entry.pokemon) === null, 'INVALID_PREPARATION_TARGET');
+        return;
+      }
+      let modifier;
+      try { modifier = type.newModifier(); } catch { modifier = null; }
+      if (modifier instanceof AddPokeballModifier) {
+        check(action.pokemonId === null && action.moveIndex === null && action.fusionId === null,
+          'INVALID_PREPARATION_TARGET');
+        return;
+      }
+      check(false, 'PREPARATION_EFFECT_UNAVAILABLE');
+    },
+    async execute(c, phase, { seat, action }) {
+      check(phases.isPhase(phase), 'INVALID_PREPARATION_PHASE');
+      const binding = bindNativeScene(c, runtime.scene.gameData), view = binding.views[seat];
+      phase.scene = view;
+      const party = c.roster.entries.filter(e => e.owner === seat && e.group === 'party')
+        .sort((a, b) => a.index - b.index).map(e => e.pokemon);
+      view.party = party;
+      view.getParty = () => party;
+      view.pokeballCounts = c.players[seat].pokeballCounts;
+      view.sound = { get: () => null };
+      Object.defineProperty(view, 'money', { configurable: true, get: () => c.players[seat].money,
+        set: value => { c.players[seat].money = value; } });
+      let ended = false;
+      view.shiftPhase = () => { ended = true; };
+      view.ui = {
+        clearText() {}, playError() { throw new Error('ORIGINAL_MENU_REJECTED'); },
+        getHandler: () => ({ updateCostText() {} }),
+        setMode: () => Promise.resolve(),
+        setModeWithoutClear(mode, _partyMode, _unused, callback, filter) {
+          check(mode === Mode.PARTY, 'UNSUPPORTED_MENU_MODE');
+          const index = party.findIndex(pokemon => pokemon.id === action.pokemonId);
+          const target = party[index];
+          check(target && filter(target) === null, 'INVALID_PREPARATION_TARGET');
+          return callback(index, undefined);
+        },
+      };
+      view.addModifier = (...args) => {
+        const modifier = args[0];
+        check(modifier instanceof AddPokeballModifier || modifier instanceof PokemonHpRestoreModifier
+          && !modifier.fainted, 'PREPARATION_EFFECT_UNAVAILABLE');
+        return observeRulePromise(view, BattleScene.prototype.addModifier.apply(view, args));
+      };
+      try {
+        const row = c.decision.players[seat];
+        const typeOptions = row.rewards.map(option =>
+          new ModifierTypeOption(restoreModifierTypeState(option.type), 0, option.cost));
+        const callback = phase.createModifierSelectCallback(typeOptions);
+        const index = row.rewards.findIndex(option => option.id === action.optionId);
+        check(index >= 0, 'INVALID_PREPARATION_OPTION');
+        await withOriginalRules(c, async () => {
+          callback(1, index);
+          // The original Party callback schedules addModifier on a microtask.
+          // Keep the scope bound until that original task and its effects settle.
+          await Promise.resolve();
+          await binding.drainTasks();
+        });
+        check(ended, 'INCOMPLETE_PREPARATION_EFFECT');
+        return { completed: true, pendingTasks: 0, ended: true,
+          events: [{ kind: 'preparation-effect', seat, operation: 'reward' }], grants: [] };
+      } finally { binding.dispose(); }
+    },
+  };
+}
+
 export async function chooseNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
-  const result = await advancePreparation(codec.restore(payload.checkpoint), payload.seat, payload.action, codec, originalSafeDecisionCodec);
+  const result = await advancePreparationEffect(codec.restore(payload.checkpoint), payload.seat,
+    payload.action, codec, originalSafeDecisionCodec, preparationEffectDriver(runtime));
   return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
 }
 
@@ -587,7 +727,8 @@ export async function chooseNativeSwitch(runtime, payload) {
 export function validateNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
-  validatePreparationAction(c, payload.seat, payload.action, originalSafeDecisionCodec);
+  validatePreparationEffect(c, payload.seat, payload.action, originalSafeDecisionCodec,
+    preparationEffectDriver(runtime));
   return true;
 }
 
@@ -641,6 +782,10 @@ export function projectNativeSnapshot(runtime, payload) {
     double: c.battle.double,
     battleType: c.battle.battleType,
     battleSpec: c.battle.battleSpec,
+    biome: c.arena.biomeType,
+    // Public day/night presentation schedule; never expose the seed or RNG state.
+    waveCycleOffset: c.scene.waveCycleOffset,
+    terrainColorRatio: c.arena.getBgTerrainColorRatioForBiome(),
     field: fieldIds,
     pokemon: fieldEntries.filter(Boolean).map(publicPokemonView),
     decision: { id: c.decision.id, kind: c.decision.kind, requiredSeats: [...c.decision.requiredSeats] },

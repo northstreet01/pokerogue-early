@@ -19,6 +19,8 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
   private rowCursor: integer = 0;
   private player: boolean;
   private rerollCost: integer;
+  private displayGeneration = 0;
+  private inputPresentation: { shopOptions?: ModifierTypeOption[]; allowReroll?: boolean; allowTransfer?: boolean } = {};
 
   public options: ModifierOption[];
   public shopOptionsRows: ModifierOption[][];
@@ -69,16 +71,18 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       return false;
     }
 
-    if (args.length !== 4 || !(args[1] instanceof Array) || !args[1].length || !(args[2] instanceof Function))
+    if (![4, 5].includes(args.length) || !(args[1] instanceof Array) || !args[1].length || !(args[2] instanceof Function))
       return false;
 
     super.show(args);
+    const generation = ++this.displayGeneration;
+    this.inputPresentation = args[4] ?? {};
 
     this.getUi().clearText();
 
     this.player = args[0];
 
-    const partyHasHeldItem = this.player && !!this.scene.findModifiers(m => m instanceof PokemonHeldItemModifier && (m as PokemonHeldItemModifier).getTransferrable(true)).length;
+    const partyHasHeldItem = this.inputPresentation.allowTransfer !== false && this.player && !!this.scene.findModifiers(m => m instanceof PokemonHeldItemModifier && (m as PokemonHeldItemModifier).getTransferrable(true)).length;
 
     this.transferButtonContainer.setVisible(false);
     this.transferButtonContainer.setAlpha(0);
@@ -91,9 +95,9 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     this.updateRerollCostText();
 
     const typeOptions = args[1] as ModifierTypeOption[];
-    const shopTypeOptions = !this.scene.gameMode.hasNoShop
+    const shopTypeOptions = this.inputPresentation.shopOptions ?? (!this.scene.gameMode.hasNoShop
       ? getPlayerShopModifierTypeOptionsForWave(this.scene.currentBattle.waveIndex, this.scene.getWaveMoneyAmount(1))
-      : [];
+      : []);
     const optionsYOffset = shopTypeOptions.length >= SHOP_OPTIONS_ROW_LIMIT ? -8 : -24;
     
     for (let m = 0; m < typeOptions.length; m++) {
@@ -130,6 +134,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       ease: 'Sine.easeIn',
       duration: 1250,
       onUpdate: t => {
+        if (generation !== this.displayGeneration) return;
         const value = t.getValue();
         const index = Math.floor(value * typeOptions.length);
         if (index > i && index <= typeOptions.length) {
@@ -141,11 +146,13 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     });
 
     this.scene.time.delayedCall(1000 + maxUpgradeCount * 2000, () => {
+      if (generation !== this.displayGeneration) return;
       for (let shopOption of this.shopOptionsRows.flat())
         shopOption.show(0, 0);
     });
 
     this.scene.time.delayedCall(4000 + maxUpgradeCount * 2000, () => {
+      if (generation !== this.displayGeneration) return;
       if (partyHasHeldItem) {
         this.transferButtonContainer.setAlpha(0);
         this.transferButtonContainer.setVisible(true);
@@ -156,7 +163,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
         });
       }
 
-      if (this.scene.currentBattle.waveIndex % 10) {
+      if (this.inputPresentation.allowReroll !== false && this.scene.currentBattle.waveIndex % 10) {
         this.rerollButtonContainer.setAlpha(0);
         this.rerollButtonContainer.setVisible(true);
         this.scene.tweens.add({
@@ -170,6 +177,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       this.setRowCursor(1);
 
       handleTutorial(this.scene, Tutorial.Select_Item).then(() => {
+        if (generation !== this.displayGeneration) return;
         this.setCursor(0);
         this.awaitingActionInput = true;
         this.onActionInput = args[2];
@@ -205,7 +213,10 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
           const originalOnActionInput = this.onActionInput;
           this.awaitingActionInput = false;
           this.onActionInput = null;
-          originalOnActionInput(-1);
+          if (originalOnActionInput(-1) === false) {
+            this.awaitingActionInput = true;
+            this.onActionInput = originalOnActionInput;
+          }
         }
       }
     } else {
@@ -322,6 +333,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
   }
 
   clear() {
+    ++this.displayGeneration;
     super.clear();
 
     this.awaitingActionInput = false;

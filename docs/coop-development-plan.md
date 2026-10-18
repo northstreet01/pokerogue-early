@@ -1,5 +1,37 @@
 # 分模块开发计划与进度
 
+2026-10-19 VS-02B-06 维护者修订：原效果改为复用原 BattleScene.addModifier 与任务观察器收尾，显式拒绝误继承的 REVIVE；修复 Potion 原 Party 缺少 battler-count、取消重选、过期回调和临时视图清理，展示使用 codec 副本。A 的球／Potion Worker 与正式双 WS／FormalRoomStore 故障、重试、重启、重复 actionId、房间隔离切片通过；B 已实际完成球补给双浏览器领取（双方5→10）、重启刷新不重授予及第二战共同 FIGHT，Potion 目标原 UI 仍待用户测试，B 整体部分通过。最终 typecheck／build 退出0，完整串行回归992/992、退出0，无失败／跳过／取消，1053058.5728ms；见维护者记录。用户要求本轮收尾后推送；发布采用公开 main 的新父提交与经审查的最终树，不合并旧内部评审历史。下一批优先复用源项目最近几个可核实版本的文字排版与原 UI，浏览器测试可交用户执行，见下一批计划；捕获／主动换人／本局备用／战后换队仍是随后 MVP 必需项。
+
+[维护者记录](mvp-vs02b06-review.md) · [新版 UI 计划](coop-ui-text-next-plan.md) · [用户测试清单](vs02b06-manual-acceptance.md)
+
+VS-02B-06 普通奖励生产接缝：A 段已把生产 `chooseNativePreparation` 接到既有 `advancePreparationEffect`，通过原 `SelectModifierPhase` 回调实际执行精灵球补给（`AddPokeballModifier`）与本人目标 Potion（`PokemonHpRestoreModifier`），保留 owner/target/option 错误并拒绝 unsupported；真实 Worker 定向 4/4；完整串行 **983/983、退出 0**（1000595.2568ms）。B 段已把原奖励菜单行映射到服务器 optionId、Potion 使用原 Party UI 选择本人 pokemonId，但未完成双浏览器真实领取与后续 FIGHT；普通奖励仅支持球和 HP 恢复；商店／重抽／成长／其它奖励仍未接。详见 [VS-02B-06 记录](mvp-vs-02b06-preparation-rewards.md)。
+
+VS-02B-05 维护者审查：修复整备菜单异步回调、重复快照、过期按钮、拒绝回执与写入失败后的菜单恢复；原菜单增加可选展示参数，单人仍走原四参数。Chrome＋应用内浏览器已真实完成原选队→首战→整备刷新／跳过／准备／取消准备→第二战，并在同目录服务重启与双端刷新后共同 FIGHT 到 revision 12。修复权威昼夜投影，双方画面一致。定向32/32、类型检查／构建通过；最终完整串行回归979/979、退出0、无跳过／取消，结果见 [维护者审查](mvp-vs-02b05-review.md)。普通奖励效果／购物／重抽／成长及捕获／主动换人／本局备用仍未闭环，不代表完整 M3 或 MVP 上线。未合并／未推送，SPEC 与提示词仅本地。
+
+2026-10-18 VS-02B-05 **未完成 A／B 验收**：已接原 `ModifierSelectUiHandler` 展示服务器已抽出的 rewards、跳过奖励／准备／取消准备安全动作、原 switch-confirm／switch-select 的“保持当前出场者”路径，并复用既有 outbox／receipt／ACK 门控；准备／下一战服务端定向 82/82、typecheck／build 通过。普通奖励效果、购物／重抽／成长未接并明确拒绝；静态 build 下 StarterSelect 黑屏导致本轮双浏览器未完成选队、整备与第二战，未跑完整回归。详见 [VS-02B-05 记录](mvp-vs-02b05-preparation-next-battle.md)。
+
+2026-10-18 VS-02B-04B 维护者纠错：基线 cd9a5f30，修复原 Phaser 容器／原资源／BattleInfo、名字与背景、原 Command/Fight/Target 输入、ACK／outbox／过期回调门控，并修复真实回合 StatChange 遮罩导致的 Worker 失败。两独立浏览器已完成两轮 FIGHT 并共同到战后 preparation（revision 4），含同目录服务恢复及两端刷新；首回合双方仅扣一次 PP。25 项定向通过，最终类型／生产构建通过。完整串行回归 970/970、退出 0，无跳过／取消，结果见 [本批记录](mvp-vs-02b04b-review-2026-10-18.md)。捕获／主动换人／本局备用与整备 UI 仍是后续 MVP 必需项，本片不代表 MVP 可上线。未合并／未推送，SPEC 和提示词不提交。
+
+2026-10-18 VS-02B-04B **未完成 B1／B2**：写了原 BattleScene 的展示适配（本人真实模型、公开代理、四场位占位）、Command/Fight/Target 薄输入端口、服务器 options 映射与 IndexedDB action outbox；typecheck／build 通过。但恢复 PlayerPokemon 的 Phaser 生命周期和公开代理 BattleInfo 未正确接，未取得任何双浏览器战斗画面或真实双方 FIGHT；完整回归未跑。只提交可审查代码子集，不宣称可玩。详见 [VS-02B-04B 记录](mvp-vs-02b04b-battle-ui.md)。
+
+2026-10-18 VS-02B-04 维护者推进：原交付 d4cfa16e 仅 A 子集、B 未实现，属实。已修快照核验／epoch、IndexedDB 原消息重放及拒绝保留选队、合作取消／CLASSIC、新默认资料身份初始化和关闭 Worker；复用原控制按钮。实际 Chrome＋应用内浏览器原选队 1／2 只→正式 profile lobby→真实首战 wait-actions，刷新恢复通过；定向24/24、typecheck／build通过，完整回归未跑。只关闭 A 关键阻断，不算 A/B 或可玩验收。下一批直接接原战斗展示与 Command/Fight/Target，共同完成真实回合。见 [审查与证据](mvp-vs-02b04-review-2026-10-18.md)。
+
+2026-10-18 VS-02B-04 **未完成 A／B**：已实现 `/coop-play.html`、合作启动分流、原 `StarterSelectUiHandler` 打开、正式 lobby／房间创建／预算显示、服务端 profile adapter 注入与随机 seed、IndexedDB 席位／outbox；typecheck／build 通过，后端 profile lobby 5/5。但浏览器内选队确认→profile-ready→双方 ready 的闭环未完成，原战斗画面与 Command／Fight／Target 输入端口未实现，完整回归未跑。详见 [VS-02B-04 记录](mvp-vs-02b04-first-ui.md)。
+
+2026-10-18 VS-02B-03 维护者修订：核对交付 953/953 日志和两个测试 blob。修复建战候选修改缓存身份、format 3 的 stage／seed 漏验及首回合版本降级；准备后改选需先 unready。profile v2 新增最小 unlocks，服务端调用原性格／配招校验并核对 IV／蛋招／属性，成本仍为原 getter。真实失败／落盘重启等定向 20/20；其余兼容／构建最终证据见 [验收](mvp-vs-02b03-review-2026-10-18.md)。当前仍无原 UI／浏览器可玩，下一批进入原选队与首回合 UI，不再扩外围 QA。捕获／主动换人／本局备用和战后换队必须纳入 MVP。
+
+2026-10-18 VS-02B-03 **完成 A／B**：A 新增原 GameData 最小 profile capture／validate／restore 与原 `getSpeciesStarterValue` 成本（含分数、个人折扣、蛋镜像）；B 新增 adapter format 3 profile lobby，真实双 WS 按 10／14 预算导入 1–6 只完整 v2 选队，双方 ready 后走真实 selected Worker 首战，持久化封存／重启／resume token／旧 actionId 重放均验证。A 定向 3/3、B 定向 3/3、旧恢复 15/15、typecheck／build 通过；完整串行 **953/953、退出 0**（1501366.3253ms）。仍无页面／真实档案自动读取／原 UI／outbox／双浏览器。详见 [VS-02B-03 记录](mvp-vs-02b03-profile-lobby.md)。
+
+2026-10-18 VS-02B-02 维护者修订：核对原交付 05b872a0 的 946/946 日志及测试 blob，独立原版定向 3/3；selected Worker 改为各 1–6 只可不等长，同席不重复，允许相同训练家数值。修订定向 69/69、类型检查／构建通过，本轮完整串行未重跑，不把 946 沿用为修订结果。用户确认共享 14 点（个人上限 10），捕获、主动换人、本局备用与战后换队进入 MVP；孵化／永久收藏后置，不丢蛋或局内成果。下一批接个人资料、原成本及完整 v2 lobby。见 [维护者验收](mvp-vs-02b02-review-2026-10-18.md)。
+
+2026-10-18 VS-02B-02 **完成**：新增 `native-open-selected`／`native-open-selected-to-input`，完整 v2 双席各 3 只描述、双 identity、原 egg 库存经严格校验后进入真实 Worker；复用原 selected-starter 构造、NewBattle／Encounter／Summon／TurnInit 与安全停点，首战 wait-actions 的 actor／options 对应双方真实原模型。定向 3/3、native guards＋runtime＋starter＋selected 68/68、typecheck／build 通过；完整串行 **946/946、退出 0**（919746.8669ms）。无非空 permanent grants、未接 profile／lobby／原 UI。详见 [VS-02B-02 记录](mvp-vs-02b02-selected-entry.md)。
+
+2026-10-18 VS-02B-01 维护者修订：原交付 8da3de5b 的 939/939 历史证据已核对。修复独立对照误用被测 restore、已解锁蛋招丢失、构造资料泄漏和输入强制转换／稀疏数组；内部选队 JSON v2 新增显式 eggMoves，旧 v1 明确拒绝，不影响房间 v2 与蛋库存 v6/v7。定向 65/65、类型检查／构建通过，修订完整回归 **943/943、退出 0**（894264.932ms），正常 1..943 收尾，fail／cancelled／skipped／todo 均为 0。仍未接原 UI／真实 profile／正式 lobby，下一片为完整选队描述进入原 Worker 首战。见 [维护者验收](mvp-vs-02b01-review-2026-10-18.md)。
+
+2026-10-18 VS-02B-01 **完成**：新增原 Starter 结果最小 JSON 描述（speciesId／规范 dexAttr／nature／moveset／pokerus／本人 IV）与原类解析／严格校验；真实 Worker `construct-starter` 用原 `GameData` form getter、原 `PlayerPokemon` 构造器和 `tryPopulateMoveset` 重建，保留 shiny／gender／form／ability／nature／moveset／pokerus／IV，失败回滚随机流。定向 4/4、runtime guards＋native runtime 61/61、typecheck／build 通过；完整串行 **939/939、退出 0**（1013817.0709ms）。仍无真实档案、lobby、原 UI 或浏览器；下一批为 profile 镜像＋按席位 lobby 描述。详见 [VS-02B-01 记录](mvp-vs-02b01-starter-selection.md)。
+
+2026-10-18 VS-02B 任务纠正：上一报告仅只读核对，未交代码，不作为功能完成。本次已独立确认主要缺口并核实实时远端 871c5f18；将下一批收窄为原 Starter 结果 JSON 往返与原 PlayerPokemon 构造差分，无需页面／浏览器。之后按席位 profile/lobby、原 UI 首战、outbox／续局分批推进，不再一次打包。未修改运行源码，未新增测试结果；935/935 仍为上一验收证据。详见 [核对与范围纠正](vs-02b-scope-review-2026-10-18.md)。
+
 2026-10-18 VS-02 维护者修订：修复关闭房间时 Worker 被在途请求重新创建导致的测试挂起；加强 envelope 恢复／stage／seed／runId 绑定、投影复制和 v6 未知蛋语义。沿用交付原种子补接原 ObtainStatusEffectPhase／ShowAbilityPhase，逐阶段新 Worker 恢复差分通过。真实双 WS＋FormalRoomStore 已验证关服重启、原 receipt 重放、单次结算、候选写盘失败及损坏存档不重写。最终定向 35/35、类型检查／构建通过；完整回归 **935/935、退出 0**（901232.6578ms），正常 1..935 收尾，失败／取消／跳过／todo 均为 0。仍仅内部入局／恢复子集，真实个人档案、原选队／战斗 UI 和跨设备未完成；默认 adapter 仍为测试夹具，正式入口默认不可用。见 [维护者记录](mvp-vs-02-review-2026-10-18.md) 与 下一批原 UI 首战提示词。下面旧计数与交付阻断保留为历史。
 
 2026-10-18 VS-02 第一段部分完成：adapter envelope v2 持久化（实际 seed／双方 identity／lobby／checkpoint／intents）、真实 lobby 选队与双方 ready 后建战、per-seat identity 构造、蛋状态校验、投影 `stage`／`eggs`、intent 字段读取修正。定向 4/4、typecheck 与生产构建通过；真实 server 重启续局、原 StarterSelect UI 未接，旧 VS-01 WS 套件当前环境挂起，完整回归未跑。第二／三段未开始，整体未验收。详见 [VS-02 记录](mvp-vs-02-original-ui-resume-2026-10-18.md)。

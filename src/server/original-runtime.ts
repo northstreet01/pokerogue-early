@@ -14,11 +14,30 @@ import { SceneRandom } from '../battle-core/decision-state.mjs';
 import { RandomDataGenerator } from '../battle-core/random.mjs';
 import { createModifierPoolState } from '../battle-core/modifier-pool-state.mjs';
 import { withOriginalRules } from '../../server/original-random-context.mjs';
-import { openNativeBattle, stepNativeEntry, openNativeBattleToInput, validateNativeAction, submitNativeActions,
+import { captureStarterSelection, restoreStarterSelection, starterFormIndex, starterGender } from '../coop/original-starter-selection';
+import { validateProfile, priceProfile } from '../coop/original-profile-entry';
+import { openNativeBattle, openNativeSelectedBattle, stepNativeEntry, openNativeBattleToInput,
+  openNativeSelectedBattleToInput, validateNativeAction, submitNativeActions,
   openNativePreparation, chooseNativePreparation, nextNativeBattle, chooseNativeSwitch, runNativeUntilBoundary,
   validateNativePreparation, validateNativeSwitch, validateNativeCheckpoint, validateNativeEggs, projectNativeSnapshot } from './native-entry';
 
 export { originalDecisionStateCodec, capturePokemonState, restorePokemonState };
+export { PlayerPokemon } from '../field/pokemon';
+export { GameData, DexAttr } from '../system/game-data';
+export { Gender } from '../data/gender';
+export { getPokemonSpecies, allSpecies } from '../data/pokemon-species';
+export { allMoves } from '../data/move';
+export { speciesEggMoves } from '../data/egg-moves';
+export { gameModes, GameModes } from '../game-mode';
+export { captureStarterSelection, restoreStarterSelection, validateStarterSelection, starterDexAttrProps } from '../coop/original-starter-selection';
+export { PROFILE_VERSION, captureProfile, validateProfile, restoreProfile, priceProfile } from '../coop/original-profile-entry';
+export { Egg } from '../data/egg';
+
+// Test/diagnostic entry: run an independent original construction under the
+// same committed random context without exposing a general rules RPC.
+export function withStarterRandomContext(context: any, callback: () => any) {
+  return withOriginalRules(context, callback);
+}
 
 // This method only allocates a sparkle sprite/animation. Preserve the original
 // shiny roll and flag; presentation will be driven by committed server events.
@@ -61,6 +80,53 @@ export function constructOriginalPokemon(runtime: ReturnType<typeof createOrigin
   });
 }
 
+// Original instance construction shared by the construct-starter RPC and the
+// selected-entry battle path. The caller supplies the committed original random
+// context; only the original constructor/move population run here.
+export function constructSelectedStarterInstance(runtime: ReturnType<typeof createOriginalRuntime>, selection: any) {
+  const gameData = runtime.scene.gameData as any;
+  const eggDescriptor = Object.getOwnPropertyDescriptor(gameData, 'starterEggMoveData');
+  try {
+    if (selection.moveset !== undefined) {
+      // Preserve the exact per-root-species egg-move unlock mask for the
+      // original tryPopulateMoveset validation. Unknown is never fabricated.
+      Object.defineProperty(gameData, 'starterEggMoveData', { configurable: true, writable: true, enumerable: true,
+        value: { [selection.species.getRootSpeciesId()]: selection.eggMoves } });
+    }
+    const level = runtime.scene.gameMode.getStartingLevel();
+    const pokemon = new PlayerPokemon(runtime.scene, selection.species, level, selection.props.abilityIndex,
+      starterFormIndex(selection), starterGender(selection), selection.props.shiny, selection.ivs.slice(),
+      selection.nature, undefined);
+    if (selection.moveset !== undefined) {
+      if (!pokemon.tryPopulateMoveset(selection.moveset as any)) throw new Error('INVALID_STARTER_MOVESET');
+    }
+    if (selection.pokerus) pokemon.pokerus = true;
+    return pokemon;
+  } finally {
+    if (eggDescriptor) Object.defineProperty(gameData, 'starterEggMoveData', eggDescriptor);
+    else delete gameData.starterEggMoveData;
+  }
+}
+
+// Reconstruct the PlayerPokemon produced by the original SelectStarterPhase
+// chain, using the already-validated JSON selection. Only the original
+// constructor/move population run; no formulas are duplicated. A failed
+// construction restores the committed random stream.
+export function constructOriginalSelectedStarter(runtime: ReturnType<typeof createOriginalRuntime>, payload: any) {
+  if (runtime.scene.gameMode.modeId !== GameModes.CLASSIC) throw new Error('UNSUPPORTED_STARTER_GAME_MODE');
+  const selection = restoreStarterSelection(payload);
+  const before = runtime.context.sceneRandom.capture();
+  try {
+    return withOriginalRules(runtime.context, () => {
+      const pokemon = constructSelectedStarterInstance(runtime, selection);
+      return { pokemon: capturePokemonState(pokemon), random: runtime.context.sceneRandom.capture() };
+    });
+  } catch (error) {
+    runtime.context.sceneRandom = new SceneRandom(before);
+    throw error;
+  }
+}
+
 export function describeOriginalCatalogs() {
   // Initialises via the original scene constructor, exactly as the game does.
   new BattleScene();
@@ -76,6 +142,8 @@ export async function executeRuntimeOperation(runtime: ReturnType<typeof createO
   if (operation === 'native-step') return stepNativeEntry(runtime, payload);
   if (operation === 'native-run-to-boundary') return runNativeUntilBoundary(runtime, payload);
   if (operation === 'native-open-to-input') return openNativeBattleToInput(runtime, payload);
+  if (operation === 'native-open-selected') return openNativeSelectedBattle(runtime, payload);
+  if (operation === 'native-open-selected-to-input') return openNativeSelectedBattleToInput(runtime, payload);
   if (operation === 'native-validate') return validateNativeAction(runtime, payload);
   if (operation === 'native-submit') return submitNativeActions(runtime, payload);
   if (operation === 'native-preparation') return openNativePreparation(runtime, payload);
@@ -93,6 +161,9 @@ export async function executeRuntimeOperation(runtime: ReturnType<typeof createO
     modifierPools: structuredClone(runtime.context.modifierPools)
   };
   if (operation === 'roundtrip') return capturePokemonState(restorePokemonState(payload));
+  if (operation === 'construct-starter') return constructOriginalSelectedStarter(runtime, payload);
+  if (operation === 'validate-profile') return priceProfile(payload);
+  if (operation === 'normalize-profile') return { profile: validateProfile(payload), priced: priceProfile(payload) };
   if (operation === 'construct') {
     if (!payload || Object.keys(payload).sort().join(',') !== 'enemy,level,speciesId' || typeof payload.enemy !== 'boolean')
       throw new Error('INVALID_POKEMON_SELECTION');

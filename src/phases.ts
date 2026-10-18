@@ -30,6 +30,7 @@ import { SummaryUiMode } from "./ui/summary-ui-handler";
 import EvolutionSceneHandler from "./ui/evolution-scene-handler";
 import { EvolutionPhase } from "./evolution-phase";
 import { Phase } from "./phase";
+import { presentOnHost } from './battle-core/presentation-port.mjs';
 import { BattleStat, getBattleStatLevelChangeDescription, getBattleStatName } from "./data/battle-stat";
 import { biomeLinks } from "./data/biomes";
 import { Biome } from "./data/enums/biome";
@@ -138,6 +139,10 @@ export class LoginPhase extends Phase {
   end(): void {
     this.scene.ui.setMode(Mode.MESSAGE);
 
+    if ((window as any).__COOP_PLAY__) {
+      super.end();
+      return;
+    }
     if (!this.scene.gameData.gender)
       this.scene.unshiftPhase(new SelectGenderPhase(this.scene));
     
@@ -2263,6 +2268,12 @@ export class StatChangePhase extends PokemonPhase {
     };
 
     if (relLevels.filter(l => l).length) {
+      // The rule completion remains the original closure above. A headless
+      // host observes only the mask animation, never constructs Phaser masks.
+      if (presentOnHost(this.scene, 'stat-change-display', { pokemonId: pokemon.id })) {
+        end();
+        return;
+      }
       pokemon.enableMask();
       const pokemonMaskSprite = pokemon.maskSprite;
 

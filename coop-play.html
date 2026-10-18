@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Early 合作冒险</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; background: #111; overflow: hidden; }
+    body { display: flex; flex-direction: column; }
+    #app { width: 100%; flex: 1; min-height: 0; }
+    #coop-play-overlay { order: -1; flex: none; z-index: 20; pointer-events: none;
+      font: 14px/1.5 system-ui, sans-serif; color: #fff; }
+    #coop-play-overlay .panel { pointer-events: auto;
+      padding: 6px 14px; background: rgba(8, 12, 24, .88);
+      box-shadow: 0 4px 24px rgba(0,0,0,.5); }
+    #coop-play-overlay h1 { font-size: 16px; margin: 0 0 8px; }
+    #coop-play-overlay .row { display: flex; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+    #coop-play-overlay button, #coop-play-overlay input { font: inherit; padding: 6px 10px; border-radius: 6px;
+      border: 1px solid #556; background: #202838; color: #fff; }
+    #coop-play-overlay button { cursor: pointer; }
+    #coop-play-overlay button.primary { background: #2d6cdf; border-color: #2d6cdf; }
+    #coop-play-overlay .status { color: #b8c4d8; }
+    #coop-play-overlay .error { color: #ff9a9a; }
+    #coop-play-overlay .hidden { display: none; }
+    #desktopControls { display: flex; justify-content: center; gap: 6px; padding: 6px; flex: none; }
+    #desktopControls button { padding: 6px 10px; }
+  </style>
+  <script>window.__COOP_PLAY__ = true;</script>
+</head>
+<body>
+  <div id="app"></div>
+  <nav id="desktopControls" aria-label="原游戏控制">
+    <button data-desktop-key="UP" aria-label="向上">↑</button><button data-desktop-key="DOWN" aria-label="向下">↓</button>
+    <button data-desktop-key="LEFT" aria-label="向左">←</button><button data-desktop-key="RIGHT" aria-label="向右">→</button>
+    <button data-desktop-key="ACTION">确认</button><button data-desktop-key="SUBMIT">完成选队</button><button data-desktop-key="CANCEL">返回</button>
+  </nav>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

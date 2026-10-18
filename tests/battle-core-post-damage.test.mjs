@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {bindPresentationPort} from '../src/battle-core/presentation-port.mjs';
 import {codec} from './helpers/decision-model.mjs';
 import {moves,arena} from './helpers/original-model.mjs';
 import {abilityRules} from './helpers/move-execution-model.mjs';
@@ -108,4 +109,24 @@ test('post-damage candidates wait for their own asynchronous tasks after end',as
   controls[0].release();await runs[0];assert.equal(controls[1].done,false);
   controls[1].release();await runs[1];
   for(const c of controls)assert.deepEqual(codec.capture(c.context),c.before);
+});
+
+for (const seat of [0, 1]) test(`headless StatChange presentation port preserves frozen rule result, owner=${seat}`, async () => {
+  for (const options of [{}, { levels: 2, selfTarget: true }, { levels: -3, stage: -5 },
+    { levels: 2, stage: 6 }, { stats: [statRules.BattleStat.RAND], levels: 1 }, { showMessage: false }]) {
+    const c = statContext(seat, options), saved = codec.capture(c);
+    const reference = await runPostDamageReference(codec.restore(saved));
+    let dispose; const presentations = [];
+    try {
+      const actual = await advancePostDamage(codec.restore(saved), { onBind: (_c, _p, binding) => {
+        dispose = bindPresentationPort(binding.scene, (kind, payload) => presentations.push({ kind, ...payload }));
+        for (const entry of _c.roster.entries) Object.defineProperty(entry.pokemon, 'enableMask',
+          { configurable: true, value: () => assert.fail('no Phaser mask on host') });
+      } });
+      assert.deepEqual(codec.capture(actual.context), codec.capture(reference.context));
+      if (options.stage !== 6) assert.equal(presentations.length, 1);
+      assert.ok(presentations.every(p => p.kind === 'stat-change-display'));
+      assert.deepEqual(codec.capture(c), saved);
+    } finally { dispose?.(); }
+  }
 });

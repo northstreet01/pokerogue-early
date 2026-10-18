@@ -112,6 +112,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
   private iconAnimHandler: PokemonIconAnimHandler;
 
   private starterSelectCallback: StarterSelectCallback;
+  private starterSelectOptions: { gameMode?: GameModes; onCancel?: () => void } = {};
 
   constructor(scene: BattleScene) {
     super(scene, Mode.STARTER_SELECT);
@@ -461,6 +462,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       }
 
       this.starterSelectCallback = args[0] as StarterSelectCallback;
+      this.starterSelectOptions = args[1] ?? {};
 
       this.starterSelectContainer.setVisible(true);
 
@@ -511,6 +513,10 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
         success = true;
         this.updateInstructions();
       } else {
+        if (this.starterSelectOptions.onCancel) {
+          this.starterSelectOptions.onCancel();
+          return true;
+        }
         this.scene.clearPhaseQueue();
         this.scene.pushPhase(new TitlePhase(this.scene));
         this.scene.getCurrentPhase().end();
@@ -1244,7 +1250,9 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
             };
           }));
         };
-        if (this.scene.gameData.unlocks[Unlockables.ENDLESS_MODE]) {
+        if (this.starterSelectOptions.gameMode !== undefined)
+          startRun(this.starterSelectOptions.gameMode);
+        else if (this.scene.gameData.unlocks[Unlockables.ENDLESS_MODE]) {
           ui.setMode(Mode.STARTER_SELECT);
           const options = [
             {

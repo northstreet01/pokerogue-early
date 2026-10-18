@@ -72,6 +72,8 @@ export default class CommandUiHandler extends UiHandler {
     if (button === Button.CANCEL || button === Button.ACTION) {
       
       if (button === Button.ACTION) {
+        const port = this.scene.getCurrentPhase() as any;
+        if (port.interceptCommand?.(cursor)) return true;
         switch (cursor) {
           // Fight
           case 0:

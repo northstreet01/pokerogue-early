@@ -47,3 +47,5 @@ A：原球补给及本人 Potion 的 Worker、正式双 WS、FormalRoomStore 故
 此次用户已授权收尾后推送。发布必须从实时 main 建立干净父提交、仅转入明确审查文件的最终树；不直接合并含内部文档的旧评审历史，不强推，不提交 SPEC／AGENT／PROMPT、存档、凭据、依赖、build／dist／日志／截图。
 
 提交范围检查：明确审查本批11个源码／测试／工程文档文件；公开整理相对 main 共50个文件。未纳入 SPEC、AGENT／PROMPT、存档／房间、依赖、build／dist、日志或截图；指定私钥／GitHub token／API key／AWS key／Bearer 模式未命中，空白检查通过。这只覆盖本次范围及所列模式，不是全历史或绝对隐私保证。
+
+2026-10-19 收尾：功能公开提交 `4573a3ece0751514a659c2c942c2f30b5ded9357` 已正常推送 origin/main，推送后实时 ls-remote 核对一致；父提交为 `871c5f183118ad0dea5eb4694ae4f94de6f68d87`。最终树与本地维护者修复提交 `63caea292d40a1a549ad324f37b4d481db184cd2` 完全一致，6个最终验证源码／测试 blob 全部匹配；旧评审祖先没有进入公开 main。此收尾状态仅补工程文档，不改变已验证生产代码。

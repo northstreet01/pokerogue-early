@@ -1,43 +1,84 @@
-# PokéRogue Early — 本地存档与合作开发基础
+# PokéRogue Early — 单人游戏与双人合作开发
 
-项目需求、真实进度、原版保留边界及后续验收统一见 SPEC.md。独立合作验证页尚未接入原游戏，实验内容限制不是正式玩法需求。
+基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的 early 版本，保留原版单人游戏、本地收藏和存档，逐步接入服务器权威的双人合作。
 
-新窗口继续开发先读 [交接说明](docs/DEVELOPMENT-HANDOFF.md)，核对 Git 状态，再按 [模块计划](docs/coop-development-plan.md) 继续。M1 契约及协议测试已完成，M2 检查点与 M3 原版运行器部分完成；[架构文档](docs/coop-architecture-2026-10-13.md) 定义服务器权威、检查点与确认边界。
+**当前仍处于合作开发阶段，尚未完成原画面双浏览器可玩的 MVP。** 独立合作实验页可以运行；原类联机链路已经通过真实 WebSocket 和磁盘恢复测试，但原合作 UI、真实个人选队及跨设备验收仍待完成。
 
-基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的固定历史提交
-`ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9`，从较早版本逐步开发独立成长、共同战斗的合作游戏。
+## 当前进度
 
-**项目没有因版本而限制精灵种类、世代或数量。** 上述历史提交用于标识代码来源和规则对照基线，不是精灵范围上限。尚未接入的精灵或机制属于开发缺口，不能据此缩减正式玩法需求。
+更新日期：2026-10-18。
 
-当前包含原版单人游戏、本地存档和独立合作实验页。实验页可验证建房/加入、各自选队、共同战斗、个人整备及保存恢复，但使用有限实验引擎，尚未接入完整原版战斗。其具体实现缺口见 [实验页说明](COOP.md)，不能作为正式合作的精灵或招式范围。
+| 部分 | 当前状态 |
+| --- | --- |
+| 单人游戏与本地存档 | 保留原版入口，支持本地存档及备份管理 |
+| 合作实验页 | 独立有限实验引擎，可验证房间、选队、战斗和整备；不代表原版合作已完成 |
+| 原规则运行器 | 房间独立 Worker 调用原类，固定夹具已走通首战→整备→战前换人／拒绝→第二战 FIGHT |
+| 正式联机接缝 | 正式协调器、八方法 adapter、shared／personal 投影、本人原模型恢复和 consumer ACK 已贯通 |
+| 入局与基础续局 | 内部 lobby 与 envelope 已接；真实双 WS 验证关服重启、席位恢复、回执重放和只结算一次 |
+| 原合作界面与跨设备 | 尚未接通；真实个人资料／原收藏选队、IndexedDB outbox 与连续游玩验收待完成 |
+| 永久收藏事务 | M6 未完成，捕获／孵化结果尚不能通过正式链路永久授予 |
 
-实验页的捕获记录现已隔离到独立收藏副本，不写回正式图鉴；实验内容限制不改变原游戏规则。审查结果见 [代码审查记录](docs/code-review-2026-10-13.md)。
+最新源码验收：**完整串行回归 935/935、退出码 0；定向 35/35；类型检查和生产构建通过**。这是 2026-10-18 已验收版本的实际结果，不代表任意后续修改自动通过，也不代表全部机制或双设备游玩验收完成。证据见 [发布记录](docs/coop-progress-release-2026-10-18.md) 与 [VS-02 维护者验收](docs/mvp-vs-02-review-2026-10-18.md)。
 
-原版接入 B1 已提取随机数、等级和捕获纯规则并回接单人，使用原函数对照验证。完整服务器战斗仍待接入，见 [原版战斗接入进度](docs/original-battle-integration-2026-10-13.md)。
+当前原类链路仍使用内部测试身份、队伍和种子，其他可达机制可能在未支持的原 Phase 安全停止。正式 `/coop/v1/ws` 在默认开发／服务入口未注入 adapter 时仍返回 `ADAPTER_UNAVAILABLE`；构建运行器不会自动启用正式合作。
 
-M2 安全停点状态适配层已完成：原 Pokemon/Battle/Arena、个人资源、随机流、原 Phase 队列及选队/行动/替补/学招/进化/地图/整备/结束检查点，恢复失败保留旧状态。177 项测试、类型检查和构建通过，包括逐阶段重启的真实 WS 双端差分。完整权威运行器、原游戏合作 UI 与真实双机仍待 M3–M8；不因版本限制精灵范围。详见 [本批范围与证据](docs/m2-checkpoints-2026-10-14.md)。
+## 本地运行
 
-当前工作区继续 M3：原出招→一次伤害与异步效果已有恢复验证，新增原 MoveEnd／TurnEnd 独立收尾差分和双端重启／写盘失败验证；decision v6，206 项回归、类型检查和构建通过；代码提交 `f2377193` 已于 2026-10-14 推送至 `origin/main`。完整回合、生产场景服务和全机制仍缺，见 [本轮复用与验证](docs/turn-end-m3-2026-10-14.md)。后续按 SPEC 复用清单核对已有实现，减少重复开发。
+需要 Node.js 和 npm。项目声明 Node.js >=18；最近一次完整验收使用 Node.js 24.15.0，未单独验证全部旧版本环境。
 
 ```sh
 npm ci --ignore-scripts
 npm run start
 ```
 
-游戏入口为 `http://localhost:8020/`，本地存档页面为 `http://localhost:8020/save-tools.html`。
-独立合作实验页为 `http://localhost:8020/coop.html`，尚非原游戏正式合作入口。双端连接方法和实验实现现状见 [COOP.md](COOP.md)。
-收藏、图鉴、扭蛋数据与单人进度保存在独立 IndexedDB 中；设置和教程使用 localStorage。
-存档按浏览器和访问地址隔离，可导入、导出备份。仓库不包含个人存档、node_modules 或构建产物。
+默认地址：
 
-验证：`npm run typecheck`、`npm run test:local-save`、`npm run test:coop`、`npm run test:battle-core`、`npm run build`。
+| 地址 | 用途 |
+| --- | --- |
+| `http://localhost:8020/` | 原版单人游戏 |
+| `http://localhost:8020/save-tools.html` | 本地存档与备份管理 |
+| `http://localhost:8020/coop.html` | 独立合作实验页 |
 
-- [当前开发记录](LOCAL-FOUNDATION.md)
-- [已确认需求与设计](docs/coop-game-design-2026-10-13.md)
-- [早期版本调查](docs/early-baseline-2026-10-13.md)
-- [当前联机版问题分析](docs/current-coop-root-causes-2026-10-13.md)
-- [历史规模指标](docs/research/early-version-metrics.json)
+开发服务监听局域网地址；实验双端连接方法和限制见 [COOP.md](COOP.md)。该页面使用实验协议／引擎，与正式原类联机链路分开。
 
-保留原版 AGPL-3.0 许可证、资源与贡献者说明。以下是所选历史快照的原版 README，其功能与部署描述属于原版历史记录。
+构建后使用 Node 服务提供静态页面与实验 WebSocket：
+
+```sh
+npm run build
+npm run start:server
+```
+
+默认端口同为 8020，与开发服务择一启动。服务需要项目中的 Node 服务代码及依赖，不能仅上传 `dist`。原类 Worker bundle 可通过 `npm run build:coop-runtime` 单独生成，当前主要用于内部接缝与回归验证。
+
+## 存档与数据边界
+
+收藏、图鉴、扭蛋数据和单人进度保存在浏览器 IndexedDB；设置和教程使用 localStorage。存档按浏览器和访问地址隔离，localhost、局域网 IP 与域名之间不会自动共享数据，迁移时使用备份工具。
+
+合作实验收藏与正式收藏隔离，不将实验捕获结果写回正式图鉴。正式房间检查点由服务器保存，个人收藏仍由本人浏览器保存；两种备份不能互相替代。仓库不包含个人存档、房间凭据、依赖目录或构建产物。
+
+## 验证与开发记录
+
+```sh
+npm run typecheck
+npm run build
+npm run build:coop-runtime
+node --test --test-concurrency=1 tests/battle-core*.test.mjs tests/coop*.test.mjs tests/local-save.test.mjs tests/localization.test.mjs tests/outsourcing-locale-placeholders.test.mjs
+```
+
+完整回归包含真实 Worker、WebSocket 和临时文件原子保存，用时约 15 分钟；环境需要允许本机回环连接及测试目录读写。单项命令见 package.json。
+
+- [开发交接与当前缺口](docs/DEVELOPMENT-HANDOFF.md)
+- [模块计划](docs/coop-development-plan.md)
+- [最快双端可玩架构](docs/mvp-delivery-architecture-2026-10-18.md)
+- [原 UI 接入资料](docs/outsourcing/MVP-UI-01-reuse-inventory.md)
+- [本地基础与历史记录](LOCAL-FOUNDATION.md)
+- [原版来源调查](docs/early-baseline-2026-10-13.md)
+
+## 原版来源与许可证
+
+源码与资源基线为固定历史提交 `ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9`。该提交用于标识来源和规则对照，项目不据此限制精灵种类、世代或数量；尚未接入内容属于开发缺口。
+
+保留原版 AGPL-3.0 许可证、资源与贡献者说明。以下是该历史快照的原版 README，其功能、环境与部署描述属于历史记录；本项目当前运行方式以上文为准。
 
 ---
 

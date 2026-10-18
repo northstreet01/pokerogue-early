@@ -690,6 +690,8 @@ export class EncounterPhase extends BattlePhase {
 
       return this.scene.ui.setMode(Mode.MESSAGE).then(() => {
         if (!this.loaded) {
+          const deferred = this.scene.deferEncounterPersistence?.();
+          if (deferred) return deferred.then(() => this.doEncounter());
           return this.scene.gameData.saveSystem().then(success => {
             if (!success)
               return this.scene.reset(true);

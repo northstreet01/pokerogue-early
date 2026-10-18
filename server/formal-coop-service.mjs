@@ -42,6 +42,10 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
     return !!socket && socket.readyState === WebSocket.OPEN && ack === `${socket.epoch}:${room.revision}:${room.decisionId}`;
   });
   const pendingGrants = (room, seat) => room.grants.filter(g => g.seat === seat && !room.grantAcks.includes(g.id));
+  const hasScopedEvents = events => Array.isArray(events)
+    && events.some(event => event && typeof event === 'object' && Object.hasOwn(event, 'scope'));
+  const eventVisibleTo = (event, seat) => !event || typeof event !== 'object' || !Object.hasOwn(event, 'scope')
+    || event.scope === 'shared' || event.scope === seat;
   const blocked = room => faults.has(room.roomId) || !online(room).every(Boolean) || !acked(room).every(Boolean) || room.grants.some(g => !room.grantAcks.includes(g.id));
   const invalidate = room => [0, 1].forEach(seat => confirmations.delete(key(room.roomId, seat)));
   const send = (socket, message) => { validateMessage(message, 'server'); if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
@@ -67,6 +71,7 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
   async function context(room) {
     assertVersions(room.versions, versions); requireAdapter(adapter, SERVER_METHODS);
     check(Number.isSafeInteger(room.revision) && room.revision >= 0 && typeof room.runId === 'string' && room.runId.length > 0 && Array.isArray(room.seats) && room.seats.length === 2 && room.seats[0] && room.seats.every(s => s === null || typeof s.token === 'string' && typeof s.name === 'string') && room.inputs && room.receipts && Array.isArray(room.grants) && Array.isArray(room.grantAcks) && Array.isArray(room.events), 'INVALID_CHECKPOINT');
+    check(!Object.hasOwn(room.checkpoint, 'runId') || room.checkpoint.runId === room.runId, 'RUN_MISMATCH');
     await adapter.validateCheckpoint(copy(room.checkpoint));
     const ctx = await adapter.restoreCheckpoint(copy(room.checkpoint));
     check((await decision(ctx)).id === room.decisionId, 'INVALID_CHECKPOINT');
@@ -96,7 +101,7 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
   }
   async function snapshot(room, socket) {
     const ctx = await context(room), view = await projection(ctx, socket.seat);
-    send(socket, { type: 'snapshot', ...versions, roomId: room.roomId, runId: room.runId, revision: room.revision, decisionId: room.decisionId, connectionEpoch: socket.epoch, seat: socket.seat, ...view, sharedHash: hashProjection(view.shared), personalHash: hashProjection(view.personal), events: room.events, grants: pendingGrants(room, socket.seat) });
+    send(socket, { type: 'snapshot', ...versions, roomId: room.roomId, runId: room.runId, revision: room.revision, decisionId: room.decisionId, connectionEpoch: socket.epoch, seat: socket.seat, ...view, sharedHash: hashProjection(view.shared), personalHash: hashProjection(view.personal), events: copy(hasScopedEvents(room.events) ? room.events.filter(event => eventVisibleTo(event, socket.seat)) : room.events), grants: pendingGrants(room, socket.seat) });
   }
   async function publish(room) {
     for (const seat of [0, 1]) { const socket = connections.get(key(room.roomId, seat)); if (socket && current(socket)) await snapshot(room, socket); }
@@ -119,11 +124,18 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
       // candidate; failures never replace the committed context or consume its RNG.
       const result = await adapter.advanceToDecision(ctx, copy(room.inputs));
       const next = copy(room), checkpoint = copy(await adapter.captureCheckpoint(result.context));
+      check(!Object.hasOwn(checkpoint, 'runId') || checkpoint.runId === room.runId, 'RUN_MISMATCH');
       await adapter.validateCheckpoint(copy(checkpoint));
       const restored = await adapter.restoreCheckpoint(copy(checkpoint)), description = await decision(restored);
       check(description.id !== room.decisionId, 'DECISION_ID_REUSED');
       next.checkpoint = checkpoint; next.decisionId = description.id; next.revision++;
       next.inputs = {}; next.events = copy(result.events); check(Array.isArray(next.events), 'INVALID_EVENTS');
+      if (hasScopedEvents(next.events)) next.events = next.events.map((event, index) => {
+        check(event && typeof event === 'object' && !Array.isArray(event), 'INVALID_EVENTS');
+        if (Object.hasOwn(event, 'scope'))
+          check(event.scope === 'shared' || event.scope === 0 || event.scope === 1, 'INVALID_EVENT_SCOPE');
+        return { ...event, eventId: `${room.roomId}:${next.revision}:${index}`, revision: next.revision, eventIndex: index };
+      });
       for (const grant of copy(result.grants)) {
         check(grant && typeof grant.id === 'string' && grant.id.length > 0 && grant.id.length <= 128 && [0, 1].includes(grant.seat) && grant.payload && typeof grant.payload === 'object' && !Array.isArray(grant.payload) && Object.keys(grant).length === 3 && !next.grants.some(g => g.id === grant.id), 'INVALID_GRANT');
         next.grants.push(grant);

@@ -663,6 +663,7 @@ export enum SpeciesFormKey {
 export const allSpecies: PokemonSpecies[] = [];
 
 export function initSpecies() {
+	if (allSpecies.length) return;
 	allSpecies.push(
     new PokemonSpecies(Species.BULBASAUR, "Bulbasaur", 1, false, false, false, "Seed Pokémon", Type.GRASS, Type.POISON, 0.7, 6.9, Abilities.OVERGROW, Abilities.NONE, Abilities.CHLOROPHYLL, 318, 45, 49, 49, 65, 65, 45, 45, 50, 64, GrowthRate.MEDIUM_SLOW, 87.5, false),
     new PokemonSpecies(Species.IVYSAUR, "Ivysaur", 1, false, false, false, "Seed Pokémon", Type.GRASS, Type.POISON, 1, 13, Abilities.OVERGROW, Abilities.NONE, Abilities.CHLOROPHYLL, 405, 60, 62, 63, 80, 80, 60, 45, 50, 142, GrowthRate.MEDIUM_SLOW, 87.5, false),

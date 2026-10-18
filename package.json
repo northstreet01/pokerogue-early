@@ -6,6 +6,7 @@
 	"scripts": {
 		"start": "vite",
 		"coop:catalog": "node scripts/generate-coop-catalog.mjs",
+		"build:coop-runtime": "node scripts/build-coop-runtime.mjs",
 		"start:server": "node server/start.mjs",
 		"test:coop": "node --test tests/coop*.test.mjs",
 		"test:battle-core": "node --test tests/battle-core*.test.mjs",

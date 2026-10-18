@@ -1973,6 +1973,7 @@ export enum Abilities {
 export const allAbilities = [ new Ability(Abilities.NONE, "-", "", 3) ];
 
 export function initAbilities() {
+  if (allAbilities.length > 1) return;
   allAbilities.push(
     new Ability(Abilities.STENCH, "Stench (N)", "By releasing stench when attacking, this Pokémon may cause the target to flinch.", 3),
     new Ability(Abilities.DRIZZLE, "Drizzle", "The Pokémon makes it rain when it enters a battle.", 3)

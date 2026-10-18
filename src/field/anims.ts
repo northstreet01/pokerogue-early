@@ -1,8 +1,10 @@
 import BattleScene from "../battle-scene";
 import { PokeballType } from "../data/pokeball";
 import * as Utils from "../utils";
+import { presentOnHost } from '../battle-core/presentation-port.mjs';
 
 export function addPokeballOpenParticles(scene: BattleScene, x: number, y: number, pokeballType: PokeballType): void {
+  if (presentOnHost(scene, 'pokeball-open', { x, y, pokeballType })) return;
   switch (pokeballType) {
     case PokeballType.POKEBALL:
       doDefaultPbOpenParticles(scene, x, y, 48);
@@ -130,6 +132,7 @@ function doFanOutParticle(scene: BattleScene, trigIndex: integer, x: integer, y:
 }
 
 export function addPokeballCaptureStars(scene: BattleScene, pokeball: Phaser.GameObjects.Sprite): void {
+  if (presentOnHost(scene, 'pokeball-capture-stars', {})) return;
   const addParticle = () => {
     const particle = scene.add.sprite(pokeball.x, pokeball.y, 'pb_particles', '4.png');
     particle.setOrigin(pokeball.originX, pokeball.originY);

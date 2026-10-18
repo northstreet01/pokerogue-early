@@ -2697,6 +2697,7 @@ export const allMoves: Move[] = [
 ];
 
 export function initMoves() {
+  if (allMoves.length > 1) return;
   allMoves.push(
     new AttackMove(Moves.POUND, "Pound", Type.NORMAL, MoveCategory.PHYSICAL, 40, 100, 35, "The target is physically pounded with a long tail, a foreleg, or the like.", -1, 0, 1),
     new AttackMove(Moves.KARATE_CHOP, "Karate Chop", Type.FIGHTING, MoveCategory.PHYSICAL, 50, 100, 25, "The target is attacked with a sharp chop. Critical hits land more easily.", -1, 0, 1)

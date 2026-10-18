@@ -783,12 +783,11 @@ export default class BattleScene extends Phaser.Scene {
 		this.offsetGym = this.gameMode.isClassic && this.getGeneratedOffsetGym();
 	}
 
-	reset(clearScene?: boolean): void {
-		this.gameMode = gameModes[GameModes.CLASSIC];
-		
-		this.setSeed(SEED_OVERRIDE || Utils.randomString(24));
-		console.log('Seed:', this.seed);
+	// Node candidates can stage encounter IO for an enclosing room transaction.
+	// null retains the original browser save path; resolution is not a permanent save receipt.
+	deferEncounterPersistence(): Promise<void> | null { return null; }
 
+	initializeRunResources(): void {
 		this.score = 0;
 		this.money = 0;
 
@@ -797,6 +796,15 @@ export default class BattleScene extends Phaser.Scene {
 
 		this.modifiers = [];
 		this.enemyModifiers = [];
+	}
+
+	reset(clearScene?: boolean): void {
+		this.gameMode = gameModes[GameModes.CLASSIC];
+
+		this.setSeed(SEED_OVERRIDE || Utils.randomString(24));
+		console.log('Seed:', this.seed);
+
+		this.initializeRunResources();
 		this.modifierBar.removeAll(true);
 		this.enemyModifierBar.removeAll(true);
 

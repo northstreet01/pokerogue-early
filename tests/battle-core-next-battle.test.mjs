@@ -8,17 +8,83 @@ import {copy} from '../src/battle-core/coop-contract.mjs';
 import fs from 'node:fs';
 import {parse} from './helpers/original-model.mjs';
 const saved=c=>copy(codec.capture(c));
-test('original encounter changes consist only of observing and returning the existing Promise chain',()=>{
+test('original encounter preserves frozen rules with tracked Promises and one explicit candidate IO port',()=>{
   const frozen=JSON.parse(fs.readFileSync(new URL('./fixtures/early-next-battle-reference.json',import.meta.url),'utf8'));
-  const current=parse('phases.ts').statements.find(n=>n.name?.text==='EncounterPhase').members.find(n=>n.name?.getText()==='start').getText();
-  const restored=current.replace('observeRulePromise(this.scene, Promise.all(loadEnemyAssets).then','Promise.all(loadEnemyAssets).then')
+  const normalize=s=>s.replace(/\r\n/g,'\n').trim();
+  const current=normalize(parse('phases.ts').statements.find(n=>n.name?.text==='EncounterPhase').members.find(n=>n.name?.getText()==='start').getText());
+  // This exact, positioned IO adapter is the only additional deviation. Keep
+  // the frozen reference unchanged and compare all remaining original rules.
+  const port='          const deferred = this.scene.deferEncounterPersistence?.();\n'
+    +'          if (deferred) return deferred.then(() => this.doEncounter());';
+  assert.equal(current.split(port).length-1,1,'exactly one known IO port');
+  assert.ok(current.includes(`if (!this.loaded) {\n${port}\n          return this.scene.gameData.saveSystem().then`),
+    'candidate IO must be inside the original unloaded save branch');
+  const restored=current.replace(port+'\n','')
+    .replace('observeRulePromise(this.scene, Promise.all(loadEnemyAssets).then','Promise.all(loadEnemyAssets).then')
     .replace('return this.scene.ui.setMode(Mode.MESSAGE).then','this.scene.ui.setMode(Mode.MESSAGE).then')
     .replace('return this.scene.gameData.saveSystem().then','this.scene.gameData.saveSystem().then')
     .replace('return this.scene.gameData.saveSession(this.scene, true).then','this.scene.gameData.saveSession(this.scene, true).then')
     .replace(/\}\)\);\s*\}$/, '});\n  }');
-  const normalize=s=>s.replace(/\r\n/g,'\n').trim();assert.equal(normalize(restored),normalize(frozen.phases.EncounterPhase.start));
+  assert.equal(normalize(restored),normalize(frozen.phases.EncounterPhase.start));
   const scene=parse('battle-scene.ts').statements.find(n=>n.name?.text==='BattleScene');
+  assert.equal(normalize(scene.members.find(n=>n.name?.getText()==='deferEncounterPersistence').getText()),
+    'deferEncounterPersistence(): Promise<void> | null { return null; }','solo scene keeps original save path');
   for(const [name,body]of Object.entries(frozen.scene))assert.equal(normalize(scene.members.find(n=>n.name?.getText()===name).getText()),normalize(body));
+});
+
+for(const mode of ['missing','null'])test(`encounter ${mode} candidate IO keeps original system/session save order`,async()=>{
+  const c=await nextBattleContext(),expected=await createNextBattle(codec.restore(saved(c))),calls=[];
+  const actual=await createNextBattle(c,{onBind:(_c,p,b)=>{
+    if(p.constructor!==originalPhases.NextEncounterPhase)return;
+    if(mode==='null')b.scene.deferEncounterPersistence=()=>{calls.push('port');return null;};
+    const system=b.scene.gameData.saveSystem,session=b.scene.gameData.saveSession;
+    b.scene.gameData.saveSystem=()=>{calls.push('system');return system();};
+    b.scene.gameData.saveSession=()=>{calls.push('session');return session();};
+  }});
+  assert.deepEqual(calls,mode==='null'?['port','system','session']:['system','session']);
+  assert.deepEqual(saved(actual.context),saved(expected.context));assert.deepEqual(actual.events,expected.events);
+});
+
+test('encounter awaits candidate persistence before original entry without calling solo saves',async()=>{
+  const c=await nextBattleContext(),before=saved(c),expected=await createNextBattle(codec.restore(before)),calls=[];
+  let enter,release,finished=false;
+  const entered=new Promise(resolve=>{enter=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  const pending=createNextBattle(c,{onBind:(_c,p,b)=>{
+    if(p.constructor!==originalPhases.NextEncounterPhase)return;
+    b.scene.deferEncounterPersistence=()=>{calls.push('port');enter();return gate;};
+    b.scene.gameData.saveSystem=()=>{calls.push('system');return Promise.resolve(true);};
+    b.scene.gameData.saveSession=()=>{calls.push('session');return Promise.resolve();};
+    const show=b.scene.ui.showText;
+    b.scene.ui.showText=(...args)=>{calls.push('encounter');return show(...args);};
+  }});
+  const outcome=pending.then(value=>{finished=true;return value;},error=>{finished=true;throw error;});
+  try{
+    await Promise.race([entered,outcome.then(()=>assert.fail('encounter ended before candidate IO was reached'))]);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(finished,false);assert.deepEqual(calls,['port']);assert.deepEqual(saved(c),before);
+  }finally{release();}
+  const actual=await outcome;
+  assert.deepEqual(calls,['port','encounter']);assert.deepEqual(saved(c),before);
+  assert.deepEqual(saved(actual.context),saved(expected.context));assert.deepEqual(actual.events,expected.events);
+});
+
+for(const failure of ['reject','throw'])test(`candidate persistence ${failure} blocks entry and preserves retryable original state`,async()=>{
+  const c=await nextBattleContext(),before=saved(c),calls=[];
+  await assert.rejects(createNextBattle(c,{onBind:(_c,p,b)=>{
+    if(p.constructor!==originalPhases.NextEncounterPhase)return;
+    b.scene.deferEncounterPersistence=()=>{
+      calls.push('port');const error=Error(`candidate-io-${failure}`);
+      if(failure==='throw')throw error;
+      return Promise.reject(error);
+    };
+    b.scene.gameData.saveSystem=()=>{calls.push('system');return Promise.resolve(true);};
+    b.scene.gameData.saveSession=()=>{calls.push('session');return Promise.resolve();};
+    const show=b.scene.ui.showText;
+    b.scene.ui.showText=(...args)=>{calls.push('encounter');return show(...args);};
+  }}),new RegExp(`candidate-io-${failure}`));
+  assert.deepEqual(calls,['port']);assert.deepEqual(saved(c),before);
+  const expected=await createNextBattle(codec.restore(before)),retry=await createNextBattle(c);
+  assert.deepEqual(saved(retry.context),saved(expected.context));assert.deepEqual(retry.events,expected.events);
 });
 for(const wave of [1,2,3])test(`original NewBattle/encounter/entry wave ${wave+1} equals continuous frozen execution across JSON restores`,async()=>{
   const start=await nextBattleContext({wave}),before=saved(start),ref=await referenceNextBattle(codec.restore(before));

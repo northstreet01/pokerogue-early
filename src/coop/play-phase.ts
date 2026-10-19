@@ -49,6 +49,7 @@ export default class CoopPlayPhase extends Phase {
   private presentation: CoopBattlePresentation | null = null;
   private preparationSignature = '';
   private releasePreparationParty: (() => void) | null = null;
+  private releaseActiveSwitchParty: (() => void) | null = null;
   private switchSignature = '';
   private submitted = false;
   private profileDirty = false;
@@ -65,6 +66,7 @@ export default class CoopPlayPhase extends Phase {
     this.scene.events?.once('shutdown', () => {
       this.disposed = true;
       this.clearPreparationParty();
+      this.clearActiveSwitchParty();
       if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
       this.epoch = null; this.socket?.close(); this.presentation?.clear(); this.overlay.remove();
     });
@@ -150,6 +152,7 @@ export default class CoopPlayPhase extends Phase {
       this.setStatus('连接已断开，正在重新连接…', true);
       this.consumer = null; this.epoch = null;
       this.clearPreparationParty();
+      this.clearActiveSwitchParty();
       this.inputReady = false; this.battleInputActive = false;
       void this.scene.ui.setMode(Mode.MESSAGE);
       this.reconnectTimer = setTimeout(() => this.connect(), 1000);
@@ -192,6 +195,7 @@ export default class CoopPlayPhase extends Phase {
           this.submitted = !!message.submitted?.[this.seat!];
           if (this.submitted || !this.inputReady) {
             this.clearPreparationParty();
+            this.clearActiveSwitchParty();
             this.battleInputActive = false;
             this.preparationSignature = ''; this.switchSignature = '';
             if (this.latest.personal.decision.kind !== 'lobby') await this.scene.ui.setMode(Mode.MESSAGE);
@@ -226,8 +230,8 @@ export default class CoopPlayPhase extends Phase {
           return;
         }
         if (action?.kind === 'fight') this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select'].includes(action?.kind)) this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select'].includes(action?.kind))
+        if (['preparation', 'switch-confirm', 'switch-select', 'switch'].includes(action?.kind)) this.submitted = true;
+        if (['preparation', 'switch-confirm', 'switch-select', 'switch'].includes(action?.kind))
           await this.scene.ui.setMode(Mode.MESSAGE);
         if (action?.kind === 'profile-ready') this.profileDirty = false;
         if (this.latest?.personal.decision.kind === 'wait-actions') this.setStatus('行动已提交，等待队友／结算…');
@@ -297,6 +301,7 @@ export default class CoopPlayPhase extends Phase {
     const signature = `${snapshot.connectionEpoch}:${snapshot.decisionId}:${snapshot.revision}`;
     if (this.battleSignature === signature) return;
     this.clearPreparationParty();
+    this.clearActiveSwitchParty();
     this.battleInputActive = false;
     this.submitted = false;
     this.preparationSignature = '';
@@ -421,6 +426,72 @@ export default class CoopPlayPhase extends Phase {
     release?.();
   }
 
+  private clearActiveSwitchParty() {
+    const release = this.releaseActiveSwitchParty;
+    this.releaseActiveSwitchParty = null;
+    release?.();
+  }
+
+  private async openActiveSwitchParty() {
+    const snapshot = this.latest, epoch = this.epoch, decision = snapshot?.personal.decision;
+    if (!decision || decision.kind !== 'wait-actions' || !this.isPersonalInputCurrent(snapshot, epoch)
+      || this.seat === null) return;
+    const options = (decision.options ?? []).filter((option: any) => option.kind === 'switch');
+    if (!options.length) {
+      this.setStatus('当前没有可上场的后备宝可梦', true);
+      return;
+    }
+    const allowed = new Set(options.map((option: any) => option.pokemonId));
+    const personal = this.model.applied?.personal;
+    if (!personal?.party?.length) throw new Error('PERSONAL_PARTY_MISSING');
+    this.clearActiveSwitchParty();
+    const savedParty = (this.scene as any).party, savedBattle = this.scene.currentBattle;
+    const party = personal.party.map((entry: any) => {
+      const pokemon = restorePokemonState(capturePokemonState(entry.pokemon));
+      pokemon.scene = this.scene;
+      pokemon.generateName();
+      return pokemon;
+    });
+    const battle = Object.create(savedBattle);
+    battle.double = false; battle.getBattlerCount = () => 1;
+    (this.scene as any).party = party;
+    this.scene.currentBattle = battle;
+    let active = true;
+    const release = () => {
+      active = false;
+      if ((this.scene as any).party === party) (this.scene as any).party = savedParty;
+      if (this.scene.currentBattle === battle) this.scene.currentBattle = savedBattle;
+    };
+    this.releaseActiveSwitchParty = release;
+    try {
+      await this.scene.ui.setMode(Mode.PARTY, PartyUiMode.SWITCH, 0, (slotIndex: number) => {
+        if (!active) return;
+        const current = this.isPersonalInputCurrent(snapshot, epoch);
+        this.clearActiveSwitchParty();
+        if (!current) return;
+        this.battleInputActive = false;
+        if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= personal.party.length) {
+          void this.scene.ui.setMode(Mode.MESSAGE).then(() => this.openBattleCommand());
+          return;
+        }
+        const entry = personal.party[slotIndex];
+        if (!entry || !allowed.has(entry.id)) {
+          this.setStatus('该宝可梦不能作为主动换人目标', true);
+          void this.scene.ui.setMode(Mode.MESSAGE).then(() => this.openBattleCommand());
+          return;
+        }
+        void this.scene.ui.setMode(Mode.MESSAGE)
+          .then(() => this.sendAction({ kind: 'switch', pokemonId: entry.id }, '已提交换人，等待服务器确认…'));
+      }, (pokemon: any) => allowed.has(pokemon.id) ? null : '不能更换为该宝可梦');
+    } catch (error) {
+      this.clearActiveSwitchParty();
+      this.battleInputActive = false;
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      this.openBattleCommand();
+      throw error;
+    }
+  }
+
   private renderPreparationControls(player: any, snapshot: any, epoch: string | null) {
     this.controls.replaceChildren();
     const row = document.createElement('div'); row.className = 'row';
@@ -483,7 +554,12 @@ export default class CoopPlayPhase extends Phase {
   interceptCommand(command: Command): boolean {
     if (!this.battleInputActive || !this.inputReady || this.actionId || this.submitted) return true;
     if (command === Command.FIGHT) return false;
-    this.setStatus('该战斗菜单尚未接入；当前可验证 FIGHT', true);
+    if (command === Command.POKEMON) {
+      void this.openActiveSwitchParty().catch(error =>
+        this.setStatus(`换人菜单失败：${error?.message ?? error}`, true));
+      return true;
+    }
+    this.setStatus('该战斗菜单尚未接入；当前可验证 FIGHT／POKEMON', true);
     return true;
   }
 

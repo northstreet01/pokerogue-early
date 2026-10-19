@@ -1,5 +1,7 @@
 # 新窗口开发交接
 
+2026-10-19 VS-02B-07 文字与入口 UI：A 复用新版 Pokerogue 语言/场景文字度量，加入 CJK 字体回退、中文降字号、轻阴影、padding 与 advanced wrap；英文保持原度量。B 将 coop-play 顶部改为低高度可换行状态条，收紧房间/准备/预算与桌面控制，窄窗适配；原菜单仍用原窗口/像素资源。typecheck、生产 build 通过；浏览器项目交用户验收，未执行项保持待测。详见 [VS-02B-07 记录](mvp-vs-02b07-ui-text.md)。
+
 2026-10-19 VS-02B-06 维护者修订：原效果改为复用原 BattleScene.addModifier 与任务观察器收尾，显式拒绝误继承的 REVIVE；修复 Potion 原 Party 缺少 battler-count、取消重选、过期回调和临时视图清理，展示使用 codec 副本。A 的球／Potion Worker 与正式双 WS／FormalRoomStore 故障、重试、重启、重复 actionId、房间隔离切片通过；B 已实际完成球补给双浏览器领取（双方5→10）、重启刷新不重授予及第二战共同 FIGHT，Potion 目标原 UI 仍待用户测试，B 整体部分通过。最终 typecheck／build 退出0，完整串行回归992/992、退出0，无失败／跳过／取消，1053058.5728ms；见维护者记录。用户要求本轮收尾后推送；发布采用公开 main 的新父提交与经审查的最终树，不合并旧内部评审历史。下一批优先复用源项目最近几个可核实版本的文字排版与原 UI，浏览器测试可交用户执行，见下一批计划；捕获／主动换人／本局备用／战后换队仍是随后 MVP 必需项。
 
 [维护者记录](mvp-vs02b06-review.md) · [新版 UI 计划](coop-ui-text-next-plan.md) · [用户测试清单](vs02b06-manual-acceptance.md)

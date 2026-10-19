@@ -22,14 +22,22 @@ export enum TextStyle {
   TOOLTIP_CONTENT
 };
 
+function isCjkLanguage(): boolean {
+  const language = i18next.resolvedLanguage ?? i18next.language;
+  return language === 'zh-Hans' || language === 'zh-Hant' || language === 'ja';
+}
+
+function getLineSpacing(styleOptions: Phaser.Types.GameObjects.Text.TextStyle, bbCode = false): number {
+  return styleOptions.lineSpacing ?? (bbCode ? (isCjkLanguage() ? 8 : 10) : (isCjkLanguage() ? 6 : 5));
+}
+
 export function addTextObject(scene: Phaser.Scene, x: number, y: number, content: string, style: TextStyle, extraStyleOptions?: Phaser.Types.GameObjects.Text.TextStyle): Phaser.GameObjects.Text {
   const [ styleOptions, shadowColor, shadowSize ] = getTextStyleOptions(style, extraStyleOptions);
 
   const ret = scene.add.text(x, y, content, styleOptions);
   ret.setScale(0.1666666667);
   ret.setShadow(shadowSize, shadowSize, shadowColor);
-  if (!(styleOptions as Phaser.Types.GameObjects.Text.TextStyle).lineSpacing)
-    ret.setLineSpacing(5);
+  ret.setLineSpacing(getLineSpacing(styleOptions as Phaser.Types.GameObjects.Text.TextStyle));
 
   return ret;
 }
@@ -38,10 +46,12 @@ export function addTextObject(scene: Phaser.Scene, x: number, y: number, content
 export function setTextStyle(obj: Phaser.GameObjects.Text, style: TextStyle, extraStyleOptions?: Phaser.Types.GameObjects.Text.TextStyle): void {
   const [ styleOptions, shadowColor, shadowSize ] = getTextStyleOptions(style, extraStyleOptions);
   obj.setStyle(styleOptions as Phaser.Types.GameObjects.Text.TextStyle);
+  // Phaser Text.setStyle updates TextStyle only; padding and lineSpacing live
+  // on Text itself and must also be updated when reusing an existing object.
+  obj.setPadding((styleOptions as Phaser.Types.GameObjects.Text.TextStyle).padding);
   obj.setScale(0.1666666667);
   obj.setShadow(shadowSize, shadowSize, shadowColor);
-  if (!(styleOptions as Phaser.Types.GameObjects.Text.TextStyle).lineSpacing)
-    obj.setLineSpacing(5);
+  obj.setLineSpacing(getLineSpacing(styleOptions as Phaser.Types.GameObjects.Text.TextStyle));
 }
 
 export function addBBCodeTextObject(scene: Phaser.Scene, x: number, y: number, content: string, style: TextStyle, extraStyleOptions?: Phaser.Types.GameObjects.Text.TextStyle): BBCodeText {
@@ -51,8 +61,7 @@ export function addBBCodeTextObject(scene: Phaser.Scene, x: number, y: number, c
   scene.add.existing(ret);
   ret.setScale(0.1666666667);
   ret.setShadow(shadowSize, shadowSize, shadowColor);
-  if (!(styleOptions as BBCodeText.TextStyle).lineSpacing)
-    ret.setLineSpacing(i18next.resolvedLanguage === 'zh-Hans' ? 8 : 10);
+  ret.setLineSpacing(getLineSpacing(styleOptions as Phaser.Types.GameObjects.Text.TextStyle, true));
 
   return ret;
 }
@@ -68,8 +77,7 @@ export function addTextInputObject(scene: Phaser.Scene, x: number, y: number, wi
 }
 
 export function getTextStyleOptions(style: TextStyle, extraStyleOptions?: Phaser.Types.GameObjects.Text.TextStyle): [ Phaser.Types.GameObjects.Text.TextStyle | InputText.IConfig, string, integer ] {
-  const language = i18next.resolvedLanguage ?? i18next.language;
-  const cjk = language === 'zh-Hans' || language === 'zh-Hant' || language === 'ja';
+  const cjk = isCjkLanguage();
   // Phaser/Canvas does not synthesize a CJK face for the pixel font. Keep the
   // original face first and fall back only for scripts it cannot render.
   const fontFamily = cjk ? 'emerald, "Noto Sans SC", "Microsoft YaHei", sans-serif' : 'emerald';

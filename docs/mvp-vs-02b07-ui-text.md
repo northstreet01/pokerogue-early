@@ -51,12 +51,13 @@
 
 ## 用户浏览器验收清单（待用户执行）
 
-1. `npm run build`。
+1. 在 early 目录依次运行 `npm run build:coop-runtime`、`npm run build`。前者生成正式 Worker 运行包，不能只构建浏览器资源。
 2. PowerShell：
    ```powershell
    $env:COOP_PROFILE_LOBBY='1'
    $env:COOP_DIST='dist'
    $env:COOP_FORMAL_DATA='build/user-vs02b07-rooms'
+   $env:COOP_DATA='build/user-vs02b07-experiment-rooms'
    $env:PORT='8043'
    node server/start.mjs
    ```
@@ -73,3 +74,15 @@
 - 未在真实浏览器执行本批视觉检查；用户测试前不宣称通过。
 - 新版消息窗口的说话者框、特殊空格换行完整回调未整套移植；本批只用语言/度量/advanced wrap。
 - 未新增跨设备/移动端支持声明。
+
+## 维护者复核补记（2026-10-19）
+
+上文保留原交付描述；以下纠正来源及实际实现范围，优先于上文：
+
+- 官方 API 核对两个完整 SHA 存在。`1c1d63a50f00630e506f447aece8e6d55a185346` 本身是引入 tutorial speaker box 的提交，并非变化前基线。`1174d9f35fa350645a74244f6e55495aa6c4eedf` 是本地参考仓库的可见上游点；early 固定基线为 SPEC 中的 `ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9`。
+- `6d9c6b425d9a99a714b43f2dbe762f9a66c9236c` 的 Ideographic Space／ZWSP 专用换行实现未移植。当前是按 early 适配的语言／场景度量和 Phaser advanced wrap；不能据此宣称新版特殊空格修复已接入。
+- 原交付普通 Text 行距仍为 5，维护者才修至中文 6；`setTextStyle` 尚无生产调用者，不代表已有文本会随切换语言即时重排。英文字号保留，默认阴影有变化。
+- 维护者补合作入口原字体注册、重设文本的 padding／显式行距与零值处理、窄窗错误及控制区换行。字体回退仍依赖用户系统可用字体，未打包 Noto 字体。
+- B 仅顶部与控制区布局、共用文字度量落地；没有逐菜单完成选队／整备／Party／BattleInfo 的结构调整和视觉验收。A／B 整体均为部分通过；浏览器及 Potion 原 Party 操作继续待用户执行。
+
+独立复验及下一步见 [维护者验收](mvp-vs-02b07-review.md)。

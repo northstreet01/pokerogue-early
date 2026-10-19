@@ -72,4 +72,8 @@
 
 ## 完整回归
 
-<!-- FULL -->
+- 运行时 HEAD：`8ffcd9d9f4346deaea268888fbbf6cc2112ef3d4`（A `0ddbd323` + B `8ffcd9d9`）；随后只追加本文档提交 `3da1d43f`，没有源码／测试差异。
+- TAP `1..1000`，tests **1000**，pass **1000**，fail／cancelled／skipped／todo 均 0，退出码 **0**，`1595758.506ms`（约 26m36s）。
+- 日志／退出码／元数据：ignored `build/vs02b08/full-final.tap`、`full-final-exit.txt`、`execution-meta-final.txt`。
+- 最终源码／测试 blob（HEAD `3da1d43f`）：active switch 测试 `46ee98024e070318f84b7ff8b55a1406dcc14ea8`，native-entry `01fae98915f00b4dcedf405e120a22aa4dfad8c5`，play-phase `a13b42a924924132c26c34c687440c7f6d361806`。
+- 未运行浏览器验收；B 段仍待用户。

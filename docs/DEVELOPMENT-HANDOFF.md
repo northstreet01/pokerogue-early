@@ -1,6 +1,6 @@
 # 新窗口开发交接
 
-2026-10-19 VS-02B-08 战斗内主动换人：A 以稳定 pokemonId option 经原 CommandPhase POKEMON／TurnStart／SwitchSummonPhase 执行，个人 Party 视图分席换人，混合 FIGHT 与双方同轮换人可达下一输入；真实 Worker 4/4、真实双 WS 1/1、既有换人定向 23/23，typecheck／build 通过。B 接原 POKEMON→个人 Party UI，取消／拒绝／刷新清理和 outbox 门控保留，但双浏览器未执行，待用户验收。普通 SEND_OUT 之外、经验条阶段及主动换人专用故障／重启测试仍是缺口。详见 [VS-02B-08 记录](mvp-vs-02b08-active-switch.md)。
+2026-10-19 VS-02B-08 战斗内主动换人：A 以稳定 pokemonId option 经原 CommandPhase POKEMON／TurnStart／SwitchSummonPhase 执行，个人 Party 视图分席换人，混合 FIGHT 与双方同轮换人可达下一输入；真实 Worker 4/4、真实双 WS 1/1、既有换人定向 23/23，最终完整串行 **1000/1000、退出 0**（1595758.506ms），typecheck／build 通过。B 接原 POKEMON→个人 Party UI，取消／拒绝／刷新清理和 outbox 门控保留，但双浏览器未执行，待用户验收。普通 SEND_OUT 之外、经验条阶段及主动换人专用故障／重启测试仍是缺口。详见 [VS-02B-08 记录](mvp-vs-02b08-active-switch.md)。
 
 2026-10-19 VS-02B-07 维护者独立复核：A 文字基础／B 顶部布局**部分通过**，浏览器视觉和 Potion 原 Party 仍交用户验收。修复合作入口原字体未注册、既有 Text 重设遗漏 padding／行距及显式零值、窄窗长错误与控制区换行；补正式 Worker 构建启动步骤，纠正来源提交含义和 early 固定基线混称。定向35/35、typecheck／生产build退出0（1m45s）；本次完整回归和浏览器未运行，不沿用旧计数。独立本地评审分支 `review/vs02b07-ui-text-fix`，main仍86798227，未合并／未推送，详见 [维护者验收](mvp-vs-02b07-review.md)。下一批仅战斗内普通主动换人 A正式运行器／事务、B原Command／本人Party／后续FIGHT，完整提示词仅本地；UI按用户实测反馈定点修，捕获／本局备用／战后换队等MVP范围不删。
 

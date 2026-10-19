@@ -363,7 +363,7 @@ test('C07 switch-select JSON restart reproduces the reserve choice and continues
   assert.equal(current.battle.waveIndex, 2);
   assert.equal(current.roster.field[selectSeat], selectReserve.pokemonId);
   assert.equal(current.roster.field[1 - selectSeat], switchSelect.roster.field[1 - selectSeat]);
-  for (const seat of [0, 1]) assert.ok(current.decision.options[seat].every(action => action.pokemonId === current.roster.field[seat]));
+  for (const seat of [0, 1]) assert.ok(current.decision.options[seat].filter(action => action.kind !== 'switch').every(action => action.pokemonId === current.roster.field[seat]));
 });
 
 test('C08 two hosts keep preparation, RNG, resources and legal results isolated', async t => {

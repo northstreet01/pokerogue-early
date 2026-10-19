@@ -56,7 +56,7 @@ test('full original entry agrees with per-phase worker restart, preserving both 
     const own = c.roster.entries.find(e => e.owner === seat && e.index === 0);
     assert.equal(c.roster.field[seat], own.pokemon.fields.id);
     assert.equal(c.continuation.phaseQueue[seat].phase.scope, seat);
-    assert.ok(c.decision.options[seat].every(a => a.pokemonId === own.pokemon.fields.id));
+    assert.ok(c.decision.options[seat].filter(a => a.kind !== 'switch').every(a => a.pokemonId === own.pokemon.fields.id));
   }
   assert.deepEqual(events.filter(e => e.kind === 'phase-start').map(e => e.phase),
     ['NewBattlePhase', 'EncounterPhase', 'PostSummonPhase', 'PostSummonPhase', 'SummonPhase',
@@ -138,7 +138,7 @@ for (const branch of ['decline', 'cancel', 'switch']) test(`original next encoun
   }
   assert.equal(choices, branch === 'decline' ? 2 : 4);
   assert.equal(c.battle.waveIndex, 2); assert.deepEqual(c.roster.field.slice(0, 2), actors);
-  for (const seat of [0, 1]) assert.ok(c.decision.options[seat].every(a => a.pokemonId === actors[seat]));
+  for (const seat of [0, 1]) assert.ok(c.decision.options[seat].filter(a => a.kind !== 'switch').every(a => a.pokemonId === actors[seat]));
   // These are usable real commands, not a fabricated decision descriptor.
   const r = await h.request('native-submit', { checkpoint: c, inputs: inputs(c) });
   const commands = restoreTurnCommands(r.checkpoint.battle.turnCommands);

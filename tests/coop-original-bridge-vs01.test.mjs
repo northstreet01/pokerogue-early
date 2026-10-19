@@ -288,7 +288,8 @@ test('two real WS clients drive the original worker to the second battle FIGHT',
     for (const seat of [0, 1]) {
       const snapshot = seat === 0 ? state.sa : state.sb;
       assert.ok(snapshot.personal.party.some(entry => entry.id === snapshot.shared.field[seat]));
-      assert.ok(snapshot.personal.decision.options.every(option => option.pokemonId === snapshot.shared.field[seat]));
+      assert.ok(snapshot.personal.decision.options.filter(option => option.kind !== 'switch')
+        .every(option => option.pokemonId === snapshot.shared.field[seat]));
     }
 
     const secondRevision = state.sa.revision;
@@ -732,3 +733,37 @@ for (const [seed, catalogId] of [['mvp-native-entry', 'GREAT_BALL'], ['potion-d'
     } finally { if (env) await env.close(); await disk.cleanup(); }
   });
 }
+
+test('VS-02B-08 real WS active switch keeps the ally and lets both seats continue fighting', { timeout: 120000 }, async () => {
+  let env;
+  try {
+    env = await startEnv({ fixture: { seed: 'vs02b08-switch', identity: { trainerId: 1, secretId: 2 },
+      parties: [[1, 4, 7], [906, 909, 912]], eggState: { players: [[], []] } } });
+    const room = await createRoom(env);
+    let state = await syncBoth(env, room.a, room.b, room.sa, room.sb);
+    const switchA = state.sa.personal.decision.options.find(option => option.kind === 'switch');
+    const switchB = state.sb.personal.decision.options.find(option => option.kind === 'switch');
+    assert.ok(switchA && switchB);
+    const outgoing = state.sa.personal.party[0].id;
+    const outgoingPp = state.sa.personal.party[0].pokemon.fields.moveset.map(move => move.fields.ppUsed);
+    const partnerIds = state.sb.personal.party.map(entry => entry.id);
+    const revision = state.sa.revision;
+    state = await submitBoth(env, room, state.sa, state.sb, [switchA, switchB]);
+    assert.equal(state.sa.revision, revision + 1);
+    assert.equal(state.sa.personal.decision.kind, 'wait-actions');
+    assert.equal(state.sa.personal.party[0].id, switchA.pokemonId);
+    assert.equal(state.sa.personal.party[1].id, outgoing);
+    assert.equal(state.sb.personal.party[0].id, switchB.pokemonId);
+    const outgoingAfterPp = state.sa.personal.party[1].pokemon.fields.moveset.map(move => move.fields.ppUsed);
+    assert.deepEqual(outgoingAfterPp, outgoingPp, 'outgoing PP was not charged by the switch');
+    assert.deepEqual(state.sb.personal.party.map(entry => entry.id).slice(0, 2),
+      [switchB.pokemonId, partnerIds[0]]);
+    const statusFight = snapshot => snapshot.personal.decision.options.find(option =>
+      option.kind === 'fight' && option.cursor === 1 && (option.target === null || option.target >= 2))
+      ?? fightAction(snapshot);
+    const next = await submitBoth(env, room, state.sa, state.sb,
+      [statusFight(state.sa), statusFight(state.sb)]);
+    assert.ok(next.sa.revision > state.sa.revision);
+    assert.ok(['wait-actions', 'preparation'].includes(next.sa.personal.decision.kind));
+  } finally { if (env) await env.close(); }
+});

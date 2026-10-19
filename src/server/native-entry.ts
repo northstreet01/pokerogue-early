@@ -38,7 +38,9 @@ import { advancePreBattleSwitch } from '../battle-core/pre-battle-switch-runner.
 import { createPreBattleSwitchDecision } from '../battle-core/switch-command.mjs';
 import { PartyOption } from '../ui/party-ui-handler';
 import { PokemonHeldItemModifier, AddPokeballModifier, PokemonHpRestoreModifier } from '../modifier/modifier';
-import { EncoreTag } from '../data/battler-tags';
+import { EncoreTag, TrappedTag } from '../data/battler-tags';
+import { CheckTrappedAbAttr, applyCheckTrappedAbAttrs } from '../data/ability';
+import * as Utils from '../utils';
 import { Command } from '../ui/command-ui-handler';
 import { Moves } from '../data/enums/moves';
 import { requireContract as check } from '../battle-core/coop-contract.mjs';
@@ -160,9 +162,21 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.tweens = { add: config => { schedule(config.onComplete, config.duration ?? 0); return { stop() {} }; } };
   root.ui = { getMessageHandler: () => ({ promptLevelUpStats: () => Promise.resolve() }), setMode: (mode, seat, _move, callback) => {
     if (mode === Mode.COMMAND) {
-      check(inputs[seat]?.kind === 'fight' && root.currentPhase instanceof CommandPhase, 'NATIVE_UI_DECISION_REQUIRED');
-      const p = root.currentPhase;
-      schedule(() => check(p.handleCommand(Command.FIGHT, inputs[seat].cursor, false), 'NATIVE_COMMAND_REJECTED'));
+      check(root.currentPhase instanceof CommandPhase, 'NATIVE_UI_DECISION_REQUIRED');
+      const p = root.currentPhase, action = inputs[seat];
+      if (action?.kind === 'fight') {
+        check(Number.isInteger(action.cursor), 'NATIVE_UI_DECISION_REQUIRED');
+        schedule(() => check(p.handleCommand(Command.FIGHT, action.cursor, false), 'NATIVE_COMMAND_REJECTED'));
+      } else {
+        check(action?.kind === 'switch', 'NATIVE_UI_DECISION_REQUIRED');
+        const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
+          && e.pokemon.id === action.pokemonId);
+        const cursor = entry ? root.getParty().indexOf(entry.pokemon) : -1;
+        check(cursor >= 0, 'INVALID_SWITCH_INTENT');
+        // The original CommandPhase validates traps/abilities and stores the
+        // ordinary POKEMON command. SwitchSummonPhase owns the actual swap.
+        schedule(() => check(p.handleCommand(Command.POKEMON, cursor, false), 'NATIVE_COMMAND_REJECTED'));
+      }
     } else if (mode === Mode.TARGET_SELECT) {
       check(inputs[seat]?.kind === 'fight' && Number.isInteger(inputs[seat].target), 'NATIVE_UI_DECISION_REQUIRED');
       schedule(() => callback(inputs[seat].target));
@@ -231,7 +245,21 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   return { root, views, events, intents, bindPhase, sync,
     drainTasks: () => Promise.all(trackers.map(tracker => tracker.drain())),
     async execute(p, resume?) {
-      ended = 0; waiting = null; const scope = bindPhase(p); root.currentPhase = p;
+      ended = 0; waiting = null;
+      if (p instanceof SwitchSummonPhase && Number.isInteger((p as any).fieldIndex)
+        && inputs[(p as any).fieldIndex]?.kind === 'switch') {
+        const seat = (p as any).fieldIndex;
+        const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
+          && e.pokemon.id === inputs[seat].pokemonId);
+        check(entry, 'INVALID_SWITCH_INTENT');
+        // Execute an active switch through this seat's personal Party view. The
+        // original SwitchSummonPhase swaps a mutable personal array, whereas the
+        // root party is a read-only composite for co-op.
+        if ((p as any).scene === root) (p as any).scene = views[seat];
+        (p as any).fieldIndex = 0;
+        (p as any).slotIndex = entry.index;
+      }
+      const scope = bindPhase(p); root.currentPhase = p;
       const changes = [];
       const patch = (object, key, value) => { changes.push([object, key, Object.getOwnPropertyDescriptor(object, key)]);
         Object.defineProperty(object, key, { value, writable: true, configurable: true }); };
@@ -324,16 +352,22 @@ function actionDecision(c, root, id) {
   try {
     const options = withOriginalRules({ ...c, sceneRandom: new SceneRandom(c.sceneRandom.capture()) }, () => Object.fromEntries([0, 1].map(seat => {
       const pokemon = root.getPlayerField()[seat];
-      return [seat, pokemon.getMoveset().flatMap((move, cursor) => {
-        if (!move.isUsable(pokemon)) return [];
-        const targets = getMoveTargets(pokemon, move.moveId);
-        return (targets.targets.length > 1 && !targets.multiple ? targets.targets : [null]).map(target => {
-          const intent = { kind: 'fight', pokemonId: pokemon.id, cursor, target };
-          resolveFightIntent(pokemon, seat, intent, { fightCommand: Command.FIGHT, noneMove: Moves.NONE,
-            struggleMove: Moves.STRUGGLE, getMoveTargets, getEncoreTag: p => p.getTag(EncoreTag) });
-          return intent;
-        });
-      })];
+      const switchOptions = c.roster.entries.filter(e => e.owner === seat && e.group === 'party'
+        && e.index > 0 && e.pokemon.hp > 0 && !c.roster.field.includes(e.pokemon.id))
+        .sort((a, b) => a.index - b.index).map(e => ({ kind: 'switch', pokemonId: e.pokemon.id }));
+      return [seat, [
+        ...pokemon.getMoveset().flatMap((move, cursor) => {
+          if (!move.isUsable(pokemon)) return [];
+          const targets = getMoveTargets(pokemon, move.moveId);
+          return (targets.targets.length > 1 && !targets.multiple ? targets.targets : [null]).map(target => {
+            const intent = { kind: 'fight', pokemonId: pokemon.id, cursor, target };
+            resolveFightIntent(pokemon, seat, intent, { fightCommand: Command.FIGHT, noneMove: Moves.NONE,
+              struggleMove: Moves.STRUGGLE, getMoveTargets, getEncoreTag: p => p.getTag(EncoreTag) });
+            return intent;
+          });
+        }),
+        ...switchOptions,
+      ]];
     })));
     return { id, kind: 'wait-actions', requiredSeats: [0, 1], options };
   } finally { c.battle.restoreRandomState(saved); }
@@ -510,15 +544,35 @@ export async function openNativeSelectedBattleToInput(runtime, payload) {
   return runOpenedToInput(runtime, await openNativeSelectedBattle(runtime, payload));
 }
 
+function validateActiveSwitch(c, binding, seat, action) {
+  check(action && Object.keys(action).sort().join(',') === 'kind,pokemonId' && action.kind === 'switch', 'INVALID_SWITCH_INTENT');
+  const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
+    && e.pokemon.id === action.pokemonId);
+  check(entry && entry.index > 0 && entry.pokemon.hp > 0, 'INVALID_SWITCH_TARGET');
+  check(!c.roster.field.includes(entry.pokemon.id), 'INVALID_SWITCH_TARGET');
+  const player = binding.root.getPlayerField()[seat];
+  check(player?.hp > 0, 'INVALID_SWITCH_OWNER');
+  const trapTag = player.findTag((tag: any) => tag instanceof TrappedTag);
+  const trapped = new Utils.BooleanHolder(false);
+  binding.root.getEnemyField().forEach((enemy: any) => applyCheckTrappedAbAttrs(CheckTrappedAbAttr, enemy, trapped));
+  check(!trapTag && !trapped.value, 'POKEMON_TRAPPED');
+  return entry;
+}
+
 export function validateNativeAction(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
   codec.validateAction(c, payload.seat, payload.action);
   const binding = bindNativeScene(c, runtime.scene.gameData);
+  const saved = c.battle.captureRandomState();
   try {
+    if (payload.action.kind === 'switch') {
+      validateActiveSwitch(c, binding, payload.seat, payload.action);
+      return true;
+    }
     return withOriginalRules(c, () => resolveFightIntent(binding.root.getPlayerField()[payload.seat], payload.seat, payload.action,
       { fightCommand: Command.FIGHT, noneMove: Moves.NONE, struggleMove: Moves.STRUGGLE, getMoveTargets, getEncoreTag: p => p.getTag(EncoreTag) }));
-  } finally { binding.dispose(); }
+  } finally { c.battle.restoreRandomState(saved); binding.dispose(); }
 }
 
 export async function submitNativeActions(runtime, payload) {
@@ -529,11 +583,14 @@ export async function submitNativeActions(runtime, payload) {
     validateInput(candidate, seat, action) {
       const binding = bindNativeScene(candidate, runtime.scene.gameData);
       const saved = candidate.battle.captureRandomState();
-      try { return withOriginalRules({ ...candidate, sceneRandom: new SceneRandom(candidate.sceneRandom.capture()) }, () =>
-        resolveFightIntent(binding.root.getPlayerField()[seat], seat, action, {
-          fightCommand: Command.FIGHT, noneMove: Moves.NONE, struggleMove: Moves.STRUGGLE,
-          getMoveTargets, getEncoreTag: p => p.getTag(EncoreTag)
-        })); }
+      try {
+        if (action.kind === 'switch') { validateActiveSwitch(candidate, binding, seat, action); return true; }
+        return withOriginalRules({ ...candidate, sceneRandom: new SceneRandom(candidate.sceneRandom.capture()) }, () =>
+          resolveFightIntent(binding.root.getPlayerField()[seat], seat, action, {
+            fightCommand: Command.FIGHT, noneMove: Moves.NONE, struggleMove: Moves.STRUGGLE,
+            getMoveTargets, getEncoreTag: p => p.getTag(EncoreTag)
+          }));
+      }
       finally { candidate.battle.restoreRandomState(saved); binding.dispose(); }
     },
     async executeCollected(candidate, inputs) {
@@ -545,12 +602,28 @@ export async function submitNativeActions(runtime, payload) {
           const p = selectNextPhase(binding.root, () => { throw new Error('NATIVE_COMMAND_QUEUE_EMPTY'); }).phase;
           await binding.execute(p);
         }
-        check([0, 1].every(seat => candidate.battle.turnCommands[seat]?.command === Command.FIGHT), 'INCOMPLETE_NATIVE_COMMANDS');
+        check([0, 1].every(seat => [Command.FIGHT, Command.POKEMON].includes(candidate.battle.turnCommands[seat]?.command)),
+          'INCOMPLETE_NATIVE_COMMANDS');
+        // Start the original turn and execute its SwitchSummon/PostSummon chain
+        // only when a switch intent was collected. Pure FIGHT turns retain the
+        // previous stable phase boundary used by recovery tests.
+        if (Object.values(inputs).some((action: any) => action?.kind === 'switch')) {
+          for (let budget = 0; budget < 30; budget++) {
+            const next = binding.root.phaseQueuePrepend.at(-1) ?? binding.root.phaseQueue[0];
+            if (next instanceof SwitchSummonPhase || next instanceof PostSummonPhase || next instanceof EnemyCommandPhase
+              || next instanceof TurnStartPhase) {
+              const p = selectNextPhase(binding.root, () => { throw new Error('NATIVE_SWITCH_QUEUE_EMPTY'); }).phase;
+              await binding.execute(p);
+              continue;
+            }
+            break;
+          }
+        }
         intents = binding.intents;
         return { completed: true, pendingTasks: 0, events: binding.events, grants: [] };
       } finally { binding.dispose(); }
     }
-  }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}` });
+  }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`, allowSwitch: true });
   return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 

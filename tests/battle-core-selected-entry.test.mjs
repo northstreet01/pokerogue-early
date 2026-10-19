@@ -94,7 +94,7 @@ test('two seats of six v2 selections reach the real first action input', async (
       const actor = c.roster.field[seat];
       assert.equal(actor, players[seat * 3].pokemon.fields.id);
       assert.ok(c.decision.options[seat].length > 0);
-      assert.ok(c.decision.options[seat].every(option => option.kind === 'fight' && option.pokemonId === actor));
+      assert.ok(c.decision.options[seat].filter(option => option.kind !== 'switch').every(option => option.kind === 'fight' && option.pokemonId === actor));
     }
     assert.deepEqual(c.eggState.players[0].map(egg => egg.id), [28123456]);
     assert.deepEqual(c.eggState.players[1], []);
@@ -158,7 +158,7 @@ test('variable personal parties preserve seat ownership and allow coincident ori
         assert.deepEqual(party.map(e => e.index), party.map((_, i) => i));
         assert.equal(c.roster.field[seat], party[0].pokemon.fields.id);
         assert.ok(c.decision.options[seat].length > 0);
-        assert.ok(c.decision.options[seat].every(option => option.pokemonId === c.roster.field[seat]));
+        assert.ok(c.decision.options[seat].filter(option => option.kind !== 'switch').every(option => option.pokemonId === c.roster.field[seat]));
       }
       assert.deepEqual(value, untouched);
       const fresh = await hostFor();

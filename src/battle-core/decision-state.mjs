@@ -100,7 +100,17 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       const entry = candidate.roster.entries.find(e => e.pokemon.id === candidate.roster.field[seat]);
       check(entry && entry.owner === seat && entry.pokemon.hp > 0, 'INVALID_DECISION');
       const options = decision.options[seat];
-      check(Array.isArray(options) && options.length > 0 && options.length <= 10000 && options.every(o => o && typeof o.kind === 'string' && o.pokemonId === entry.pokemon.id), 'INVALID_DECISION');
+      check(Array.isArray(options) && options.length > 0 && options.length <= 10000
+        && options.every(o => {
+          if (!o || typeof o.kind !== 'string') return false;
+          if (o.kind === 'switch') {
+            try { exact(o, ['kind', 'pokemonId']); } catch { return false; }
+            const target = candidate.roster.entries.find(e => e.pokemon.id === o.pokemonId);
+            return target?.owner === seat && target.group === 'party' && target.index > 0
+              && target.pokemon.hp > 0 && !candidate.roster.field.includes(target.pokemon.id);
+          }
+          return o.pokemonId === entry.pokemon.id;
+        }), 'INVALID_DECISION');
       check(new Set(options.map(canonical)).size === options.length, 'INVALID_DECISION');
     }
     if (decision.kind === 'wait-target') {

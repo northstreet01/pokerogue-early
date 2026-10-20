@@ -78,6 +78,8 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       const active=candidate.continuation?.currentPhase;
       if(active?.remaining==='wait-switch')check(candidate.continuation.standbyPhase===null
         &&phaseState?.isPhase(active.phase)&&phaseState.capture(active.phase,candidate).type==='SwitchPhase'
+        &&phaseState.capture(active.phase,candidate).scope===decision.requiredSeats[0]
+        &&active.phase.isModal===true&&active.phase.doReturn===false
         &&decision.requiredSeats.length===1&&decision.requiredSeats[0]===active.phase.fieldIndex,
         'INVALID_SWITCH_DECISION');
       return;

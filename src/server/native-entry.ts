@@ -28,6 +28,7 @@ import { advanceCollectedFightCommands } from '../battle-core/fight-command.mjs'
 import { bindCoopModifierScope } from '../battle-core/modifier-scope.mjs';
 import { bindCoopFaint } from '../battle-core/faint-queue.mjs';
 import { openPreparation, advancePreparation, validatePreparationAction, coopRewardExclusions } from '../battle-core/preparation-runner.mjs';
+import { advancePreparationReserveSwap, validatePreparationReserveSwap } from '../battle-core/preparation-runner.mjs';
 import { advancePreparationEffect, validatePreparationEffect } from '../battle-core/preparation-effects-runner.mjs';
 import { advanceNextBattle } from '../battle-core/next-battle-runner.mjs';
 import { originalSafeDecisionCodec } from '../original-phase-checkpoints';
@@ -37,7 +38,8 @@ import { fixedBattles, BattleType } from '../battle';
 import { Biome } from '../data/enums/biome';
 import { PokeballType } from '../data/pokeball';
 import { advancePreBattleSwitch } from '../battle-core/pre-battle-switch-runner.mjs';
-import { createPreBattleSwitchDecision } from '../battle-core/switch-command.mjs';
+import { createPreBattleSwitchDecision, createForcedSwitchDecision } from '../battle-core/switch-command.mjs';
+import { advanceForcedSwitch } from '../battle-core/forced-switch-runner.mjs';
 import { PartyOption } from '../ui/party-ui-handler';
 import { PokemonHeldItemModifier, AddPokeballModifier, PokemonHpRestoreModifier } from '../modifier/modifier';
 import { EncoreTag, TrappedTag } from '../data/battler-tags';
@@ -68,6 +70,11 @@ const supportedPhases = [SummonPhase, PostSummonPhase, ToggleDoublePositionPhase
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
   FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, AttemptCapturePhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
+const switchKind = p => p instanceof CheckSwitchPhase ? 'switch-confirm'
+  : p.isModal ? 'wait-switch' : 'switch-select';
+const switchDecision = (id, c, p) => switchKind(p) === 'wait-switch'
+  ? createForcedSwitchDecision(id, c, [p.fieldIndex])
+  : createPreBattleSwitchDecision(id, c, p.fieldIndex, switchKind(p));
 
 // These original methods only display; they never consume a move or change HP.
 function installPokemonDisplayPort() {
@@ -592,8 +599,7 @@ export async function stepNativeEntry(runtime, checkpoint) {
       finally { binding.dispose(); }
     },
     suspendBoundary(c, p, id) {
-      const kind = p instanceof CheckSwitchPhase ? 'switch-confirm' : 'switch-select';
-      return { remaining: kind, decision: createPreBattleSwitchDecision(id, c, p.fieldIndex, kind) };
+      return { remaining: switchKind(p), decision: switchDecision(id, c, p) };
     },
     finishBoundary(c, p, id) {
       if (!c.continuation.phaseQueue.length && !c.continuation.phaseQueuePrepend.length)
@@ -624,13 +630,13 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
       const result = await binding.execute(p);
       const id = `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`;
       if (result.suspended) {
-        const kind = p instanceof CheckSwitchPhase ? 'switch-confirm' : 'switch-select';
+        const kind = switchKind(p);
         // Retain the actual current phase, just as the per-phase runner does.
         const descriptor = { kind: 'original-phase', phaseId: Math.max(-1,
           ...Object.values(c.continuation).flat().filter((d: any) => d?.phaseId !== undefined).map((d: any) => d.phaseId)) + 1,
           phase: p, remaining: kind };
         c.continuation.currentPhase = descriptor;
-        c.decision = createPreBattleSwitchDecision(id, c, (p as any).fieldIndex, kind);
+        c.decision = switchDecision(id, c, p);
         return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
       }
       c.decision = p instanceof TurnInitPhase ? actionDecision(c, binding.root, id)
@@ -877,8 +883,16 @@ function preparationEffectDriver(runtime) {
 
 export async function chooseNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
-  const result = await advancePreparationEffect(codec.restore(payload.checkpoint), payload.seat,
-    payload.action, codec, originalSafeDecisionCodec, preparationEffectDriver(runtime));
+  const c = codec.restore(payload.checkpoint);
+  const result = payload.action?.operation === 'reserve-swap'
+    ? await advancePreparationReserveSwap(c, payload.seat, payload.action, codec, originalSafeDecisionCodec)
+    : await advancePreparationEffect(c, payload.seat, payload.action, codec, originalSafeDecisionCodec, preparationEffectDriver(runtime));
+  if (payload.action?.operation === 'reserve-swap') {
+    // Use the same personal-party/reserve roster order as every native phase.
+    // No phase starts and no rule RNG is consumed during this rebind.
+    const binding = bindNativeScene(result.context, runtime.scene.gameData);
+    try { binding.sync(); } finally { binding.dispose(); }
+  }
   return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
 }
 
@@ -905,6 +919,16 @@ export async function nextNativeBattle(runtime, checkpoint) {
 export async function chooseNativeSwitch(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'checkpoint,inputs', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
+  if (c.decision.kind === 'wait-switch') {
+    const result = await advanceForcedSwitch(c, payload.inputs, codec, {
+      async resumeSwitch(candidate, phase, { seat, partyIndex }) {
+        const binding = bindNativeScene(candidate, runtime.scene.gameData);
+        try { return await binding.execute(phase, () => phase.createSwitchSelectCallback(0)(partyIndex, PartyOption.SEND_OUT)); }
+        finally { binding.dispose(); }
+      },
+    }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}` });
+    return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
+  }
   const result = await advancePreBattleSwitch(c, payload.inputs, codec, {
     finishBoundary(candidate, _phase, id) {
       if (!candidate.continuation.phaseQueue.length && !candidate.continuation.phaseQueuePrepend.length)
@@ -932,6 +956,10 @@ export async function chooseNativeSwitch(runtime, payload) {
 export function validateNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
+  if (payload.action?.operation === 'reserve-swap') {
+    validatePreparationReserveSwap(c, payload.seat, payload.action, codec, originalSafeDecisionCodec);
+    return true;
+  }
   validatePreparationEffect(c, payload.seat, payload.action, originalSafeDecisionCodec,
     preparationEffectDriver(runtime));
   return true;
@@ -940,7 +968,7 @@ export function validateNativePreparation(runtime, payload) {
 export function validateNativeSwitch(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
-  check(['switch-confirm', 'switch-select'].includes(c.decision.kind), 'INVALID_ACTION');
+  check(['switch-confirm', 'switch-select', 'wait-switch'].includes(c.decision.kind), 'INVALID_ACTION');
   codec.validateAction(c, payload.seat, payload.action);
   return true;
 }

@@ -68,7 +68,8 @@ class Client {
       const waiter = { predicate, resolve, timer: null };
       waiter.timer = setTimeout(() => {
         this.waiters.splice(this.waiters.indexOf(waiter), 1);
-        reject(new Error('WS_WAIT_TIMEOUT'));
+        const snapshot = this.latestSnapshot();
+        reject(new Error(`WS_WAIT_TIMEOUT ${this.name}: revision=${snapshot?.revision}, decision=${snapshot?.personal.decision.kind}, errors=${this.messages.filter(m => m.type === 'error').map(m => m.code).join(',')}`));
       }, timeout);
       this.waiters.push(waiter);
     });
@@ -157,7 +158,7 @@ async function applyAndAck(env, client, snapshot) {
 
 function requiresInput(snapshot) {
   const decision = snapshot.personal.decision;
-  return ['lobby', 'wait-actions', 'preparation', 'switch-confirm', 'switch-select'].includes(decision.kind)
+  return ['lobby', 'wait-actions', 'preparation', 'switch-confirm', 'switch-select', 'wait-switch'].includes(decision.kind)
     && decision.requiredSeats.length > 0;
 }
 
@@ -949,5 +950,143 @@ test('VS-02B-09 ordinary capture survives single-input restart, candidate retry,
       state = await submitBoth(env, resumedRoom, state.sa, state.sb, [fightAction(state.sa), fightAction(state.sb)]);
       assert.ok(state.sa.revision > nextRevision, 'both actual FIGHT inputs advance the next encounter');
       assert.equal(state.sb.personal.reserve.length, 1);
+    } finally { if (env) await env.close(); await disk.cleanup(); }
+  });
+
+test('VS-02B-10 captured reserve edit retries from disk, restores both views and fights in the next encounter',
+  { timeout: 180000 }, async () => {
+    const disk = await temporaryStore(); let env, rejectRevision = null;
+    const fixture = { seed: 'capture-review-5', identity: { trainerId: 1, secretId: 2 },
+      parties: [[1, 4, 7], [906, 909, 912]], eggState: { players: [
+        [{ id: 28123456, gachaType: 0, hatchWaves: 10, timestamp: 1000 }],
+        [{ id: 28123456, gachaType: 0, hatchWaves: 12, timestamp: 1000 }],
+      ] } };
+    const store = () => {
+      const actual = new FormalRoomStore(disk.directory);
+      return { load: () => actual.load(), save: room => {
+        if (room.revision === rejectRevision) throw Error('reserve edit candidate failure');
+        return actual.save(room);
+      } };
+    };
+    const fight = s => s.personal.decision.options.find(o => o.kind === 'fight' && (o.target === null || o.target >= 2));
+    try {
+      env = await startEnv({ fixture, store: store() });
+      const room = await createRoom(env);
+      let state = await syncBoth(env, room.a, room.b, room.sa, room.sb);
+      for (let turn = 0; turn < 10 && !state.sb.personal.decision.options.some(o => o.kind === 'ball'); turn++)
+        state = await submitBoth(env, room, state.sa, state.sb, [fight(state.sa), fight(state.sb)]);
+      state = await submitBoth(env, room, state.sa, state.sb, [fight(state.sa), state.sb.personal.decision.options.find(o => o.kind === 'ball')]);
+      assert.equal(state.sb.personal.decision.kind, 'preparation');
+      const initial = state.sb, peer = state.sa;
+      const action = { kind: 'preparation', operation: 'reserve-swap', partyId: initial.personal.party[0].id,
+        reserveId: initial.personal.reserve[0].id };
+      const isolated = await createRoom(env);
+      const isolatedBefore = canonical(env.service.rooms.get(isolated.roomId).checkpoint);
+      const before = canonical(env.service.rooms.get(room.roomId).checkpoint);
+      const tokens = [room.a, room.b].map(c => c.messages.find(m => m.type === 'welcome' && m.roomId).resumeToken);
+      const envelope = { type: 'submitAction', roomId: room.roomId, runId: room.runId,
+        decisionId: initial.decisionId, expectedRevision: initial.revision, actionId: 'reserve-edit-durable', action };
+      rejectRevision = initial.revision + 1;
+      const failure = room.b.next(m => m.type === 'error' && m.code === 'STORAGE_FAILED');
+      room.b.send(envelope);
+      const receipt = await room.b.wait(m => m.type === 'actionReceipt' && m.actionId === envelope.actionId);
+      assert.equal(receipt.accepted, true); await failure;
+      const failed = (await disk.store.load()).find(r => r.roomId === room.roomId);
+      assert.equal(failed.revision, initial.revision);
+      assert.equal(canonical(failed.checkpoint), before);
+      assert.deepEqual(failed.inputs, { 1: action });
+      assert.equal(room.a.latestSnapshot().revision, initial.revision);
+      await env.close(); env = null; rejectRevision = null;
+
+      env = await startEnv({ fixture, store: store() });
+      const resume = async () => {
+        const clients = [await connect(env, 'reserve-A'), await connect(env, 'reserve-B')];
+        for (const [seat, client] of clients.entries()) {
+          client.send({ type: 'resumeSeat', roomId: room.roomId, resumeToken: tokens[seat] });
+          await client.wait(m => m.type === 'snapshot');
+        }
+        return clients;
+      };
+      let [a, b] = await resume();
+      state = await syncBoth(env, a, b, a.latestSnapshot(), b.latestSnapshot());
+      if (state.sb.revision === initial.revision)
+        state = await syncBoth(env, a, b, await a.waitRevisionAfter(initial.revision), await b.waitRevisionAfter(initial.revision));
+      assert.equal(state.sb.revision, initial.revision + 1);
+      assert.equal(state.sb.shared.field[1], null, 'replacement is not falsely marked as already summoned');
+      assert.equal(state.sb.personal.party[0].id, action.reserveId);
+      assert.deepEqual(state.sb.personal.party[0].pokemon, initial.personal.reserve[0].pokemon);
+      assert.deepEqual(state.sb.personal.reserve[0].pokemon, initial.personal.party[0].pokemon);
+      assert.deepEqual(state.sb.personal.resources, initial.personal.resources);
+      assert.deepEqual(state.sb.personal.eggs, initial.personal.eggs);
+      assert.deepEqual(state.sa.personal.party, peer.personal.party);
+      assert.deepEqual(state.sa.personal.resources, peer.personal.resources);
+      assert.equal(state.sa.events.some(e => e.kind === 'preparation-reserve-swap'), false);
+      assert.ok(state.sb.events.some(e => e.kind === 'preparation-reserve-swap'));
+      const committed = canonical(env.service.rooms.get(room.roomId).checkpoint), hashes = [state.sa.personalHash, state.sb.personalHash];
+      assert.deepEqual(env.service.rooms.get(room.roomId).checkpoint.intents, JSON.parse(before).intents);
+      await env.close(); env = null;
+      env = await startEnv({ fixture, store: store() });
+      [a, b] = await resume();
+      state = await syncBoth(env, a, b, a.latestSnapshot(), b.latestSnapshot());
+      assert.deepEqual([state.sa.personalHash, state.sb.personalHash], hashes);
+      b.send(envelope);
+      assert.deepEqual(await b.wait(m => m.type === 'actionReceipt' && m.actionId === envelope.actionId), receipt);
+      const conflict = b.next(m => m.type === 'error' && m.code === 'ACTION_ID_CONFLICT');
+      b.send({ ...envelope, action: { ...action, partyId: initial.personal.party[1].id } }); await conflict;
+      assert.equal(canonical((await disk.store.load()).find(r => r.roomId === room.roomId).checkpoint), committed);
+      assert.equal(canonical((await disk.store.load()).find(r => r.roomId === isolated.roomId).checkpoint), isolatedBefore);
+      const resumedRoom = { ...room, a, b };
+      state = await finishSwitches(env, resumedRoom, await finishPreparation(env, resumedRoom, state));
+      assert.equal(state.sb.shared.field[1], action.reserveId);
+      const revision = state.sb.revision, input = fightAction(state.sb);
+      const ppBefore = state.sb.personal.party[0].pokemon.fields.moveset[input.cursor].fields.ppUsed;
+      state = await submitBoth(env, resumedRoom, state.sa, state.sb, [fightAction(state.sa), input]);
+      assert.ok(state.sb.revision > revision);
+      assert.equal(state.sb.personal.party.find(e => e.id === action.reserveId).pokemon.fields.moveset[input.cursor].fields.ppUsed, ppBefore + 1);
+    } finally { if (env) await env.close(); await disk.cleanup(); }
+  });
+
+test('VS-02B-10 natural combat faint resumes an owned forced switch after formal service/Worker restart',
+  { timeout: 180000 }, async () => {
+    const disk = await temporaryStore(); let env;
+    const fixture = { seed: 'team-forced-ws', identity: { trainerId: 1, secretId: 2 },
+      parties: [[7, 4, 1], [129, 906, 909]], eggState: { players: [[], []] } };
+    try {
+      env = await startEnv({ fixture, store: disk.store });
+      const room = await createRoom(env);
+      let state = await syncBoth(env, room.a, room.b, room.sa, room.sb);
+      for (let turn = 0; turn < 40 && state.sa.personal.decision.kind === 'wait-actions'; turn++) {
+        const status = snapshot => {
+          const moves = snapshot.personal.party[0].pokemon.fields.moveset;
+          const cursor = moves.findIndex(m => [39, 150].includes(m.fields.moveId)); // Original Tail Whip / Splash, no inflicted damage.
+          const option = snapshot.personal.decision.options.find(o => o.kind === 'fight' && o.cursor === cursor);
+          assert.ok(option); return option;
+        };
+        state = await submitBoth(env, room, state.sa, state.sb, [status(state.sa), status(state.sb)]);
+      }
+      assert.equal(state.sa.personal.decision.kind, 'wait-switch');
+      const seat = state.sa.personal.decision.requiredSeats[0], snapshot = seat === 0 ? state.sa : state.sb;
+      const action = snapshot.personal.decision.options[0], peerId = snapshot.shared.field[1 - seat];
+      assert.equal(snapshot.personal.party.find(e => e.id === snapshot.shared.field[seat]).pokemon.fields.hp, 0);
+      assert.ok(action && snapshot.personal.party.some(e => e.id === action.pokemonId));
+      const tokens = [room.a, room.b].map(c => c.messages.find(m => m.type === 'welcome' && m.roomId).resumeToken);
+      const hash = [state.sa.personalHash, state.sb.personalHash];
+      await env.close(); env = null;
+      env = await startEnv({ fixture, store: new FormalRoomStore(disk.directory) });
+      const clients = [await connect(env, 'forced-A'), await connect(env, 'forced-B')];
+      for (const [s, client] of clients.entries()) {
+        client.send({ type: 'resumeSeat', roomId: room.roomId, resumeToken: tokens[s] });
+        await client.wait(m => m.type === 'snapshot');
+        assert.equal(client.latestSnapshot().personalHash, hash[s]);
+      }
+      const [a, b] = clients, resumedRoom = { ...room, a, b };
+      state = await syncBoth(env, a, b, a.latestSnapshot(), b.latestSnapshot());
+      state = await submitOne(env, resumedRoom, clients[seat], seat === 0 ? state.sa : state.sb, action);
+      assert.equal(state.sa.shared.field[seat], action.pokemonId);
+      assert.equal(state.sa.shared.field[1 - seat], peerId);
+      assert.equal(state.sa.personal.decision.kind, 'wait-actions');
+      const revision = state.sa.revision;
+      state = await submitBoth(env, resumedRoom, state.sa, state.sb, [fightAction(state.sa), fightAction(state.sb)]);
+      assert.ok(state.sa.revision > revision);
     } finally { if (env) await env.close(); await disk.cleanup(); }
   });

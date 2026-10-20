@@ -1,5 +1,23 @@
 # VS-02B-10：备用详情与战后换队（2026-10-21）
 
+## 断电前最新结论：规则已纠正，当前仅部分完成，不能按完整功能验收
+
+用户在本批开发中明确改定：按原版每人最多保留6只；捕获后取舍，不能靠reserve无限积累。以下A／B两个阶段记录属于该纠正之前的实现与测试历史，已被新规则取代；44项UI通过不代表新取舍UI通过，不再派发备用分页／无限仓库方案。
+
+最新修改：未满6只时沿原EnemyPokemon.addToParty直接进入本人party；满6只时暂停原AttemptCapturePhase，新增capture-choice安全边界，选择放弃新捕获或放生本人非前场成员后接纳。复用原PartyUiHandler.doRelease及原捕获后续方法，新增可恢复的finishCatch入口，不能重投球／重跑捕获RNG。已落到原phase／codec／native／正式adapter的路由；个人原reserve-swap生产入口明确拒绝。没有自动删除旧存档reserve：旧规则库存存在时阻止新的捕获并报LEGACY_RESERVE_REQUIRES_REVIEW，后续必须明确迁移取舍，不能静默清空。
+
+最新真实Worker定向4/4、退出0，5464.0506ms，正常1..4，无失败／跳过／取消／todo：不足6只捕获→本人party→下一战实际FIGHT；满6只放弃或原放生后接纳（仍6只）→新成员下一战；非法owner／前场／额外字段／准备绕过／错误scope拒绝；新Worker恢复结果一致；原倒下强制换人恢复。满员测试从真实v2六只选队构造，仅为确定成功而显式合成初始Master Ball库存，不是浏览器证据。typecheck及Worker构建退出0。
+
+第一次新版定向3/4失败于恢复选择后的decisionId追加非数字后缀，导致后续菜单ID不递增；现已改用原native数字序列，第二次4/4通过。早期原放生因headless容器缺少destroy失败，补原显示销毁端口；未替换原party／modifier删除方法。
+
+**未完成且下一次必须优先处理**：新capture-choice的原Confirm／Party RELEASE客户端接线；撤除旧备用分页／换队按钮及相应测试；旧reserve的显式取舍迁移；原捕获／WS套件仍有旧reserve断言需按新规则重写并核对，不可删断言／skip掩盖；新增取舍的正式双WS＋FormalRoomStore失败／重试／重启／去重／隔离；最终完整串行回归；用户双浏览器验收。因此当前不能作为完整A／B、M3或MVP通过，也不应合并发布main。用户要求即将断电，停止功能扩展，保存当前工作并仅推送独立备份评审分支。
+
+最终生产构建、发布SHA与收尾核对在本文件末尾追加。证据仅本地ignored build/vs02b10，旧日志不冒充新结果。
+
+断电前最终检查：新版typecheck退出0，Worker构建退出0，生产build退出0（47.81s，既有chunk警告）。新版Worker最终定向为上述4/4、退出0；完整串行、取舍双WS和浏览器未执行，旧44项UI仅历史。相对公开origin/main扫描51个变更文件的常见凭据模式未命中，tracked无SPEC／任务书／build／dist等禁止路径，diff --check通过；这是本批扫描，不是绝对隐私保证。实时远端main再次确认86798227ca995c4ff40043b99a0c6846ed177154。
+
+本地保留feature/vs02b10-reserve-team完整开发历史；对外保存使用review/vs02b10-poweroff-backup，以实时公开main为单一父提交、内容与本地最终树一致，防止推入旧内部评审历史，不修改main。SPEC与续接任务书仅本地忽略。下一次从本记录最新“部分完成”状态继续，不能从早先A／B通过段落推断已完成。
+
 用户本次明确授权由维护者直接完成第①部分，暂停“只验收其它agent交付”的日常分工。本批只开发队伍闭环，不扩展成长、购物、持有物捕获或M6。
 
 ## 起点核对

@@ -1,6 +1,7 @@
 import { captureModifierPoolState, restoreModifierPoolState } from './modifier-pool-state.mjs';
 import { createForcedSwitchDecision,createPreBattleSwitchDecision } from './switch-command.mjs';
 import { createLearnDecision } from './learn-command.mjs';
+import { createCaptureChoice } from './capture-choice.mjs';
 import { restoreContinuation } from './phase-continuation.mjs';
 import { safeDecisionKinds } from './safe-decisions.mjs';
 import { captureTurnCommands, restoreTurnCommands } from './command-state.mjs';
@@ -55,6 +56,15 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
     if (saved.presence !== 'absent') Object.defineProperty(target, key, { value: saved.presence === 'undefined' ? undefined : saved.value === null ? null : decode(saved.value), writable: true, enumerable: true, configurable: true });
   }
   function validateDecision(decision, candidate) {
+    if(decision.kind==='capture-choice'){
+      const seat=decision.requiredSeats?.[0],active=candidate.continuation?.currentPhase;
+      check(active?.kind==='original-phase'&&active.remaining==='capture-select'&&candidate.continuation.standbyPhase===null
+        &&phaseState?.isPhase(active.phase),'INVALID_CAPTURE_CHOICE');
+      const p=phaseState.capture(active.phase,candidate);
+      check(p.type==='AttemptCapturePhase'&&p.scope===seat
+        &&canonical(createCaptureChoice(decision.id,candidate,seat))===canonical(decision),'INVALID_CAPTURE_CHOICE');
+      return;
+    }
     if(['switch-confirm','switch-select'].includes(decision.kind)){
       const seat=decision.requiredSeats?.[0],active=candidate.continuation?.currentPhase;
       check(decision.requiredSeats?.length===1&&canonical(createPreBattleSwitchDecision(decision.id,candidate,seat,decision.kind))===canonical(decision),

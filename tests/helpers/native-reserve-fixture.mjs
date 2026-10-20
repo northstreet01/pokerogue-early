@@ -29,7 +29,8 @@ export async function capturedPreparation() {
     c = (await h.request('native-submit', { checkpoint: c, inputs: { 0: attack(c, 0), 1: ball } })).checkpoint;
     c = await settleNative(h, c);
     assert.equal(c.decision.kind, 'preparation');
-    assert.equal(c.roster.entries.filter(e => e.owner === 1 && e.group === 'reserve').length, 1);
+    assert.equal(c.roster.entries.filter(e => e.owner === 1 && e.group === 'reserve').length, 0);
+    assert.equal(c.roster.entries.filter(e => e.owner === 1 && e.group === 'party').length, 4);
     return { h, c };
   } catch (error) { await h.close(); throw error; }
 }
@@ -49,4 +50,30 @@ export async function enterNextNative(h, c, switchTo = null) {
   }
   assert.equal(c.decision.kind, 'wait-actions');
   return c;
+}
+
+// Full parties are constructed through the production selected-starter Worker.
+// Only the initial master-ball inventory is synthetic for deterministic success.
+export async function fullCaptureChoice() {
+  const identities = [{trainerId:1,secretId:2},{trainerId:3,secretId:4}];
+  const h = await createOriginalRuleHost({ seed:'capture-review-5', identity:identities[0] });
+  try {
+    const selection = speciesId => ({version:2,speciesId,dexAttr:'149',nature:0,moveset:null,
+      pokerus:false,ivs:[31,30,29,28,27,26],eggMoves:0});
+    let c = (await h.request('native-open-selected-to-input', { identities,
+      starterSelections:[[1,4,7],[906,909,912,25,133,152]].map(p=>p.map(selection)),
+      eggState:{players:[[],[]]} })).checkpoint;
+    for(let turn=0;turn<12&&!c.decision.options?.[1]?.some(o=>o.kind==='ball');turn++) {
+      assert.equal(c.decision.kind,'wait-actions');
+      c = (await h.request('native-submit',{checkpoint:c,inputs:{0:attack(c,0),1:attack(c,1)}})).checkpoint;
+      c = await settleNative(h,c);
+    }
+    const ball = {...c.decision.options[1].find(o=>o.kind==='ball'),pokeballType:4};
+    assert.equal(ball.kind,'ball');c.players[1].pokeballCounts[4]=1;c.decision.options[1].push(ball);
+    const before = structuredClone(c);
+    c = (await h.request('native-submit',{checkpoint:c,inputs:{0:attack(c,0),1:ball}})).checkpoint;
+    const result = await h.request('native-run-to-boundary',c);
+    assert.equal(result.checkpoint.decision.kind,'capture-choice');
+    return {h,c:result.checkpoint,before,result};
+  } catch(error) {await h.close();throw error;}
 }

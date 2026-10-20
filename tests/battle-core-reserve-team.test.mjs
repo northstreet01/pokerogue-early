@@ -1,94 +1,65 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { capturedPreparation, settleNative, enterNextNative, attack } from './helpers/native-reserve-fixture.mjs';
+import { capturedPreparation, fullCaptureChoice, settleNative, enterNextNative, attack } from './helpers/native-reserve-fixture.mjs';
 import { createOriginalRuleHost } from '../server/original-rule-host.mjs';
+const personal=(c,group)=>c.roster.entries.filter(e=>e.owner===1&&e.group===group).sort((a,b)=>a.index-b.index);
 
-const personal = (c, group) => c.roster.entries.filter(e => e.owner === 1 && e.group === group).sort((a, b) => a.index - b.index);
-const swap = (c, index = 0) => ({ kind: 'preparation', operation: 'reserve-swap',
-  partyId: personal(c, 'party')[index].pokemon.fields.id, reserveId: personal(c, 'reserve')[0].pokemon.fields.id });
-
-test('ordinary captured reserve swaps into the front without replaying rewards and fights next encounter', async () => {
-  const { h, c } = await capturedPreparation();
-  try {
-    const action = swap(c), before = JSON.stringify(c);
-    assert.equal(action.reserveId, 0, 'zero is a valid stable captured ID');
-    await h.request('native-validate-preparation', { checkpoint: c, seat: 1, action });
-    assert.equal(JSON.stringify(c), before);
-    const switched = (await h.request('native-prepare-action', { checkpoint: c, seat: 1, action })).checkpoint;
-    assert.equal(switched.roster.field[1], null, 'next original Summon owns deployment, not the roster edit');
-    assert.deepEqual(personal(switched, 'party')[0].pokemon, personal(c, 'reserve')[0].pokemon);
-    assert.deepEqual(personal(switched, 'reserve')[0].pokemon, personal(c, 'party')[0].pokemon);
-    assert.deepEqual(switched.decision.players, c.decision.players);
-    assert.deepEqual(switched.pendingEffects, c.pendingEffects);
-    assert.deepEqual(switched.players, c.players);
-    assert.deepEqual(switched.eggState, c.eggState);
-    const projected = await h.request('native-project', { checkpoint: switched, seat: 1 });
-    assert.equal(projected.personal.party[0].id, action.reserveId);
-    const next = await enterNextNative(h, JSON.parse(JSON.stringify(switched)));
-    assert.equal(next.roster.field[1], action.reserveId);
-    const inputs = { 0: attack(next, 0), 1: attack(next, 1) };
-    assert.equal(inputs[1].pokemonId, action.reserveId);
-    const beforeMoves = personal(next, 'party')[0].pokemon.fields.moveset;
-    const submitted = (await h.request('native-submit', { checkpoint: next, inputs })).checkpoint;
-    const result = await settleNative(h, submitted);
-    const caught = result.roster.entries.find(e => e.pokemon.fields.id === action.reserveId);
-    assert.equal(caught.pokemon.fields.moveset[inputs[1].cursor].fields.ppUsed,
-      beforeMoves[inputs[1].cursor].fields.ppUsed + 1);
-    assert.equal(personal(result, 'reserve')[0].pokemon.fields.id, action.partyId);
-  } finally { await h.close(); }
+test('ordinary capture joins an under-full personal party and can fight the next encounter without reserve storage',async()=>{
+ const {h,c}=await capturedPreparation();
+ try {
+  const caught=personal(c,'party').find(e=>e.pokemon.fields.id===0);
+  assert.ok(caught);assert.equal(personal(c,'party').length,4);assert.equal(personal(c,'reserve').length,0);
+  await assert.rejects(h.request('native-prepare-action',{checkpoint:c,seat:1,
+    action:{kind:'preparation',operation:'reserve-swap',partyId:c.roster.field[1],reserveId:0}}),e=>e.code==='RESERVE_STORAGE_DISABLED');
+  const next=await enterNextNative(h,c,0);assert.equal(next.roster.field[1],0);
+  const inputs={0:attack(next,0),1:attack(next,1)},before=personal(next,'party')[0].pokemon.fields.moveset;
+  const submitted=(await h.request('native-submit',{checkpoint:next,inputs})).checkpoint;
+  const after=await settleNative(h,submitted),entry=after.roster.entries.find(e=>e.pokemon.fields.id===0);
+  assert.equal(entry.pokemon.fields.moveset[inputs[1].cursor].fields.ppUsed,before[inputs[1].cursor].fields.ppUsed+1);
+  assert.equal(personal(after,'reserve').length,0);
+ }finally{await h.close()}
 });
 
-test('reserve swap respects one and six member parties and a later original pre-battle selection', async () => {
-  const { h, c } = await capturedPreparation();
-  try {
-    for (const size of [1, 6]) {
-      // Explicit synthetic size boundaries; the reserve itself was captured by
-      // the actual ordinary-ball path above. Never used as browser evidence.
-      const initial = structuredClone(c), own = personal(initial, 'party');
-      if (size === 1) {
-        initial.roster.entries = initial.roster.entries.filter(e => !own.slice(1).includes(e));
-        initial.roster.retiredIds.push(...own.slice(1).map(e => e.pokemon.fields.id));
-      } else for (let index = 3; index < size; index++) {
-        const entry = structuredClone(own[1]); entry.index = index; entry.pokemon.fields.id = 4000000000 + index;
-        initial.roster.entries.push(entry);
-      }
-      const action = swap(initial, size - 1);
-      const after = (await h.request('native-prepare-action', { checkpoint: initial, seat: 1, action })).checkpoint;
-      assert.equal(personal(after, 'party').length, size);
-      assert.deepEqual(after.roster.field.slice(0, 1), initial.roster.field.slice(0, 1));
-      const next = await enterNextNative(h, after, size === 6 ? action.reserveId : null);
-      assert.equal(next.roster.field[1], action.reserveId);
-      assert.equal(personal(next, 'party').length, size);
-    }
-  } finally { await h.close(); }
+test('full-party capture must release an owned bench or decline the new individual, never accumulate seven',async()=>{
+ const {h,c,before}=await fullCaptureChoice();
+ try {
+  assert.equal(personal(c,'party').length,6);assert.equal(personal(c,'reserve').length,0);
+  assert.equal(c.players[1].pokeballCounts[4],0);
+  for(const action of c.decision.options[1].slice(0,2)) {
+   const done=await h.request('native-switch',{checkpoint:JSON.parse(JSON.stringify(c)),inputs:{1:action}});
+   const after=await settleNative(h,done.checkpoint);
+   assert.equal(personal(after,'party').length,6);assert.equal(personal(after,'reserve').length,0);
+   assert.deepEqual(after.players,c.players);assert.deepEqual(after.eggState,c.eggState);
+   assert.equal(after.roster.field[0],c.roster.field[0]);
+   if(action.releaseId===null){assert.deepEqual(personal(after,'party').map(e=>e.pokemon.fields.id),personal(c,'party').map(e=>e.pokemon.fields.id));}
+   else {
+    assert.ok(!personal(after,'party').some(e=>e.pokemon.fields.id===action.releaseId));
+    assert.ok(after.roster.retiredIds.includes(action.releaseId));
+    const caught=personal(after,'party').find(e=>e.pokemon.fields.id===0);assert.ok(caught);
+    const source=before.roster.entries.find(e=>e.pokemon.fields.id===c.decision.targetId).pokemon.fields;
+    for(const key of ['ivs','nature','gender','abilityIndex','formIndex','shiny','moveset','status'])assert.deepEqual(caught.pokemon.fields[key],source[key],key);
+    const next=await enterNextNative(h,after,0);assert.equal(next.roster.field[1],0);
+   }
+  }
+ }finally{await h.close()}
 });
 
-test('reserve swap rejects foreign IDs, ready state, extra fields and unresolved personal choices without mutation', async () => {
-  const { h, c } = await capturedPreparation();
-  try {
-    const action = swap(c);
-    for (const bad of [{ ...action, partyId: c.roster.field[0] }, { ...action, reserveId: action.partyId },
-      { ...action, reserveId: 4294967295 }, { ...action, extra: true }]) {
-      await assert.rejects(h.request('native-validate-preparation', { checkpoint: c, seat: 1, action: bad }));
-      await assert.rejects(h.request('native-prepare-action', { checkpoint: c, seat: 1, action: bad }));
-    }
-    const ready = structuredClone(c); ready.decision.players[1].rewardResolved = true; ready.decision.players[1].ready = true;
-    await assert.rejects(h.request('native-validate-preparation', { checkpoint: ready, seat: 1, action }), e => e.code === 'PREPARATION_ALREADY_READY');
-    const pending = structuredClone(c);
-    pending.decision.players[1].selection = { optionId: pending.decision.players[1].rewards[0].id,
-      pokemonId: action.partyId, moveIndex: null, fusionId: null };
-    const before = JSON.stringify(pending);
-    await assert.rejects(h.request('native-prepare-action', { checkpoint: pending, seat: 1, action }), e => e.code === 'UNRESOLVED_PREPARATION');
-    assert.equal(JSON.stringify(pending), before);
-    const growth = structuredClone(c);
-    growth.pendingEffects.push({ id: 'preparation-growth-1-0', remaining: 'start', phase: { version: 1,
-      type: 'LevelUpPhase', scope: 1, fields: Object.fromEntries(Object.entries({ partyMemberIndex: 0, fieldIndex: 0, player: true, lastLevel: 4, level: 5 })
-        .map(([k, value]) => [k, { presence: 'value', value }])), presentation: {} } });
-    await assert.rejects(h.request('native-prepare-action', { checkpoint: growth, seat: 1, action }), e => e.code === 'PREPARATION_GROWTH_PENDING');
-    const empty = structuredClone(c);
-    for (const e of empty.roster.entries) if (e.owner === 1 && e.pokemon.fields.id !== action.partyId) e.pokemon.fields.hp = 0;
-    await assert.rejects(h.request('native-prepare-action', { checkpoint: empty, seat: 1, action }), e => e.code === 'NO_LIVING_PARTY_MEMBER');
-  } finally { await h.close(); }
+test('capture choice rejects peer/front/extra fields, stale scope and ready bypass without mutation',async()=>{
+ const {h,c}=await fullCaptureChoice();
+ try {
+  const snapshot=JSON.stringify(c);
+  for(const releaseId of [c.roster.field[0],c.roster.field[1],4294967295])
+   await assert.rejects(h.request('native-switch',{checkpoint:c,inputs:{1:{kind:'capture-choice',releaseId}}}));
+  await assert.rejects(h.request('native-switch',{checkpoint:c,inputs:{0:c.decision.options[1][0]}}));
+  await assert.rejects(h.request('native-switch',{checkpoint:c,inputs:{1:{...c.decision.options[1][1],extra:true}}}));
+  await assert.rejects(h.request('native-prepare-action',{checkpoint:c,seat:1,action:{kind:'preparation',operation:'ready'}}));
+  const wrong=structuredClone(c);wrong.continuation.currentPhase.phase.scope=0;
+  await assert.rejects(h.request('native-validate-checkpoint',wrong));
+  assert.equal(JSON.stringify(c),snapshot);
+  const one=(await h.request('native-switch',{checkpoint:c,inputs:{1:c.decision.options[1][1]}})).checkpoint;
+  const fresh=await createOriginalRuleHost({seed:c.scene.seed,identity:{trainerId:1,secretId:2}});
+  try {const restored=(await fresh.request('native-switch',{checkpoint:JSON.parse(JSON.stringify(c)),inputs:{1:c.decision.options[1][1]}})).checkpoint;assert.deepEqual(restored,one)}finally{await fresh.close()}
+ }finally{await h.close()}
 });
 
 test('actual native faint requires an owned forced replacement and survives per-phase Worker recovery', async () => {

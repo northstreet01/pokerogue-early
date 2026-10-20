@@ -1,5 +1,7 @@
 # 新窗口开发交接
 
+2026-10-20 VS-02B-09 普通捕获：A 以稳定 ball/target option 驱动原 CommandPhase BALL／AttemptCapturePhase，原三次判定与转换，成功个体进入捕获者 reserve，私有投影与客户端 apply→capture 保留完整状态；直接 Worker 3/3，typecheck／runtime／build 通过。B 加合作页最小球选择与只读备用行，取消／outbox／receipt 门控保留；未复用完整原 BallUiHandler、未做双浏览器。正式双 WS／故障重启和普通球稳定随机回归未补；完整回归见本批记录。战后换队／M6 仍未做。
+
 2026-10-20 用户追加按键／鼠标修订：WASD方向、Enter确认、Esc取消、M菜单、C完成选队；鼠标接原选队、选项、Command／Fight／Target、Party、奖励等菜单，保留原回调、冷却、合作输入门控；文本输入框不再同时驱动画布。定向43/43、typecheck／生产build退出0，完整串行未重跑。用户自行测试后反馈“没发现问题”，只记本批可用性复核，不扩大为完整双端验收。分支fix/keyboard-mouse-controls，未合并／未推送，详见[输入修订记录](controls-review-2026-10-20.md)。下一批捕获开发须保留此最新输入修订。
 
 2026-10-20 VS-02B-08维护者复验：修复威吓插入阶段后另一席换错后备／恢复游标、Party跨await旧目标提交及放生等未接本地操作；接原ShowPartyExpBarPhase／HidePartyExpBarPhase，换人后退场参战者能按原方法获经验并进入整备。补真实双WS＋FormalRoomStore的单方输入重启、候选落盘失败重试、再次重启、去重和房间隔离；更正原WS成功例实际使用MemoryStore。最终定向51/51，typecheck／runtime build／生产build退出0；完整串行1006/1006、退出0（1028492.7826ms，无失败／取消／跳过），最终结果见[维护者验收](mvp-vs-02b08-review.md)。A限普通SEND_OUT切片，B原Party及Potion／文字视觉仍待用户浏览器验收，不宣称全机制。评审分支review/vs02b08-active-switch-fix，未合并／未推送。下一批普通捕获→本人本局备用持久化→原BALL菜单，战后换队另批；M6待处理成果不得丢，详细任务书仅本地。

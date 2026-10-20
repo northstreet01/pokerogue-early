@@ -13,7 +13,6 @@ import { Command } from '../ui/command-ui-handler';
 import { ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
 import { AddPokeballModifier } from '../modifier/modifier';
 import { PartyUiMode, PartyOption } from '../ui/party-ui-handler';
-import { getPokeballName } from '../data/pokeball';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -568,14 +567,14 @@ export default class CoopPlayPhase extends Phase {
       return true;
     }
     if (command === Command.BALL) {
-      this.openCaptureMenu();
+      void this.openCaptureMenu().catch(error => this.setStatus(`选球菜单失败：${error?.message ?? error}`, true));
       return true;
     }
     this.setStatus('该战斗菜单尚未接入；当前可验证 FIGHT／POKEMON／BALL', true);
     return true;
   }
 
-  private openCaptureMenu() {
+  private async openCaptureMenu() {
     const snapshot = this.latest, epoch = this.epoch, decision = snapshot?.personal.decision;
     if (!decision || decision.kind !== 'wait-actions' || !this.isPersonalInputCurrent(snapshot, epoch)
       || this.seat === null) return;
@@ -585,22 +584,26 @@ export default class CoopPlayPhase extends Phase {
       this.setStatus('当前没有合法捕获目标或可用精灵球', true);
       return;
     }
-    const row = document.createElement('div'); row.className = 'row';
-    for (const option of options) {
-      row.append(this.button(`投出 ${getPokeballName(option.pokeballType)}`, () => {
-        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-        this.battleInputActive = false;
-        void this.scene.ui.setMode(Mode.MESSAGE).then(() =>
-          this.sendAction({ kind: 'ball', pokeballType: option.pokeballType, targetId: option.targetId },
-            '已投出精灵球，等待服务器裁定…'));
-      }, true));
-    }
-    row.append(this.button('返回', () => {
+    const cancel = async () => {
       if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
       this.battleInputActive = false;
-      void this.scene.ui.setMode(Mode.MESSAGE).then(() => this.openBattleCommand());
-    }));
-    this.controls.append(row);
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (this.isPersonalInputCurrent(snapshot, epoch)) this.openBattleCommand();
+    };
+    await this.scene.ui.setMode(Mode.BALL, {
+      counts: { ...snapshot.personal.resources.pokeballs },
+      allowed: options.map((o: any) => o.pokeballType), cancel,
+      select: async (ball: number) => {
+        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+        const option = options.find((o: any) => o.pokeballType === ball);
+        if (!option) return;
+        this.battleInputActive = false;
+        await this.scene.ui.setMode(Mode.MESSAGE);
+        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+        await this.sendAction({ kind: 'ball', pokeballType: option.pokeballType, targetId: option.targetId },
+          '已提交投球，等待服务器裁定…');
+      },
+    });
     this.setStatus('选择精灵球；取消可返回 Command');
   }
 

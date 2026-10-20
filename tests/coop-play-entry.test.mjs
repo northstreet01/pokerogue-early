@@ -541,3 +541,64 @@ test('cooperative active Party permits only SEND_OUT and summary; local release 
   await tick(); await tick();
   assert.equal(sent.length, 0, 'Baton Pass must not be silently submitted as ordinary switch');
 });
+
+function capturePhase() {
+  const state = activeSwitchPhase(), { p } = state;
+  p.latest.personal.resources = { pokeballs: { 0: 5, 1: 0, 2: 0, 3: 0, 4: 0 } };
+  p.latest.personal.decision.options = [{ kind: 'ball', pokeballType: 0, targetId: 123 }];
+  return state;
+}
+
+test('original BALL port uses server inventory/options; cancel, failed outbox and rejection reopen Command', async () => {
+  for (const outcome of ['cancel', 'disk-failure', 'rejected']) {
+    const { p, modes, sent } = capturePhase();
+    if (outcome === 'disk-failure') p.storage = { ...p.storage, saveAction: async () => { throw Error('TEST_DISK_FAILURE'); } };
+    await p.openCaptureMenu();
+    assert.equal(modes.at(-1)[0], api.Mode.BALL);
+    p.openBattleCommand();
+    assert.equal(modes.at(-1)[0], api.Mode.BALL, 'repeated ready notifications retain the open ball menu');
+    const config = modes.at(-1)[1];
+    assert.deepEqual(config.counts, p.latest.personal.resources.pokeballs);
+    assert.notEqual(config.counts, p.latest.personal.resources.pokeballs);
+    assert.deepEqual(config.allowed, [0]);
+    if (outcome === 'cancel') await config.cancel();
+    else await config.select(0);
+    if (outcome === 'rejected') {
+      assert.deepEqual(sent[0].action, { kind: 'ball', pokeballType: 0, targetId: 123 });
+      await p.onMessage({ type: 'actionReceipt', roomId: p.roomId, actionId: p.actionId,
+        decisionId: p.latest.decisionId, revision: p.latest.revision, accepted: false, code: 'INVALID_CAPTURE_TARGET' });
+    } else assert.equal(sent.length, 0);
+    assert.equal(modes.at(-1)[0], api.Mode.COMMAND);
+    assert.equal(p.latest.personal.resources.pokeballs[0], 5, 'browser never settles ball consumption');
+  }
+});
+
+test('original BALL callback cannot cross awaited revision or epoch, and cannot select an unlisted ball', async () => {
+  for (const stale of ['revision', 'epoch']) {
+    const { p, modes, sent } = capturePhase();
+    await p.openCaptureMenu();
+    const config = modes.at(-1)[1];
+    await config.select(4); assert.equal(sent.length, 0);
+    let finish;
+    p.scene.ui.setMode = () => new Promise(resolve => { finish = resolve; });
+    const pending = config.select(0);
+    if (stale === 'revision') p.latest = { ...p.latest, revision: 6, decisionId: 'fight-6' };
+    else p.epoch = 'epoch-2';
+    finish(); await pending;
+    assert.equal(sent.length, 0);
+  }
+});
+
+test('original BallUiHandler keeps its navigation/cancel and filters unlisted cooperative balls', () => {
+  const selected = [], counts = { 0: 5, 1: 9, 2: 0, 3: 0, 4: 0 }; let cancelled = 0, errors = 0;
+  const handler = Object.assign(Object.create(api.BallUiHandler.prototype), {
+    cursor: 0, selection: { counts, allowed: [0], select: ball => selected.push(ball), cancel: () => cancelled++ },
+    getUi: () => ({ playError: () => errors++, playSelect() {} }),
+    setCursor(cursor) { this.cursor = cursor; return true; },
+  });
+  handler.processInput(api.Button.ACTION);
+  handler.processInput(api.Button.DOWN); handler.processInput(api.Button.ACTION);
+  handler.processInput(api.Button.CANCEL);
+  assert.deepEqual(selected, [0]); assert.equal(errors, 1); assert.equal(cancelled, 1);
+  assert.deepEqual(counts, { 0: 5, 1: 9, 2: 0, 3: 0, 4: 0 });
+});

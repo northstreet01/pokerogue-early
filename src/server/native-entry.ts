@@ -107,7 +107,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       speciesId: p.species.speciesId, dexAttr: p.getDexAttr().toString(), incrementCount }),
     updateSpeciesDexIvs: (speciesId, ivs) => intents.push({ kind: 'dex-ivs', speciesId, ivs: [...ivs] }),
     setPokemonCaught: p => { intents.push({ kind: 'capture-pending', pokemonId: p.id,
-      speciesId: p.species.speciesId, level: p.level, ivs: [...p.ivs], nature: p.nature }); return Promise.resolve(); },
+      speciesId: p.species.speciesId, dexAttr: p.getDexAttr().toString(), level: p.level,
+      ivs: [...p.ivs], nature: p.nature }); return Promise.resolve(); },
     saveSystem: () => { throw new Error('PERMANENT_SAVE_UNAVAILABLE'); },
     saveSession: () => { throw new Error('PERSONAL_SESSION_SAVE_UNAVAILABLE'); } });
   root.gameData = deferredData();
@@ -159,7 +160,13 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   };
   root.pokemonInfoContainer = { show(pokemon) { events.push({ kind: 'capture-info', pokemonId: pokemon.id }); },
     hide() {} };
-  root.addFaintedEnemyScore = pokemon => events.push({ kind: 'capture-score', pokemonId: pokemon.id });
+  root.addFaintedEnemyScore = BattleScene.prototype.addFaintedEnemyScore;
+  root.queueCaptureAttempt = (phase, seat) => {
+    check(seat === 0 || seat === 1, 'INVALID_CAPTURE_OWNER');
+    phase.scene = views[seat];
+    phase.coopTargetId = phase.getPokemon()?.id;
+    root.unshiftPhase(phase);
+  };
   root.abilityBar = { shown: false, showAbility(p) { this.shown = true; events.push({ kind: 'ability-display', pokemonId: p.id }); }, hide() { this.shown = false; } };
   root.add = { existing() {}, sprite: (..._args: any[]) => new DisplayTarget() };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
@@ -185,7 +192,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       };
       const repeats = config.repeat ?? 0;
       for (let index = 0; index < repeats; index++)
-        schedule(() => { if (!counter.stopped) config.onRepeat?.(); }, (config.duration ?? 0) + (config.repeatDelay ?? 0));
+        schedule(() => { if (!counter.stopped) config.onRepeat?.(); }, (index + 1) * ((config.duration ?? 0) + (config.repeatDelay ?? 0)));
       schedule(() => { if (!counter.stopped) config.onUpdate?.(counter); }, 0);
       schedule(() => { if (!counter.stopped) config.onComplete?.(); }, (repeats + 1) * ((config.duration ?? 0) + (config.repeatDelay ?? 0)));
       return counter;
@@ -199,7 +206,14 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         schedule(() => check(p.handleCommand(Command.FIGHT, action.cursor, false), 'NATIVE_COMMAND_REJECTED'));
       } else if (action?.kind === 'ball') {
         root.pokeballCounts = c.players[seat].pokeballCounts;
-        schedule(() => check(p.handleCommand(Command.BALL, action.pokeballType), 'NATIVE_COMMAND_REJECTED'));
+        schedule(() => {
+          const ally = c.battle.turnCommands[seat - 1];
+          const skip = ally?.skip;
+          check(p.handleCommand(Command.BALL, action.pokeballType), 'NATIVE_COMMAND_REJECTED');
+          // Solo's second battler shares its trainer's action. Co-op seats act
+          // independently; undo only the skip introduced by the BALL branch.
+          if (ally) { if (skip === undefined) delete ally.skip; else ally.skip = skip; }
+        });
       } else {
         check(action?.kind === 'switch', 'NATIVE_UI_DECISION_REQUIRED');
         const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
@@ -232,6 +246,9 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.generateEnemyModifiers = () => observeRulePromise(root, generate.call(root));
   root.newBattle = (...args) => BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true);
   function bindPhase(p, existingScope?: number) {
+    // Capture is personal, but its Victory starts the shared encounter/EXP
+    // lifecycle. Do not let the catcher's temporary reserve view own it.
+    if (p instanceof VictoryPhase && views.includes((p as any).scene)) (p as any).scene = root;
     // TurnStart creates root-scene switches with a composite party cursor.
     // Normalize while the phase is queued, before its first checkpoint: later
     // execution and restart must not depend on the already consumed inputs.
@@ -290,21 +307,22 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     async execute(p, resume?) {
       ended = 0; waiting = null;
       const completed = new Promise<void>(resolve => { completePhase = resolve; });
-      let captureSeat: number | null = null, captureParty: Pokemon[] | null = null, savedGetParty: any = null;
+      let captureSeat: number | null = null, captureParty: Pokemon[] | null = null;
       let captureTarget: any = null, captureTargetScene: any = null, savedViewGetParty: any = null;
+      let cancelCapture = false;
       if (p instanceof AttemptCapturePhase) {
-        const seats = [0, 1].filter(seat => c.battle.turnCommands[seat]?.command === Command.BALL
-          && c.battle.turnCommands[seat].targets?.includes((p as any).battlerIndex));
-        check(seats.length > 0, 'INVALID_CAPTURE_OWNER');
-        captureSeat = seats[0];
+        captureSeat = views.indexOf((p as any).scene);
+        check(captureSeat === 0 || captureSeat === 1, 'INVALID_CAPTURE_OWNER');
+        const command = c.battle.turnCommands[captureSeat];
+        captureTarget = (p as any).getPokemon?.();
+        check(command?.command === Command.BALL && command.cursor === (p as any).pokeballType
+          && Number.isSafeInteger((p as any).coopTargetId), 'INVALID_CAPTURE_TARGET');
+        cancelCapture = (p as any).coopTargetId !== captureTarget?.id;
         captureParty = [];
-        savedGetParty = root.getParty;
-        root.getParty = () => captureParty;
         savedViewGetParty = (views[captureSeat] as any).getParty;
         (views[captureSeat] as any).getParty = () => captureParty;
         // addPlayerPokemon calculates a personal Pokemon; its scene must be the
         // seat view so modifier ownership is unambiguous.
-        captureTarget = (p as any).getPokemon?.();
         captureTargetScene = captureTarget?.scene;
         if (captureTarget) captureTarget.scene = views[captureSeat];
         root.pokeballCounts = c.players[captureSeat].pokeballCounts;
@@ -352,7 +370,10 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         let failure;
         events.push({ kind: resume ? 'phase-resume' : 'phase-start', phase: p.constructor.name });
         try {
-          if (resume) resume();
+          if (cancelCapture) {
+            events.push({ kind: 'capture-cancelled', reason: 'target-left', pokemonId: (p as any).coopTargetId });
+            p.end();
+          } else if (resume) resume();
           else if (p instanceof SwitchPhase) {
             const seat = (p as any).fieldIndex; (p as any).fieldIndex = 0;
             try { p.start(); } finally { (p as any).fieldIndex = seat; }
@@ -388,7 +409,6 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
           check(p.queueExperience === oldExperience, 'INVALID_NATIVE_VICTORY_BINDING');
         }
         disposeFaint(); disposeModifiers();
-        if (savedGetParty) root.getParty = savedGetParty;
         if (savedViewGetParty) (views[captureSeat!] as any).getParty = savedViewGetParty;
         if (captureTarget) captureTarget.scene = captureTargetScene;
         for (const [object, key, descriptor] of changes.reverse()) {
@@ -401,13 +421,24 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         // Victory phase finishes, so give the new individual a fresh stable id
         // without consuming rule RNG or dropping any converted fields.
         const used = new Set<number>(c.roster.entries.map(entry => entry.pokemon.id as number).concat(c.roster.retiredIds));
-        let nextId = Math.max(0, ...used) + 1;
+        let nextId = 0;
         for (const pokemon of captureParty) {
           while (used.has(nextId)) nextId++;
           pokemon.id = nextId; used.add(nextId); nextId++;
+          for (const intent of intents) {
+            if ((intent.kind === 'capture-pending' && intent.pokemonId === captureTarget.id)
+              || (intent.kind === 'dex-ivs' && intent.speciesId === pokemon.species.speciesId && !('pokemonId' in intent))) {
+              intent.sourcePokemonId = captureTarget.id;
+              intent.pokemonId = pokemon.id;
+              if (intent.kind === 'capture-pending') intent.pokemon = capturePokemonState(pokemon);
+            }
+          }
         }
         if (captureTarget) {
           (captureTarget as any).__coopCaptured = true;
+          // Its queued action no longer has a field owner. Keep the next
+          // per-phase checkpoint valid, rather than relying on TurnEnd to clear it.
+          c.battle.turnCommands[(p as any).battlerIndex] = null;
           const fieldIndex = root.field.getIndex(captureTarget);
           if (fieldIndex >= 0) root.field.list.splice(fieldIndex, 1);
         }
@@ -444,7 +475,8 @@ function actionDecision(c, root, id) {
       const activeEnemies = root.getEnemyField().filter((enemy: any) => enemy.isActive(true));
       const captureOptions = activeEnemies.length === 1 && c.battle.battleType !== BattleType.TRAINER
         && c.arena.biomeType !== Biome.END && !(activeEnemies[0].isBoss() && activeEnemies[0].bossSegmentIndex >= 1)
-        ? Object.values(PokeballType).filter(value => Number.isInteger(value))
+        && !c.enemyModifiers.some(m => m instanceof PokemonHeldItemModifier && m.pokemonId === activeEnemies[0].id)
+        ? Object.values(PokeballType).filter(value => Number.isInteger(value) && Number(value) < 5)
           .filter(ball => (c.players[seat].pokeballCounts[ball] ?? 0) > 0)
           .map(ball => ({ kind: 'ball', pokeballType: ball, targetId: activeEnemies[0].id }))
         : [];
@@ -641,7 +673,7 @@ export async function openNativeSelectedBattleToInput(runtime, payload) {
 function validateCaptureIntent(c, binding, seat, action) {
   check(action && Object.keys(action).sort().join(',') === 'kind,pokeballType,targetId'
     && action.kind === 'ball', 'INVALID_CAPTURE_INTENT');
-  check(Number.isInteger(action.pokeballType) && Object.values(PokeballType).includes(action.pokeballType),
+  check(Number.isInteger(action.pokeballType) && action.pokeballType < 5 && Object.values(PokeballType).includes(action.pokeballType),
     'INVALID_POKEBALL');
   check((c.players[seat].pokeballCounts[action.pokeballType] ?? 0) > 0, 'NO_POKEBALL');
   check(c.battle.battleType !== BattleType.TRAINER, 'CAPTURE_TRAINER_BATTLE');
@@ -649,6 +681,8 @@ function validateCaptureIntent(c, binding, seat, action) {
   const enemies = binding.root.getEnemyField().filter((enemy: any) => enemy.isActive(true));
   check(enemies.length === 1 && enemies[0].id === action.targetId, 'INVALID_CAPTURE_TARGET');
   check(!(enemies[0].isBoss() && enemies[0].bossSegmentIndex >= 1), 'CAPTURE_BOSS');
+  check(!c.enemyModifiers.some(m => m instanceof PokemonHeldItemModifier && m.pokemonId === action.targetId),
+    'UNSUPPORTED_CAPTURE_HELD_ITEMS');
   return enemies[0];
 }
 

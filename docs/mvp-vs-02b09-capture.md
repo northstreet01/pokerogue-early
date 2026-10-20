@@ -70,3 +70,32 @@
 - 战后换队、完整原 Party reserve 管理、永久收藏 M6、蛋事务未接。
 - B 未复用原 BallUiHandler；当前是合作页最小选择面板。
 - 捕获成功后经验／Victory 已走原 Phase，但更复杂成长子决策仍需原记录中的缺口。
+
+## 2026-10-21 维护者追加（不覆盖以上原交付历史）
+
+原交付A有伙伴行动被跳过、双投球归属猜测、捕获计分空操作、逐阶段捕获恢复非法检查点及待处理记录归属缺失等问题，维护者已在独立本地评审分支修复；B已替换为原BallUiHandler可选展示／回调端口，并补跨await门控。最终验证与具体范围以 [维护者验收](mvp-vs-02b09-review.md) 为准。原Party／Summary查看仍未接，双浏览器仍待用户；以上“最小网页球面板”和“正式WS未补”描述仅保留为原交付历史。
+
+用户启动时改用空闲端口8046，URL为 `http://127.0.0.1:8046/coop-play.html`；目录建议 `build/user-vs02b09-review-rooms`、`build/user-vs02b09-review-legacy`，保持同目录重启验证。不要占用／关闭原服务。Command→BALL现在应显示原画布球菜单，WASD／方向键移动、Enter或鼠标确认、Esc取消；球数量来自本人权威投影，合法性仍以服务器为准。备用现阶段只能从顶栏查看名称／等级，完整属性有自动恢复证据但没有原Summary人工查看入口，不能要求用户把此项勾成已通过。
+
+### 当前用户测试启动命令
+
+以下是维护者修订版本，不沿用上方原交付的8045端口：
+
+```powershell
+Set-Location E:\pokeregue\pokerogue-early
+npm run build:coop-runtime
+if ($LASTEXITCODE -ne 0) { throw 'Worker构建失败' }
+npm run build
+if ($LASTEXITCODE -ne 0) { throw '生产构建失败' }
+if (Get-NetTCPConnection -LocalPort 8046 -State Listen -ErrorAction SilentlyContinue) {
+  throw '8046已占用，请另选空闲端口并相应修改URL，不关闭原服务'
+}
+$env:COOP_PROFILE_LOBBY='1'
+$env:COOP_DIST='dist'
+$env:COOP_FORMAL_DATA='build/user-vs02b09-review-rooms'
+$env:COOP_DATA='build/user-vs02b09-review-legacy'
+$env:PORT='8046'
+node server/start.mjs
+```
+
+两个独立浏览器／profile打开 `http://127.0.0.1:8046/coop-play.html`。正常选队、战斗形成单只合法野生目标；原BALL菜单取消／重选、投球失败后双方继续FIGHT、成功只归本人备用、刷新／同目录关服重启不重扣／重获，再整备进入下一战双方FIGHT。浏览器不强制成功，不改值或跳阶段，未达到成功分支就准确反馈已到步骤。当前备用完整属性没有原Summary入口，留待下一批，不要求用户通过隐藏方法核对。

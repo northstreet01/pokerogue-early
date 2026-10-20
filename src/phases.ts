@@ -1773,7 +1773,13 @@ export class TurnStartPhase extends FieldPhase {
             this.scene.pushPhase(new MovePhase(this.scene, pokemon, turnCommand.targets || turnCommand.move.targets, move, false, queuedMove.ignorePP));
           break;
         case Command.BALL:
-          this.scene.unshiftPhase(new AttemptCapturePhase(this.scene, turnCommand.targets[0] % 2, turnCommand.cursor));
+          const capturePhase = new AttemptCapturePhase(this.scene, turnCommand.targets[0] % 2, turnCommand.cursor);
+          // Co-op binds the acting owner before this queued phase is persisted.
+          // Solo retains the original queue and scene.
+          if ((this.scene as any).queueCaptureAttempt)
+            (this.scene as any).queueCaptureAttempt(capturePhase, o);
+          else
+            this.scene.unshiftPhase(capturePhase);
           break;
         case Command.POKEMON:
         case Command.RUN:
@@ -3290,6 +3296,8 @@ export class PokemonHealPhase extends CommonAnimPhase {
 
 export class AttemptCapturePhase extends PokemonPhase {
   private pokeballType: PokeballType;
+  // Optional co-op queued-instance binding; absent on the solo path.
+  declare coopTargetId?: integer;
   private pokeball: Phaser.GameObjects.Sprite;
   private originalY: number;
 

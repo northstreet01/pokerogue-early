@@ -13,6 +13,8 @@ export default class BallUiHandler extends UiHandler {
   private countsText: Phaser.GameObjects.Text;
 
   private cursorObj: Phaser.GameObjects.Image;
+  private selection: { counts: Record<number, number>; allowed: number[];
+    select: (ball: number) => void; cancel: () => void } | null = null;
 
   constructor(scene: BattleScene) {
     super(scene, Mode.BALL);
@@ -54,7 +56,7 @@ export default class BallUiHandler extends UiHandler {
 
   show(args: any[]): boolean {
     super.show(args);
-
+    this.selection = args[0] ?? null;
     this.updateCounts();
     this.pokeballSelectContainer.setVisible(true);
     this.setCursor(this.cursor);
@@ -67,7 +69,15 @@ export default class BallUiHandler extends UiHandler {
 
     let success = false;
 
-    const pokeballTypeCount = Object.keys(this.scene.pokeballCounts).length;
+    const pokeballTypeCount = Object.keys(this.selection?.counts ?? this.scene.pokeballCounts).length;
+
+    if (this.selection && (button === Button.ACTION || button === Button.CANCEL)) {
+      const selection = this.selection;
+      if (button === Button.CANCEL || this.cursor >= pokeballTypeCount) selection.cancel();
+      else if (selection.allowed.includes(this.cursor) && selection.counts[this.cursor] > 0) selection.select(this.cursor);
+      else { ui.playError(); return true; }
+      ui.playSelect(); return true;
+    }
 
     if (button === Button.ACTION || button === Button.CANCEL) {
       const commandPhase = this.scene.getCurrentPhase() as CommandPhase;
@@ -103,7 +113,7 @@ export default class BallUiHandler extends UiHandler {
   }
 
   updateCounts() {
-    this.countsText.setText(Object.values(this.scene.pokeballCounts).map(c => `x${c}`).join('\n'));
+    this.countsText.setText(Object.values(this.selection?.counts ?? this.scene.pokeballCounts).map(c => `x${c}`).join('\n'));
   }
 
   setCursor(cursor: integer): boolean {
@@ -121,6 +131,7 @@ export default class BallUiHandler extends UiHandler {
 
   clear() {
     super.clear();
+    this.selection = null;
     this.pokeballSelectContainer.setVisible(false);
     this.eraseCursor();
   }

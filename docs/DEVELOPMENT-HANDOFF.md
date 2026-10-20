@@ -1,5 +1,7 @@
 # 新窗口开发交接
 
+2026-10-21 VS-02B-09维护者修订：独立修复伙伴BALL跳过、双投球归属、逐阶段恢复检查点、原计分、待处理捕获事实归属与ID分配；原BallUiHandler接替网页投球按钮并补异步门控。真实Worker／正式双WS磁盘故障恢复／UI回归已补，最终数字见[验收记录](mvp-vs-02b09-review.md)。A仅限无持有物和原支持球种，B原球菜单待用户浏览器，备用原Summary仍未接；下一批只推进捕获备用战后换队至下一战可用。评审分支本地，未合并／未推送。
+
 2026-10-20 VS-02B-09 普通捕获：A 以稳定 ball/target option 驱动原 CommandPhase BALL／AttemptCapturePhase，原三次判定与转换，成功个体进入捕获者 reserve，私有投影与客户端 apply→capture 保留完整状态；直接 Worker 3/3，typecheck／runtime／build 通过。B 加合作页最小球选择与只读备用行，取消／outbox／receipt 门控保留；未复用完整原 BallUiHandler、未做双浏览器。正式双 WS／故障重启和普通球稳定随机回归未补；完整回归见本批记录。战后换队／M6 仍未做。
 
 2026-10-20 用户追加按键／鼠标修订：WASD方向、Enter确认、Esc取消、M菜单、C完成选队；鼠标接原选队、选项、Command／Fight／Target、Party、奖励等菜单，保留原回调、冷却、合作输入门控；文本输入框不再同时驱动画布。定向43/43、typecheck／生产build退出0，完整串行未重跑。用户自行测试后反馈“没发现问题”，只记本批可用性复核，不扩大为完整双端验收。分支fix/keyboard-mouse-controls，未合并／未推送，详见[输入修订记录](controls-review-2026-10-20.md)。下一批捕获开发须保留此最新输入修订。

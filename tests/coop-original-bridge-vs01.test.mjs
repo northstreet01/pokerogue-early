@@ -855,3 +855,99 @@ test('VS-02B-08 active switch survives single-input restart, disk retry and dupl
       assert.equal(canonical((await disk.store.load()).find(r => r.roomId === isolated.roomId).checkpoint), isolatedBefore);
     } finally { if (env) await env.close(); await disk.cleanup(); }
   });
+
+test('VS-02B-09 ordinary capture survives single-input restart, candidate retry, deduplication and room isolation',
+  { timeout: 180000 }, async () => {
+    const disk = await temporaryStore(); let env, rejectRevision = null;
+    const fixture = { seed: 'capture-review-5', identity: { trainerId: 1, secretId: 2 },
+      parties: [[1, 4, 7], [906, 909, 912]], eggState: { players: [[], []] } };
+    const guardedStore = () => {
+      const store = new FormalRoomStore(disk.directory);
+      return { load: () => store.load(), save: room => {
+        if (room.revision === rejectRevision) throw Error('capture candidate disk failure');
+        return store.save(room);
+      } };
+    };
+    const fight = snapshot => snapshot.personal.decision.options.find(o => o.kind === 'fight' && (o.target === null || o.target >= 2));
+    try {
+      env = await startEnv({ fixture, store: guardedStore() });
+      const room = await createRoom(env);
+      let state = await syncBoth(env, room.a, room.b, room.sa, room.sb);
+      for (let turn = 0; turn < 10 && !state.sb.personal.decision.options.some(o => o.kind === 'ball'); turn++)
+        state = await submitBoth(env, room, state.sa, state.sb, [fight(state.sa), fight(state.sb)]);
+      const isolated = await createRoom(env);
+      const isolatedBefore = canonical(env.service.rooms.get(isolated.roomId).checkpoint);
+      const initial = state.sb;
+      const action = initial.personal.decision.options.find(o => o.kind === 'ball' && o.pokeballType === 0);
+      assert.ok(action, 'legal ordinary ball from actual native options');
+      const tokens = [room.a, room.b].map(c => c.messages.find(m => m.type === 'welcome' && m.roomId).resumeToken);
+      const envelope = { type: 'submitAction', roomId: room.roomId, runId: room.runId,
+        decisionId: initial.decisionId, expectedRevision: initial.revision, actionId: 'capture-durable', action };
+      const before = canonical(env.service.rooms.get(room.roomId).checkpoint);
+      room.b.send(envelope);
+      const receipt = await room.b.wait(m => m.type === 'actionReceipt' && m.actionId === envelope.actionId);
+      assert.equal(receipt.accepted, true);
+      const single = (await disk.store.load()).find(r => r.roomId === room.roomId);
+      assert.equal(single.revision, initial.revision);
+      assert.deepEqual(single.inputs, { 1: action });
+      assert.equal(canonical(single.checkpoint), before);
+      await env.close(); env = null;
+      env = await startEnv({ fixture, store: guardedStore() });
+      const clients = [await connect(env, 'capture-resume-A'), await connect(env, 'capture-resume-B')];
+      for (const [seat, client] of clients.entries()) {
+        client.send({ type: 'resumeSeat', roomId: room.roomId, resumeToken: tokens[seat] });
+        await client.wait(m => m.type === 'snapshot');
+      }
+      const [a, b] = clients;
+      state = await syncBoth(env, a, b, a.latestSnapshot(), b.latestSnapshot());
+      rejectRevision = initial.revision + 1;
+      const failure = a.next(m => m.type === 'error' && m.code === 'STORAGE_FAILED');
+      await submit(a, state.sa, fight(state.sa)); await failure;
+      const failed = (await disk.store.load()).find(r => r.roomId === room.roomId);
+      assert.equal(failed.revision, initial.revision);
+      assert.equal(canonical(failed.checkpoint), before);
+      assert.equal(Object.keys(failed.inputs).length, 2);
+      rejectRevision = null;
+      const counts = [a.snapshots.length, b.snapshots.length];
+      a.send({ type: 'requestSnapshot', roomId: room.roomId, runId: room.runId,
+        knownRevision: initial.revision, reason: 'retry-capture-save' });
+      await syncBoth(env, a, b, await a.waitSnapshotCount(counts[0]), await b.waitSnapshotCount(counts[1]));
+      state = await syncBoth(env, a, b, await a.waitRevisionAfter(initial.revision), await b.waitRevisionAfter(initial.revision));
+      assert.equal(state.sa.revision, initial.revision + 1);
+      assert.equal(state.sa.personal.reserve.length, 0);
+      assert.equal(state.sb.personal.reserve.length, 1);
+      assert.equal(state.sb.personal.resources.pokeballs[0], initial.personal.resources.pokeballs[0] - 1);
+      assert.equal(state.sb.shared.field.includes(action.targetId), false);
+      const stored = env.service.rooms.get(room.roomId).checkpoint;
+      const pending = stored.intents.find(i => i.type === 'capture-pending');
+      assert.equal(pending.owner, 1);
+      assert.equal(pending.status, 'pending');
+      assert.equal(pending.payload.pokemonId, state.sb.personal.reserve[0].id);
+      assert.equal(pending.payload.sourcePokemonId, action.targetId);
+      const committed = canonical(stored), hashes = [state.sa.personalHash, state.sb.personalHash];
+      await env.close(); env = null;
+      env = await startEnv({ fixture, store: new FormalRoomStore(disk.directory) });
+      const resumed = [await connect(env, 'capture-final-A'), await connect(env, 'capture-final-B')];
+      for (const [seat, client] of resumed.entries()) {
+        client.send({ type: 'resumeSeat', roomId: room.roomId, resumeToken: tokens[seat] });
+        await client.wait(m => m.type === 'snapshot');
+        assert.equal(client.latestSnapshot().personalHash, hashes[seat]);
+      }
+      const [finalA, finalB] = resumed;
+      await syncBoth(env, finalA, finalB, finalA.latestSnapshot(), finalB.latestSnapshot());
+      finalB.send(envelope);
+      assert.deepEqual(await finalB.wait(m => m.type === 'actionReceipt' && m.actionId === envelope.actionId), receipt);
+      const conflict = finalB.next(m => m.type === 'error' && m.code === 'ACTION_ID_CONFLICT');
+      finalB.send({ ...envelope, action: { ...action, targetId: action.targetId + 1 } }); await conflict;
+      assert.equal(canonical((await disk.store.load()).find(r => r.roomId === room.roomId).checkpoint), committed);
+      assert.equal(canonical((await disk.store.load()).find(r => r.roomId === isolated.roomId).checkpoint), isolatedBefore);
+      state = await syncBoth(env, finalA, finalB, finalA.latestSnapshot(), finalB.latestSnapshot());
+      assert.equal(state.sa.personal.decision.kind, 'preparation');
+      const resumedRoom = { ...room, a: finalA, b: finalB };
+      state = await finishSwitches(env, resumedRoom, await finishPreparation(env, resumedRoom, state));
+      const nextRevision = state.sa.revision;
+      state = await submitBoth(env, resumedRoom, state.sa, state.sb, [fightAction(state.sa), fightAction(state.sb)]);
+      assert.ok(state.sa.revision > nextRevision, 'both actual FIGHT inputs advance the next encounter');
+      assert.equal(state.sb.personal.reserve.length, 1);
+    } finally { if (env) await env.close(); await disk.cleanup(); }
+  });

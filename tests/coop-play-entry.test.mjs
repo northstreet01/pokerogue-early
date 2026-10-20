@@ -447,6 +447,7 @@ test('Potion target submits stable personal id and failed outbox can reopen sele
     if (failed) p.storage = { ...p.storage, saveAction: async () => { throw Error('TEST_DISK_FAILURE'); } };
     await p.choosePreparationReward(rewardOption('POTION'), p.latest, p.epoch);
     modes.at(-1)[3](0); await tick(); await tick();
+    for (let i = 0; i < 8 && !failed && !sent.length; i++) await tick();
     assert.equal(sent.length, failed ? 0 : 1);
     if (failed) assert.equal(modes.at(-1)[0], api.Mode.MODIFIER_SELECT);
     else assert.equal(sent[0].action.pokemonId, entry.id);

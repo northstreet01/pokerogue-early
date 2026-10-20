@@ -470,3 +470,73 @@ test('personal DOM skip while Potion Party is open releases the temporary view b
   callback(0); await tick();
   assert.equal(sent.length, 1); assert.equal(sent[0].action.operation, 'skip-reward');
 });
+
+function activeSwitchPhase() {
+  const state = personalPotionPhase(), { p, entry } = state;
+  const runtime = api.createOriginalRuntime('switch-party-menu', { trainerId: 1, secretId: 2 });
+  const pokemon = api.constructOriginalPokemon(runtime, 4, 5);
+  p.model.applied.personal.party.push({ id: pokemon.id, pokemon });
+  p.latest.personal.decision = { id: 'fight-4', kind: 'wait-actions', requiredSeats: [0, 1],
+    options: [{ kind: 'switch', pokemonId: pokemon.id }] };
+  p.latest.decisionId = 'fight-4';
+  p.battleInputActive = true;
+  p.getPokemon = () => entry.pokemon;
+  return { ...state, target: pokemon.id };
+}
+
+test('active Party cancel, failed outbox and rejection restore Command without mutating verified party', async () => {
+  for (const outcome of ['cancel', 'disk-failure', 'rejected']) {
+    const { p, modes, sent, target } = activeSwitchPhase();
+    const party = p.scene.party, battle = p.scene.currentBattle;
+    const before = p.model.applied.personal.party.map(e => api.capturePokemonState(e.pokemon));
+    if (outcome === 'disk-failure') p.storage = { ...p.storage, saveAction: async () => { throw Error('TEST_DISK_FAILURE'); } };
+    await p.openActiveSwitchParty();
+    assert.equal(p.scene.currentBattle.getBattlerCount(), 1);
+    modes.at(-1)[3](outcome === 'cancel' ? 6 : 1,
+      outcome === 'cancel' ? api.PartyOption.CANCEL : api.PartyOption.SEND_OUT);
+    await tick(); await tick();
+    if (outcome === 'rejected') {
+      assert.equal(sent[0].action.pokemonId, target);
+      await p.onMessage({ type: 'actionReceipt', roomId: p.roomId, actionId: p.actionId,
+        decisionId: p.latest.decisionId, revision: p.latest.revision, accepted: false, code: 'POKEMON_TRAPPED' });
+    } else assert.equal(sent.length, 0);
+    assert.equal(p.scene.party, party); assert.equal(p.scene.currentBattle, battle);
+    assert.equal(modes.at(-1)[0], api.Mode.COMMAND);
+    assert.deepEqual(p.model.applied.personal.party.map(e => api.capturePokemonState(e.pokemon)), before);
+  }
+});
+
+test('active Party selection cannot submit after its awaited mode transition crosses revision or epoch', async () => {
+  for (const stale of ['revision', 'epoch']) {
+    const { p, modes, sent } = activeSwitchPhase();
+    await p.openActiveSwitchParty();
+    let finish;
+    const originalMode = p.scene.ui.setMode;
+    p.scene.ui.setMode = () => new Promise(resolve => { finish = resolve; });
+    modes.at(-1)[3](1, api.PartyOption.SEND_OUT);
+    if (stale === 'revision') p.latest = { ...p.latest, revision: 5, decisionId: 'fight-5' };
+    else p.epoch = 'epoch-2';
+    p.scene.ui.setMode = originalMode;
+    finish(); await tick(); await tick();
+    assert.equal(sent.length, 0, 'old choice must not acquire the new decision envelope');
+  }
+});
+
+test('cooperative active Party permits only SEND_OUT and summary; local release and Baton Pass cannot execute', async () => {
+  const { p, modes, sent } = activeSwitchPhase();
+  await p.openActiveSwitchParty();
+  const permitted = modes.at(-1)[7].allowedOptions;
+  assert.deepEqual(permitted, [api.PartyOption.SEND_OUT, api.PartyOption.SUMMARY]);
+  for (const option of [api.PartyOption.RELEASE, api.PartyOption.UNPAUSE_EVOLUTION, api.PartyOption.PASS_BATON]) {
+    const handler = Object.assign(Object.create(api.PartyUiHandler.prototype), {
+      optionsMode: true, options: [option], optionsCursor: 0,
+      allowedOptions: new Set([...permitted, api.PartyOption.CANCEL]),
+      getUi: () => ({ playError() {} }),
+      scene: { getParty: () => assert.fail('unsupported local operation must not reach party mutation') },
+    });
+    assert.equal(handler.processInput(api.Button.ACTION), false);
+  }
+  modes.at(-1)[3](1, api.PartyOption.PASS_BATON);
+  await tick(); await tick();
+  assert.equal(sent.length, 0, 'Baton Pass must not be silently submitted as ordinary switch');
+});

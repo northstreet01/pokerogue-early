@@ -89,6 +89,7 @@ export default class PartyUiHandler extends MessageUiHandler {
   private selectFilter: PokemonSelectFilter | PokemonModifierTransferSelectFilter;
   private moveSelectFilter: PokemonMoveSelectFilter;
   private tmMoveId: Moves;
+  private allowedOptions: Set<PartyOption> | undefined;
 
   private iconAnimHandler: PokemonIconAnimHandler;
 
@@ -184,6 +185,8 @@ export default class PartyUiHandler extends MessageUiHandler {
       ? args[4] as PokemonMoveSelectFilter
       : PartyUiHandler.FilterAllMoves;
     this.tmMoveId = args.length > 5 && args[5] ? args[5] : Moves.NONE;
+    this.allowedOptions = args[6]?.allowedOptions
+      ? new Set<PartyOption>([...args[6].allowedOptions, PartyOption.CANCEL]) : undefined;
 
     this.partyContainer.setVisible(true);
     this.partyBg.setTexture(`party_bg${this.scene.currentBattle.double ? '_double' : ''}`);
@@ -216,6 +219,11 @@ export default class PartyUiHandler extends MessageUiHandler {
     if (this.optionsMode) {
       if (button === Button.ACTION) {
         const option = this.options[this.optionsCursor];
+        if (this.allowedOptions && !this.allowedOptions.has(option)
+          && option !== PartyOption.SCROLL_UP && option !== PartyOption.SCROLL_DOWN) {
+          ui.playError();
+          return false;
+        }
         const pokemon = this.scene.getParty()[this.cursor];
         if (this.partyUiMode === PartyUiMode.MODIFIER_TRANSFER && !this.transferMode && option !== PartyOption.CANCEL) {
           this.startTransfer();
@@ -589,6 +597,7 @@ export default class PartyUiHandler extends MessageUiHandler {
         this.options.push(im);
     }
 
+    if (this.allowedOptions) this.options = this.options.filter(option => this.allowedOptions.has(option));
     this.optionsScrollTotal = this.options.length;
     let optionStartIndex = this.optionsScrollCursor;
     let optionEndIndex = Math.min(this.optionsScrollTotal, optionStartIndex + (!optionStartIndex || this.optionsScrollCursor + 8 >= this.optionsScrollTotal ? 8 : 7));
@@ -752,6 +761,7 @@ export default class PartyUiHandler extends MessageUiHandler {
 
   clear() {
     super.clear();
+    this.allowedOptions = undefined;
     this.partyContainer.setVisible(false);
     this.clearPartySlots();
   }

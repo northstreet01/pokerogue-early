@@ -4,7 +4,7 @@ import { NewBattlePhase, EncounterPhase, SummonPhase, PostSummonPhase, ToggleDou
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
-import { FaintPhase, VictoryPhase, ExpPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase } from '../phases';
+import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase } from '../phases';
 import { SelectModifierPhase } from '../phases';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase } from '../phases';
 import { Mode } from '../ui/ui';
@@ -63,7 +63,7 @@ class DisplayTarget {
 
 const supportedPhases = [SummonPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 
 // These original methods only display; they never consume a move or change HP.
@@ -88,6 +88,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     nativeEvents: [], enableTutorials: false });
   const events = root.nativeEvents, intents = [], callbacks = [];
   let tick = 0, order = 0, ended = 0, waiting = null, nextId = 0;
+  let completePhase: (() => void) | undefined;
   const ids = new WeakMap();
   const phaseScopes = new WeakMap();
   const schedule = (callback, delay = 0) => { if (callback) callbacks.push({ callback, tick: tick + delay, order: order++ }); };
@@ -135,7 +136,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     intents.push({ kind: 'encounter-persistence-pending', waveIndex: root.currentBattle.waveIndex });
     return Promise.resolve();
   };
-  root.shiftPhase = () => { check(++ended === 1, 'NATIVE_PHASE_COMPLETED_TWICE'); };
+  root.shiftPhase = () => { check(++ended === 1, 'NATIVE_PHASE_COMPLETED_TWICE'); completePhase?.(); };
   root.initSession = () => { intents.push({ kind: 'session-start' }); };
   root.playBgm = root.playSound = root.playSoundWithoutBgm = () => {};
   root.updateFieldScale = root.setFieldScale = () => Promise.resolve();
@@ -143,6 +144,13 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.trainer = root.arenaPlayer = root.arenaEnemy = root.arenaNextEnemy = new DisplayTarget();
   root.pbTray = root.pbTrayEnemy = { hide() {} };
   root.modifierBar = root.enemyModifierBar = { updateModifiers() {} };
+  root.partyExpBar = {
+    showPokemonExp(pokemon, exp) {
+      events.push({ kind: 'experience-bar', pokemonId: pokemon.id, exp });
+      return Promise.resolve();
+    },
+    hide: () => Promise.resolve(),
+  };
   root.abilityBar = { shown: false, showAbility(p) { this.shown = true; events.push({ kind: 'ability-display', pokemonId: p.id }); }, hide() { this.shown = false; } };
   root.add = { existing() {} };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
@@ -199,6 +207,16 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.generateEnemyModifiers = () => observeRulePromise(root, generate.call(root));
   root.newBattle = (...args) => BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true);
   function bindPhase(p, existingScope?: number) {
+    // TurnStart creates root-scene switches with a composite party cursor.
+    // Normalize while the phase is queued, before its first checkpoint: later
+    // execution and restart must not depend on the already consumed inputs.
+    if (p instanceof SwitchSummonPhase && (p as any).player && (p as any).scene === root) {
+      const seat = (p as any).fieldIndex;
+      const target = root.getParty()[(p as any).slotIndex];
+      const index = parties[seat]?.indexOf(target);
+      check(index > 0, 'INVALID_SWITCH_TARGET');
+      (p as any).slotIndex = index;
+    }
     let scope = existingScope;
     if (scope === undefined) scope = phaseScopes.get(p);
     if (scope === undefined) scope = views.includes(p.scene) ? views.indexOf(p.scene)
@@ -246,19 +264,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     drainTasks: () => Promise.all(trackers.map(tracker => tracker.drain())),
     async execute(p, resume?) {
       ended = 0; waiting = null;
-      if (p instanceof SwitchSummonPhase && Number.isInteger((p as any).fieldIndex)
-        && inputs[(p as any).fieldIndex]?.kind === 'switch') {
-        const seat = (p as any).fieldIndex;
-        const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
-          && e.pokemon.id === inputs[seat].pokemonId);
-        check(entry, 'INVALID_SWITCH_INTENT');
-        // Execute an active switch through this seat's personal Party view. The
-        // original SwitchSummonPhase swaps a mutable personal array, whereas the
-        // root party is a read-only composite for co-op.
-        if ((p as any).scene === root) (p as any).scene = views[seat];
-        (p as any).fieldIndex = 0;
-        (p as any).slotIndex = entry.index;
-      }
+      const completed = new Promise<void>(resolve => { completePhase = resolve; });
       const scope = bindPhase(p); root.currentPhase = p;
       const changes = [];
       const patch = (object, key, value) => { changes.push([object, key, Object.getOwnPropertyDescriptor(object, key)]);
@@ -325,6 +331,9 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
           } else await new Promise(resolve => setImmediate(resolve));
           check(budget < 9999, 'NATIVE_CALLBACK_BUDGET_EXCEEDED');
         }
+        // The original off-field EXP phase ends after its 500ms display timer.
+        // Await that boundary; do not replace addExp or skip the original phase.
+        if (!failure && p instanceof ShowPartyExpBarPhase) await completed;
         const settled = await Promise.allSettled(trackers.map(t => t.drain()));
         const failed = settled.find(r => r.status === 'rejected');
         if (failure) throw failure;
@@ -604,21 +613,6 @@ export async function submitNativeActions(runtime, payload) {
         }
         check([0, 1].every(seat => [Command.FIGHT, Command.POKEMON].includes(candidate.battle.turnCommands[seat]?.command)),
           'INCOMPLETE_NATIVE_COMMANDS');
-        // Start the original turn and execute its SwitchSummon/PostSummon chain
-        // only when a switch intent was collected. Pure FIGHT turns retain the
-        // previous stable phase boundary used by recovery tests.
-        if (Object.values(inputs).some((action: any) => action?.kind === 'switch')) {
-          for (let budget = 0; budget < 30; budget++) {
-            const next = binding.root.phaseQueuePrepend.at(-1) ?? binding.root.phaseQueue[0];
-            if (next instanceof SwitchSummonPhase || next instanceof PostSummonPhase || next instanceof EnemyCommandPhase
-              || next instanceof TurnStartPhase) {
-              const p = selectNextPhase(binding.root, () => { throw new Error('NATIVE_SWITCH_QUEUE_EMPTY'); }).phase;
-              await binding.execute(p);
-              continue;
-            }
-            break;
-          }
-        }
         intents = binding.intents;
         return { completed: true, pendingTasks: 0, events: binding.events, grants: [] };
       } finally { binding.dispose(); }

@@ -77,3 +77,62 @@ test('JSON restoration before submit produces the same active-switch result', as
     assert.equal(canonical(first), canonical(second));
   } finally { await h.close(); }
 });
+
+test('two switches with an incoming Intimidate survive every queued phase restart', async () => {
+  const h = await createOriginalRuleHost({ seed: 'vs02b08-switch', identity: { trainerId: 1, secretId: 2 } });
+  try {
+    const c = (await h.request('native-open-to-input', {
+      parties: [[1, 4, 7], [906, 23, 912]], eggState
+    })).checkpoint;
+    const inputs = { 0: switchOption(c, 0), 1: switchOption(c, 1) };
+    const submitted = (await h.request('native-submit', { checkpoint: c, inputs })).checkpoint;
+    const expected = (await h.request('native-run-to-boundary', submitted)).checkpoint;
+    let restored = submitted;
+    const trace = [];
+    for (let step = 0; restored.decision.kind === 'continuing' && step < 80; step++) {
+      const fresh = await createOriginalRuleHost({ seed: c.scene.seed, identity: { trainerId: 1, secretId: 2 } });
+      try {
+        const result = await fresh.request('native-step', JSON.parse(JSON.stringify(restored)));
+        restored = result.checkpoint;
+        trace.push(...result.events.filter(e => e.kind === 'phase-start').map(e => e.phase));
+      } finally { await fresh.close(); }
+    }
+    assert.equal(restored.decision.kind, 'wait-actions');
+    assert.deepEqual(restored.roster.field.slice(0, 2), [inputs[0].pokemonId, inputs[1].pokemonId]);
+    const semantic = value => {
+      const copy = structuredClone(value);
+      delete copy.decision.id;
+      for (const key of ['phaseQueue', 'phaseQueuePrepend', 'nextCommandPhaseQueue'])
+        for (const descriptor of copy.continuation[key]) delete descriptor.phaseId;
+      return copy;
+    };
+    assert.deepEqual(semantic(restored), semantic(expected));
+    assert.ok(trace.includes('ShowAbilityPhase'), 'incoming ability must interrupt the switch chain');
+  } finally { await h.close(); }
+});
+
+test('switched-out participants receive original experience and reach preparation after victory', async () => {
+  const { h, c } = await open();
+  try {
+    const outgoing = c.roster.field.slice(0, 2);
+    let state = (await h.request('native-submit', { checkpoint: c,
+      inputs: { 0: switchOption(c, 0), 1: switchOption(c, 1) } })).checkpoint;
+    const trace = [];
+    for (let turn = 0; turn < 12; turn++) {
+      const result = await h.request('native-run-to-boundary', state);
+      state = result.checkpoint;
+      trace.push(...result.events.filter(e => e.kind === 'phase-start').map(e => e.phase));
+      if (state.decision.kind !== 'wait-actions') break;
+      state = (await h.request('native-submit', { checkpoint: state,
+        inputs: { 0: fightOption(state, 0), 1: fightOption(state, 1) } })).checkpoint;
+    }
+    assert.ok(trace.includes('ShowPartyExpBarPhase'));
+    assert.ok(trace.includes('HidePartyExpBarPhase'));
+    assert.ok(state.continuation.phaseQueue.some(d => d.phase.type === 'SelectModifierPhase'));
+    for (const id of outgoing) {
+      const before = c.roster.entries.find(e => e.pokemon.fields.id === id).pokemon.fields;
+      const after = state.roster.entries.find(e => e.pokemon.fields.id === id).pokemon.fields;
+      assert.ok(after.exp > before.exp);
+    }
+  } finally { await h.close(); }
+});

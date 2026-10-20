@@ -77,3 +77,18 @@
 - 日志／退出码／元数据：ignored `build/vs02b08/full-final.tap`、`full-final-exit.txt`、`execution-meta-final.txt`。
 - 最终源码／测试 blob（HEAD `3da1d43f`）：active switch 测试 `46ee98024e070318f84b7ff8b55a1406dcc14ea8`，native-entry `01fae98915f00b4dcedf405e120a22aa4dfad8c5`，play-phase `a13b42a924924132c26c34c687440c7f6d361806`。
 - 未运行浏览器验收；B 段仍待用户。
+
+## 维护者复验补记（2026-10-20，覆盖上方当前状态，保留原交付历史）
+
+原交付1000/1000日志、退出码和8ffcd9d9→69363802仅文档差异已核对。原新增WS用例实际使用默认MemoryStore，虽然通过正式adapter／真实Worker，但不能称为FormalRoomStore磁盘验收。
+
+维护者已复现并修复：
+
+- 双方同轮换人，先入场者的威吓插入ShowAbility／StatChange后，待执行换人的根party下标未正确转成个人party下标。改在原TurnStart创建的换人阶段入队时完成映射并持久化，移除依赖本次inputs的提前执行循环；逐阶段新Worker恢复与连续执行一致。
+- 选择本人目标后等待Mode.MESSAGE时，旧回调可能获得新revision／epoch的提交信封。增加await之后的再次检查。
+- 原Party SWITCH会列出放生／恢复进化等本地操作，且callback忽略PartyOption可能把Baton Pass当普通换人。添加可选菜单许可集合，合作仅派出／摘要／取消，原单人缺省行为保留；回调再次核对SEND_OUT。
+- 换下的参战者胜利获经验时原ShowPartyExpBarPhase未支持，导致后续战斗阻断。接原ShowPartyExpBarPhase／HidePartyExpBarPhase的显示端口并等待原结束边界；继续使用原addExp与LevelUp，不重写公式。
+
+新增主动换人专用真实双WS＋FormalRoomStore：单方输入落盘后关闭服务／Worker再启动、候选落盘失败与重试、成功后再次关服重启、重复actionId回执、同ID异内容拒绝、房间隔离。最终定向51/51、退出0，typecheck／runtime build／生产build退出0；完整回归结果见 [维护者验收](mvp-vs-02b08-review.md)。
+
+用户清单继续有效，并增加：菜单只显示派出／摘要／取消；双人换人遇到威吓后目标仍正确；换人后击倒敌人能给已退场参战者经验并进入整备。以上浏览器步骤均待用户执行，不以自动测试替代。

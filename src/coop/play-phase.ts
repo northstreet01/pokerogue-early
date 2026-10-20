@@ -12,7 +12,7 @@ import { GameModes } from '../game-mode';
 import { Command } from '../ui/command-ui-handler';
 import { ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
 import { AddPokeballModifier } from '../modifier/modifier';
-import { PartyUiMode } from '../ui/party-ui-handler';
+import { PartyUiMode, PartyOption } from '../ui/party-ui-handler';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -464,7 +464,7 @@ export default class CoopPlayPhase extends Phase {
     };
     this.releaseActiveSwitchParty = release;
     try {
-      await this.scene.ui.setMode(Mode.PARTY, PartyUiMode.SWITCH, 0, (slotIndex: number) => {
+      await this.scene.ui.setMode(Mode.PARTY, PartyUiMode.SWITCH, 0, (slotIndex: number, option: PartyOption) => {
         if (!active) return;
         const current = this.isPersonalInputCurrent(snapshot, epoch);
         this.clearActiveSwitchParty();
@@ -475,14 +475,18 @@ export default class CoopPlayPhase extends Phase {
           return;
         }
         const entry = personal.party[slotIndex];
-        if (!entry || !allowed.has(entry.id)) {
+        if (option !== PartyOption.SEND_OUT || !entry || !allowed.has(entry.id)) {
           this.setStatus('该宝可梦不能作为主动换人目标', true);
           void this.scene.ui.setMode(Mode.MESSAGE).then(() => this.openBattleCommand());
           return;
         }
         void this.scene.ui.setMode(Mode.MESSAGE)
-          .then(() => this.sendAction({ kind: 'switch', pokemonId: entry.id }, '已提交换人，等待服务器确认…'));
-      }, (pokemon: any) => allowed.has(pokemon.id) ? null : '不能更换为该宝可梦');
+          .then(() => {
+            if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+            return this.sendAction({ kind: 'switch', pokemonId: entry.id }, '已提交换人，等待服务器确认…');
+          });
+      }, (pokemon: any) => allowed.has(pokemon.id) ? null : '不能更换为该宝可梦',
+      undefined, undefined, { allowedOptions: [PartyOption.SEND_OUT, PartyOption.SUMMARY] });
     } catch (error) {
       this.clearActiveSwitchParty();
       this.battleInputActive = false;
@@ -657,6 +661,7 @@ export default class CoopPlayPhase extends Phase {
     if (this.actionId) { this.setStatus('操作已提交，等待回执…'); return false; }
     if (!this.inputReady) { this.setStatus('正在核对双方状态，请稍后提交'); return false; }
     this.clearPreparationParty();
+    this.clearActiveSwitchParty();
     const actionId = crypto.randomUUID();
     const message = { type: 'submitAction', roomId: this.roomId, runId: this.latest.runId,
       decisionId: this.latest.decisionId, expectedRevision: this.latest.revision, actionId, action };

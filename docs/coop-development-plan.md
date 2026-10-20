@@ -1,5 +1,7 @@
 # 分模块开发计划与进度
 
+2026-10-20 VS-02B-08维护者复验：原换人Phase入队时持久化个人游标，修复威吓插入阶段后错换／恢复问题；补Party跨await门控和仅派出／摘要／取消的原菜单适配，原Show／HidePartyExpBar支持关闭退场参战者获经验阻断。主动换人专用真实磁盘重启／失败重试／去重／隔离定向已接，最终51/51、typecheck／runtime build／生产build退出0；完整串行1006/1006、退出0（1028492.7826ms，无失败／取消／跳过），最终结果见[验收](mvp-vs-02b08-review.md)。B双浏览器待用户，不提升为完整M3／MVP。下一功能批限定普通捕获进入本人本局备用并接原BALL输入；战后换队、其它成长／整备分支和M6继续未完成。评审修复本地提交，未合并／未推送。
+
 2026-10-19 VS-02B-08 战斗内主动换人：A 以稳定 pokemonId option 经原 CommandPhase POKEMON／TurnStart／SwitchSummonPhase 执行，个人 Party 视图分席换人，混合 FIGHT 与双方同轮换人可达下一输入；真实 Worker 4/4、真实双 WS 1/1、既有换人定向 23/23，最终完整串行 **1000/1000、退出 0**（1595758.506ms），typecheck／build 通过。B 接原 POKEMON→个人 Party UI，取消／拒绝／刷新清理和 outbox 门控保留，但双浏览器未执行，待用户验收。普通 SEND_OUT 之外、经验条阶段及主动换人专用故障／重启测试仍是缺口。详见 [VS-02B-08 记录](mvp-vs-02b08-active-switch.md)。
 
 2026-10-19 VS-02B-07 维护者复核：A／B部分通过，非逐菜单视觉验收。补原字体注册、Text padding／行距重设与显式零值、窄窗错误／控制换行；来源及启动清单更正。定向35/35，typecheck／生产build退出0；本批全套和浏览器未执行，视觉／Potion原Party待用户。main仍86798227，评审修订未合并／未推送，见 [验收](mvp-vs-02b07-review.md)。下一功能批仅原战斗内普通主动换人，分A正式native／事务、B原Command→本人Party→实际换人→继续FIGHT；任务书本地保存。捕获／本局备用／战后换队及其他整备分支继续未完成，不能把本片提升为M3或MVP通过。

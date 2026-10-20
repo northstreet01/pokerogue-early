@@ -4,7 +4,7 @@ import { NewBattlePhase, EncounterPhase, SummonPhase, PostSummonPhase, ToggleDou
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
-import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase } from '../phases';
+import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase } from '../phases';
 import { SelectModifierPhase } from '../phases';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase } from '../phases';
 import { Mode } from '../ui/ui';
@@ -33,7 +33,9 @@ import { advanceNextBattle } from '../battle-core/next-battle-runner.mjs';
 import { originalSafeDecisionCodec } from '../original-phase-checkpoints';
 import { captureModifierTypeState, getPlayerShopModifierTypeOptionsForWave, modifierTypes,
   ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
-import { fixedBattles } from '../battle';
+import { fixedBattles, BattleType } from '../battle';
+import { Biome } from '../data/enums/biome';
+import { PokeballType } from '../data/pokeball';
 import { advancePreBattleSwitch } from '../battle-core/pre-battle-switch-runner.mjs';
 import { createPreBattleSwitchDecision } from '../battle-core/switch-command.mjs';
 import { PartyOption } from '../ui/party-ui-handler';
@@ -56,14 +58,15 @@ class DisplayTarget {
   setTexture(..._args) { return this; }
   setFrame(..._args) { return this; }
   setScale(..._args) { return this; }
-  setAlpha(..._args) { return this; }
+  setAlpha(..._args: any[]) { return this; }
   clearTint() { return this; }
+  setTintFill(..._args: any[]) { return this; }
   destroy() {}
 }
 
 const supportedPhases = [SummonPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, AttemptCapturePhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 
 // These original methods only display; they never consume a move or change HP.
@@ -102,6 +105,9 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   const deferredData = () => ({ ...identity, unlocks: {}, gameStats: new GameStats(), getFormAttr: GameData.prototype.getFormAttr,
     setPokemonSeen: (p, incrementCount = true) => intents.push({ kind: 'seen', pokemonId: p.id,
       speciesId: p.species.speciesId, dexAttr: p.getDexAttr().toString(), incrementCount }),
+    updateSpeciesDexIvs: (speciesId, ivs) => intents.push({ kind: 'dex-ivs', speciesId, ivs: [...ivs] }),
+    setPokemonCaught: p => { intents.push({ kind: 'capture-pending', pokemonId: p.id,
+      speciesId: p.species.speciesId, level: p.level, ivs: [...p.ivs], nature: p.nature }); return Promise.resolve(); },
     saveSystem: () => { throw new Error('PERMANENT_SAVE_UNAVAILABLE'); },
     saveSession: () => { throw new Error('PERSONAL_SESSION_SAVE_UNAVAILABLE'); } });
   root.gameData = deferredData();
@@ -151,8 +157,11 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     },
     hide: () => Promise.resolve(),
   };
+  root.pokemonInfoContainer = { show(pokemon) { events.push({ kind: 'capture-info', pokemonId: pokemon.id }); },
+    hide() {} };
+  root.addFaintedEnemyScore = pokemon => events.push({ kind: 'capture-score', pokemonId: pokemon.id });
   root.abilityBar = { shown: false, showAbility(p) { this.shown = true; events.push({ kind: 'ability-display', pokemonId: p.id }); }, hide() { this.shown = false; } };
-  root.add = { existing() {} };
+  root.add = { existing() {}, sprite: (..._args: any[]) => new DisplayTarget() };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
   root.validateAchv = (achv) => { intents.push({ kind: 'achievement-check', id: achv.id }); return false; };
   root.validateVoucher = () => { throw new Error('VOUCHER_POLICY_UNCONFIRMED'); };
@@ -167,7 +176,20 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     };
     schedule(callback, config.delay ?? 0); return timer;
   };
-  root.tweens = { add: config => { schedule(config.onComplete, config.duration ?? 0); return { stop() {} }; } };
+  root.tweens = { add: config => { schedule(config.onComplete, config.duration ?? 0); return { stop() {} }; },
+    addCounter: config => {
+      const counter = {
+        stopped: false,
+        getValue: () => 0,
+        stop() { this.stopped = true; },
+      };
+      const repeats = config.repeat ?? 0;
+      for (let index = 0; index < repeats; index++)
+        schedule(() => { if (!counter.stopped) config.onRepeat?.(); }, (config.duration ?? 0) + (config.repeatDelay ?? 0));
+      schedule(() => { if (!counter.stopped) config.onUpdate?.(counter); }, 0);
+      schedule(() => { if (!counter.stopped) config.onComplete?.(); }, (repeats + 1) * ((config.duration ?? 0) + (config.repeatDelay ?? 0)));
+      return counter;
+    } };
   root.ui = { getMessageHandler: () => ({ promptLevelUpStats: () => Promise.resolve() }), setMode: (mode, seat, _move, callback) => {
     if (mode === Mode.COMMAND) {
       check(root.currentPhase instanceof CommandPhase, 'NATIVE_UI_DECISION_REQUIRED');
@@ -175,6 +197,9 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       if (action?.kind === 'fight') {
         check(Number.isInteger(action.cursor), 'NATIVE_UI_DECISION_REQUIRED');
         schedule(() => check(p.handleCommand(Command.FIGHT, action.cursor, false), 'NATIVE_COMMAND_REJECTED'));
+      } else if (action?.kind === 'ball') {
+        root.pokeballCounts = c.players[seat].pokeballCounts;
+        schedule(() => check(p.handleCommand(Command.BALL, action.pokeballType), 'NATIVE_COMMAND_REJECTED'));
       } else {
         check(action?.kind === 'switch', 'NATIVE_UI_DECISION_REQUIRED');
         const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
@@ -249,7 +274,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     c.roster.entries = parties.flatMap((party, owner) => party.map((pokemon, index) => ({ owner, group: 'party', index, pokemon })))
       .concat(c.roster.entries.filter(e => e.owner !== null && e.group === 'reserve')).concat((root.currentBattle?.enemyParty ?? [])
       .map((pokemon, index) => ({ owner: null, group: 'enemy', index, pokemon })));
-    c.roster.field = root.getField().map((p, slot) => p && (root.field.getIndex(p) >= 0
+    c.roster.field = root.getField().map((p, slot) => p && !(p as any).__coopCaptured && (root.field.getIndex(p) >= 0
       || p.isFainted() && c.roster.field[slot] === p.id) ? p.id : null);
     for (const key of ['seed', 'waveSeed', 'waveCycleOffset', 'offsetGym', 'score']) c.scene[key] = root[key];
     if (Object.prototype.hasOwnProperty.call(root, 'lastEnemyTrainer')) c.scene.lastEnemyTrainer = root.lastEnemyTrainer;
@@ -265,6 +290,25 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     async execute(p, resume?) {
       ended = 0; waiting = null;
       const completed = new Promise<void>(resolve => { completePhase = resolve; });
+      let captureSeat: number | null = null, captureParty: Pokemon[] | null = null, savedGetParty: any = null;
+      let captureTarget: any = null, captureTargetScene: any = null, savedViewGetParty: any = null;
+      if (p instanceof AttemptCapturePhase) {
+        const seats = [0, 1].filter(seat => c.battle.turnCommands[seat]?.command === Command.BALL
+          && c.battle.turnCommands[seat].targets?.includes((p as any).battlerIndex));
+        check(seats.length > 0, 'INVALID_CAPTURE_OWNER');
+        captureSeat = seats[0];
+        captureParty = [];
+        savedGetParty = root.getParty;
+        root.getParty = () => captureParty;
+        savedViewGetParty = (views[captureSeat] as any).getParty;
+        (views[captureSeat] as any).getParty = () => captureParty;
+        // addPlayerPokemon calculates a personal Pokemon; its scene must be the
+        // seat view so modifier ownership is unambiguous.
+        captureTarget = (p as any).getPokemon?.();
+        captureTargetScene = captureTarget?.scene;
+        if (captureTarget) captureTarget.scene = views[captureSeat];
+        root.pokeballCounts = c.players[captureSeat].pokeballCounts;
+      }
       const scope = bindPhase(p); root.currentPhase = p;
       const changes = [];
       const patch = (object, key, value) => { changes.push([object, key, Object.getOwnPropertyDescriptor(object, key)]);
@@ -344,11 +388,44 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
           check(p.queueExperience === oldExperience, 'INVALID_NATIVE_VICTORY_BINDING');
         }
         disposeFaint(); disposeModifiers();
+        if (savedGetParty) root.getParty = savedGetParty;
+        if (savedViewGetParty) (views[captureSeat!] as any).getParty = savedViewGetParty;
+        if (captureTarget) captureTarget.scene = captureTargetScene;
         for (const [object, key, descriptor] of changes.reverse()) {
           if (descriptor) Object.defineProperty(object, key, descriptor); else delete object[key];
         }
       }
+      if (captureParty?.length) {
+        // EnemyPokemon.addToParty copies the wild instance id as its dataSource
+        // id. In co-op the wild roster entry is still present until the original
+        // Victory phase finishes, so give the new individual a fresh stable id
+        // without consuming rule RNG or dropping any converted fields.
+        const used = new Set<number>(c.roster.entries.map(entry => entry.pokemon.id as number).concat(c.roster.retiredIds));
+        let nextId = Math.max(0, ...used) + 1;
+        for (const pokemon of captureParty) {
+          while (used.has(nextId)) nextId++;
+          pokemon.id = nextId; used.add(nextId); nextId++;
+        }
+        if (captureTarget) {
+          (captureTarget as any).__coopCaptured = true;
+          const fieldIndex = root.field.getIndex(captureTarget);
+          if (fieldIndex >= 0) root.field.list.splice(fieldIndex, 1);
+        }
+        // A successful capture ends the encounter; any already queued player or
+        // enemy MovePhase still references the removed wild instance. Drop those
+        // stale action phases after the original capture has already won.
+        for (const queue of [root.phaseQueue, root.phaseQueuePrepend])
+          for (let index = queue.length - 1; index >= 0; index--)
+            if (queue[index] instanceof MovePhase) queue.splice(index, 1);
+      }
       check(ended === 1 || ended === 0 && waiting, 'INCOMPLETE_NATIVE_PHASE'); root.currentPhase = null; sync();
+      if (captureParty?.length) {
+        const index = c.roster.entries.filter(e => e.owner === captureSeat && e.group === 'reserve').length;
+        for (const [offset, pokemon] of captureParty.entries()) {
+          pokemon.scene = views[captureSeat!];
+          c.roster.entries.push({ owner: captureSeat, group: 'reserve', index: index + offset, pokemon });
+        }
+      }
       if (waiting) return { completed: false, suspended: true, pendingTasks: 0, events: [...events], grants: [] };
       return { completed: true, pendingTasks: 0, events: [...events], grants: [] };
     },
@@ -364,6 +441,13 @@ function actionDecision(c, root, id) {
       const switchOptions = c.roster.entries.filter(e => e.owner === seat && e.group === 'party'
         && e.index > 0 && e.pokemon.hp > 0 && !c.roster.field.includes(e.pokemon.id))
         .sort((a, b) => a.index - b.index).map(e => ({ kind: 'switch', pokemonId: e.pokemon.id }));
+      const activeEnemies = root.getEnemyField().filter((enemy: any) => enemy.isActive(true));
+      const captureOptions = activeEnemies.length === 1 && c.battle.battleType !== BattleType.TRAINER
+        && c.arena.biomeType !== Biome.END && !(activeEnemies[0].isBoss() && activeEnemies[0].bossSegmentIndex >= 1)
+        ? Object.values(PokeballType).filter(value => Number.isInteger(value))
+          .filter(ball => (c.players[seat].pokeballCounts[ball] ?? 0) > 0)
+          .map(ball => ({ kind: 'ball', pokeballType: ball, targetId: activeEnemies[0].id }))
+        : [];
       return [seat, [
         ...pokemon.getMoveset().flatMap((move, cursor) => {
           if (!move.isUsable(pokemon)) return [];
@@ -376,6 +460,7 @@ function actionDecision(c, root, id) {
           });
         }),
         ...switchOptions,
+        ...captureOptions,
       ]];
     })));
     return { id, kind: 'wait-actions', requiredSeats: [0, 1], options };
@@ -553,6 +638,20 @@ export async function openNativeSelectedBattleToInput(runtime, payload) {
   return runOpenedToInput(runtime, await openNativeSelectedBattle(runtime, payload));
 }
 
+function validateCaptureIntent(c, binding, seat, action) {
+  check(action && Object.keys(action).sort().join(',') === 'kind,pokeballType,targetId'
+    && action.kind === 'ball', 'INVALID_CAPTURE_INTENT');
+  check(Number.isInteger(action.pokeballType) && Object.values(PokeballType).includes(action.pokeballType),
+    'INVALID_POKEBALL');
+  check((c.players[seat].pokeballCounts[action.pokeballType] ?? 0) > 0, 'NO_POKEBALL');
+  check(c.battle.battleType !== BattleType.TRAINER, 'CAPTURE_TRAINER_BATTLE');
+  check(c.arena.biomeType !== Biome.END, 'CAPTURE_FORBIDDEN_BIOME');
+  const enemies = binding.root.getEnemyField().filter((enemy: any) => enemy.isActive(true));
+  check(enemies.length === 1 && enemies[0].id === action.targetId, 'INVALID_CAPTURE_TARGET');
+  check(!(enemies[0].isBoss() && enemies[0].bossSegmentIndex >= 1), 'CAPTURE_BOSS');
+  return enemies[0];
+}
+
 function validateActiveSwitch(c, binding, seat, action) {
   check(action && Object.keys(action).sort().join(',') === 'kind,pokemonId' && action.kind === 'switch', 'INVALID_SWITCH_INTENT');
   const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
@@ -579,6 +678,10 @@ export function validateNativeAction(runtime, payload) {
       validateActiveSwitch(c, binding, payload.seat, payload.action);
       return true;
     }
+    if (payload.action.kind === 'ball') {
+      validateCaptureIntent(c, binding, payload.seat, payload.action);
+      return true;
+    }
     return withOriginalRules(c, () => resolveFightIntent(binding.root.getPlayerField()[payload.seat], payload.seat, payload.action,
       { fightCommand: Command.FIGHT, noneMove: Moves.NONE, struggleMove: Moves.STRUGGLE, getMoveTargets, getEncoreTag: p => p.getTag(EncoreTag) }));
   } finally { c.battle.restoreRandomState(saved); binding.dispose(); }
@@ -594,6 +697,7 @@ export async function submitNativeActions(runtime, payload) {
       const saved = candidate.battle.captureRandomState();
       try {
         if (action.kind === 'switch') { validateActiveSwitch(candidate, binding, seat, action); return true; }
+        if (action.kind === 'ball') { validateCaptureIntent(candidate, binding, seat, action); return true; }
         return withOriginalRules({ ...candidate, sceneRandom: new SceneRandom(candidate.sceneRandom.capture()) }, () =>
           resolveFightIntent(binding.root.getPlayerField()[seat], seat, action, {
             fightCommand: Command.FIGHT, noneMove: Moves.NONE, struggleMove: Moves.STRUGGLE,
@@ -611,7 +715,7 @@ export async function submitNativeActions(runtime, payload) {
           const p = selectNextPhase(binding.root, () => { throw new Error('NATIVE_COMMAND_QUEUE_EMPTY'); }).phase;
           await binding.execute(p);
         }
-        check([0, 1].every(seat => [Command.FIGHT, Command.POKEMON].includes(candidate.battle.turnCommands[seat]?.command)),
+        check([0, 1].every(seat => [Command.FIGHT, Command.POKEMON, Command.BALL].includes(candidate.battle.turnCommands[seat]?.command)),
           'INCOMPLETE_NATIVE_COMMANDS');
         intents = binding.intents;
         return { completed: true, pendingTasks: 0, events: binding.events, grants: [] };
@@ -869,11 +973,22 @@ export function projectNativeSnapshot(runtime, payload) {
       group: 'party',
       pokemon: capturePokemonState(entry.pokemon),
     }));
+  const reserve = c.roster.entries
+    .filter(entry => entry.owner === payload.seat && entry.group === 'reserve')
+    .sort((a, b) => a.index - b.index)
+    .map(entry => ({
+      id: entry.pokemon.id,
+      owner: payload.seat,
+      index: entry.index,
+      group: 'reserve',
+      pokemon: capturePokemonState(entry.pokemon),
+    }));
   const personal = {
     format: 1,
     stage: 'battle',
     seat: payload.seat,
     party,
+    reserve,
     eggs: c.eggState ? originalOwnedEggStateCodec.capture(c.eggState).players[payload.seat] : null,
     resources: {
       money: player.money,

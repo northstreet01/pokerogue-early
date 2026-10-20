@@ -56,7 +56,7 @@ export async function advanceCollectedFightCommands(context,inputs,codec,driver,
   const before=canonical(codec.capture(candidate));
   for(const seat of seats){
     const kind=actions[seat]?.kind;
-    check(inputKind==='wait-target'?kind==='target':allowSwitch?['fight','switch'].includes(kind):kind==='fight',
+    check(inputKind==='wait-target'?kind==='target':allowSwitch?['fight','switch','ball'].includes(kind):kind==='fight',
       'UNSUPPORTED_COMMAND_INPUT');
     codec.validateAction(candidate,seat,actions[seat]);
     const validation=driver.validateInput(candidate,seat,copy(actions[seat]));

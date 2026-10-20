@@ -109,6 +109,13 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
             return target?.owner === seat && target.group === 'party' && target.index > 0
               && target.pokemon.hp > 0 && !candidate.roster.field.includes(target.pokemon.id);
           }
+          if (o.kind === 'ball') {
+            try { exact(o, ['kind', 'pokeballType', 'targetId']); } catch { return false; }
+            const target = candidate.roster.entries.find(e => e.owner === null && e.group === 'enemy'
+              && e.pokemon.id === o.targetId);
+            return Number.isInteger(o.pokeballType) && o.pokeballType >= 0 && o.pokeballType <= 5
+              && target?.pokemon.hp > 0 && candidate.roster.field.includes(target.pokemon.id);
+          }
           return o.pokemonId === entry.pokemon.id;
         }), 'INVALID_DECISION');
       check(new Set(options.map(canonical)).size === options.length, 'INVALID_DECISION');

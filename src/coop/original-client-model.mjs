@@ -12,8 +12,11 @@ export function createOriginalClientModel({ restorePokemonState, capturePokemonS
     applySnapshot(snapshot) {
       const shared = COPY(snapshot.shared);
       const personal = COPY(snapshot.personal);
+      const hasReserve = Object.hasOwn(personal, 'reserve');
       const party = Array.isArray(personal.party)
         ? personal.party.map(entry => ({ ...entry, pokemon: restorePokemonState(COPY(entry.pokemon)) })) : [];
+      const reserve = Array.isArray(personal.reserve)
+        ? personal.reserve.map(entry => ({ ...entry, pokemon: restorePokemonState(COPY(entry.pokemon)) })) : [];
       const byId = new Map(party.map(entry => [entry.id, entry]));
       for (const publicEntry of shared.pokemon ?? []) {
         if (publicEntry.owner !== snapshot.seat) continue;
@@ -22,7 +25,7 @@ export function createOriginalClientModel({ restorePokemonState, capturePokemonS
         if (own.pokemon.hp !== publicEntry.hp || own.pokemon.getMaxHp() !== publicEntry.maxHp)
           throw new Error('OWN_POKEMON_VIEW_MISMATCH');
       }
-      applied = { seat: snapshot.seat, shared, personal: { ...personal, party }, byId };
+      applied = { seat: snapshot.seat, shared, personal: { ...personal, party, ...(hasReserve ? { reserve } : {}) }, byId };
     },
 
     captureAppliedState() {
@@ -38,6 +41,13 @@ export function createOriginalClientModel({ restorePokemonState, capturePokemonS
           group: entry.group,
           pokemon: capturePokemonState(entry.pokemon),
         })),
+        ...(Object.hasOwn(applied.personal, 'reserve') ? { reserve: applied.personal.reserve.map(entry => ({
+          id: entry.id,
+          owner: entry.owner,
+          index: entry.index,
+          group: entry.group,
+          pokemon: capturePokemonState(entry.pokemon),
+        })) } : {}),
         eggs: COPY(applied.personal.eggs ?? null),
         resources: COPY(applied.personal.resources),
         decision: COPY(applied.personal.decision),

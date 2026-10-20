@@ -292,7 +292,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       if (context.lobby) { await validateLobbyAction(room, action); return; }
       const decision = context.checkpoint.decision;
       if (decision.kind === 'wait-actions') {
-        check(action?.kind === 'fight' || action?.kind === 'switch', 'INVALID_ACTION');
+        check(['fight', 'switch', 'ball'].includes(action?.kind), 'INVALID_ACTION');
         await request(room, 'native-validate', { checkpoint: context.checkpoint, seat, action: COPY(action) });
         return;
       }

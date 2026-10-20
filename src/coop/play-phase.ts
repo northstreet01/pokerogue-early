@@ -611,8 +611,12 @@ export default class CoopPlayPhase extends Phase {
     const reserve = this.model?.applied?.personal?.reserve ?? [];
     this.reserveLine.hidden = reserve.length === 0;
     if (!reserve.length) { this.reserveLine.textContent = ''; return; }
-    this.reserveLine.textContent = `本局备用：${reserve.map((entry: any) =>
-      `${entry.pokemon.name ?? `#${entry.id}`} Lv.${entry.pokemon.level}`).join('、')}`;
+    this.reserveLine.textContent = `本局备用：${reserve.map((entry: any) => {
+      // The codec intentionally excludes the display name. Rebuild it through
+      // the original method, without constructors or rule-state changes.
+      if (!entry.pokemon.name) entry.pokemon.generateName();
+      return `${entry.pokemon.name ?? `#${entry.id}`} Lv.${entry.pokemon.level}`;
+    }).join('、')}`;
   }
 
   private openBattleCommand() {

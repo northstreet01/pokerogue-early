@@ -602,3 +602,20 @@ test('original BallUiHandler keeps its navigation/cancel and filters unlisted co
   assert.deepEqual(selected, [0]); assert.equal(errors, 1); assert.equal(cancelled, 1);
   assert.deepEqual(counts, { 0: 5, 1: 9, 2: 0, 3: 0, 4: 0 });
 });
+
+test('restored reserve labels rebuild original names without changing captured rule state', () => {
+  const { p, entry } = personalPotionPhase();
+  const pokemon = api.restorePokemonState(api.capturePokemonState(entry.pokemon));
+  assert.equal(pokemon.name, undefined, 'display names are intentionally absent from the codec');
+  const before = api.capturePokemonState(pokemon);
+  p.model.applied.personal.reserve = [{ id: pokemon.id, pokemon }];
+  p.reserveLine = { hidden: true, textContent: '' };
+  p.renderReserve();
+  assert.equal(p.reserveLine.hidden, false);
+  assert.equal(p.reserveLine.textContent, `本局备用：${entry.pokemon.name} Lv.${pokemon.level}`);
+  assert.deepEqual(api.capturePokemonState(pokemon), before);
+  p.model.applied.personal.reserve = [];
+  p.renderReserve();
+  assert.equal(p.reserveLine.hidden, true);
+  assert.equal(p.reserveLine.textContent, '');
+});

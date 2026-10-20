@@ -21,3 +21,13 @@ A阶段定向6/6，退出0，22620.9242ms，失败／跳过／取消／todo均0�
 ## B与最终验收
 
 尚待原Party／只读Summary、reserve分页、确认交换、战前/强制补位的原Party选择接线及最终定向／构建／完整回归。浏览器由用户执行，未执行项目不标通过。完成后本记录追加结果，保留阶段历史。
+
+### B实现与阶段验证
+
+已完成原Party／Summary的只读备用入口；每页至多6只，超过6只仅翻页，不扩大本人1–6只随身队伍。整备的“战后换队”选择本人备用→本人现有任意槽位→原确认框→服务器reserve-swap，一换一；不与伙伴交换。未ready、无selection／subdecision时开放，拒绝和IndexedDB写入失败后可重选。
+
+展示复用已有Phaser Container工厂，围绕codec副本调用原init／loadAssets，保留原Summary所需精灵／调色板；不调用Pokemon构造器、不消耗规则RNG、不改核验模型。原Party与Summary增加可选readOnly配置，防止浏览副本时重排招式；单人无参数时维持原功能。原Summary上下切换相邻个体保持只读，原Party退出后恢复公开双打party／battle。加载期间取消／断线／换快照先恢复场景，待原资源回调结束才销毁副本；异步旧入口、旧确认、相同快照重开菜单用菜单epoch失效。原Potion和主动换人也改用这个统一的展示生命周期，继续调用原过滤／稳定ID输入／outbox。
+
+原战前确认／选择及倒下强制补位都接原Confirm／Party，强制Party原Esc与取消槽不退出。正式输入仍由服务器option限定，不在浏览器结算。原UI的明确mode handler访问只增加可选参数，用于摘要覆盖Party时一起清理。
+
+B阶段界面定向44/44、退出0（6846.3201ms），typecheck和build:coop-runtime退出0。测试使用真实控制器／原Party和Summary输入方法，但Phaser资源端口为无画布副本，不能写成浏览器画面通过。早期UI回归先因headless容器不支持真实sprites失败7项，明确注入展示端口后剩1项为旧测试未传原Party的APPLY参数，补全真实回调参数；随后补上并发入口／强制Esc／摘要相邻个体等边界。两个早期typecheck失败均为新增明确mode参数尚未扩展UI.getHandler签名，已修正。日志保留ignored目录，后续最终全套另记。

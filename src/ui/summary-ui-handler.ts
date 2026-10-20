@@ -30,6 +30,7 @@ export enum SummaryUiMode {
 }
 
 export default class SummaryUiHandler extends UiHandler {
+  private readOnly = false;
   private summaryUiMode: SummaryUiMode;
 
   private summaryContainer: Phaser.GameObjects.Container;
@@ -198,6 +199,7 @@ export default class SummaryUiHandler extends UiHandler {
 
     this.pokemon = args[0] as PlayerPokemon;
     this.summaryUiMode = args.length > 1 ? args[1] as SummaryUiMode : SummaryUiMode.DEFAULT;
+    this.readOnly = args[4]?.readOnly === true;
 
     this.scene.ui.bringToTop(this.summaryContainer);
 
@@ -277,7 +279,7 @@ export default class SummaryUiHandler extends UiHandler {
         if (this.moveCursor < this.pokemon.moveset.length) {
           if (this.summaryUiMode === SummaryUiMode.LEARN_MOVE)
             this.moveSelectFunction(this.moveCursor);
-          else {
+          else if (!this.readOnly) {
             if (this.selectedMoveIndex === -1) {
               this.selectedMoveIndex = this.moveCursor;
               this.setCursor(this.moveCursor);
@@ -341,8 +343,9 @@ export default class SummaryUiHandler extends UiHandler {
             const partyMemberIndex = party.indexOf(this.pokemon);
             if ((isDown && partyMemberIndex < party.length - 1) || (!isDown && partyMemberIndex)) {
               const page = this.cursor;
+              const readOnly = this.readOnly;
               this.clear();
-              this.show([ party[partyMemberIndex + (isDown ? 1 : -1)], this.summaryUiMode, page ]);
+              this.show([ party[partyMemberIndex + (isDown ? 1 : -1)], this.summaryUiMode, page, undefined, { readOnly } ]);
             }
             break;
           case Button.LEFT:
@@ -835,6 +838,7 @@ export default class SummaryUiHandler extends UiHandler {
 
   clear() {
     super.clear();
+    this.readOnly = false;
     this.pokemon = null;
     this.cursor = -1;
     this.newMove = null;

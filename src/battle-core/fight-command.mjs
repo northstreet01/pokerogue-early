@@ -40,7 +40,7 @@ export function resolveFightIntent(pokemon, fieldIndex, input, rules) {
 // Collect the required seats before the trusted adapter starts or resumes the
 // original Command/SelectTarget phases. Queue order and command rules stay there;
 // this boundary only isolates, validates and commits a model.
-export async function advanceCollectedFightCommands(context,inputs,codec,driver,{decisionId}={}) {
+export async function advanceCollectedFightCommands(context,inputs,codec,driver,{decisionId,allowSwitch=false}={}) {
   check(typeof decisionId==='string'&&decisionId.length>0&&decisionId.length<=128
     &&decisionId!==context.decision.id,'INVALID_COMMAND_DECISION_ID');
   check(driver&&typeof driver.validateInput==='function'&&driver.validateInput.constructor.name!=='AsyncFunction'
@@ -55,7 +55,9 @@ export async function advanceCollectedFightCommands(context,inputs,codec,driver,
     &&canonical(Object.keys(actions).sort())===canonical(seats.map(String).sort()),'INCOMPLETE_COMMAND_INPUTS');
   const before=canonical(codec.capture(candidate));
   for(const seat of seats){
-    check(actions[seat]?.kind===(inputKind==='wait-target'?'target':'fight'),'UNSUPPORTED_COMMAND_INPUT');
+    const kind=actions[seat]?.kind;
+    check(inputKind==='wait-target'?kind==='target':allowSwitch?['fight','switch','ball'].includes(kind):kind==='fight',
+      'UNSUPPORTED_COMMAND_INPUT');
     codec.validateAction(candidate,seat,actions[seat]);
     const validation=driver.validateInput(candidate,seat,copy(actions[seat]));
     check(!validation?.then,'ASYNC_COMMAND_VALIDATOR');

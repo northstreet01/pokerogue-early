@@ -687,14 +687,14 @@ export default class BattleScene extends Phaser.Scene {
 	setupControls() {
 		const keyCodes = Phaser.Input.Keyboard.KeyCodes;
 		const keyConfig = {
-			[Button.UP]: [keyCodes.UP, keyCodes.W],
-			[Button.DOWN]: [keyCodes.DOWN, keyCodes.S],
-			[Button.LEFT]: [keyCodes.LEFT, keyCodes.A],
-			[Button.RIGHT]: [keyCodes.RIGHT, keyCodes.D],
-			[Button.SUBMIT]: [keyCodes.ENTER],
-			[Button.ACTION]: [keyCodes.SPACE, keyCodes.ENTER, keyCodes.Z],
-			[Button.CANCEL]: [keyCodes.BACKSPACE, keyCodes.X],
-			[Button.MENU]: [keyCodes.ESC, keyCodes.M],
+			[Button.UP]: [keyCodes.W, keyCodes.UP],
+			[Button.DOWN]: [keyCodes.S, keyCodes.DOWN],
+			[Button.LEFT]: [keyCodes.A, keyCodes.LEFT],
+			[Button.RIGHT]: [keyCodes.D, keyCodes.RIGHT],
+			[Button.SUBMIT]: [keyCodes.C],
+			[Button.ACTION]: [keyCodes.ENTER, keyCodes.SPACE, keyCodes.Z],
+			[Button.CANCEL]: [keyCodes.ESC, keyCodes.BACKSPACE, keyCodes.X],
+			[Button.MENU]: [keyCodes.M],
 			[Button.CYCLE_SHINY]: [keyCodes.R],
 			[Button.CYCLE_FORM]: [keyCodes.F],
 			[Button.CYCLE_GENDER]: [keyCodes.G],
@@ -1255,6 +1255,9 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	checkInput(): boolean {
+		// Lobby text fields must not also move or confirm the game underneath.
+		if (typeof document !== 'undefined' && document.activeElement?.matches('input, textarea, select, [contenteditable="true"]'))
+			return false;
 		if (this.blockInput)
 			return;
 		let inputSuccess = false;
@@ -1339,6 +1342,20 @@ export default class BattleScene extends Phaser.Scene {
 			return;
 		if (inputSuccess && this.enableVibration && typeof navigator.vibrate !== 'undefined')
 			navigator.vibrate(vibrationLength || 10);
+		this.lockControls();
+	}
+
+	/** Mouse selection still enters the original UI input path and its cooldown. */
+	processUiPointer(button: Button | null, select: () => boolean | void): boolean {
+		if (this.blockInput || select() === false)
+			return false;
+		const success = button === null || this.ui.processInput(button);
+		if (success)
+			this.lockControls();
+		return success;
+	}
+
+	private lockControls() {
 		this.blockInput = true;
 		this.time.delayedCall(Utils.fixedInt(250), () => this.blockInput = false);
 	}

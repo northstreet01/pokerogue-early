@@ -5,6 +5,16 @@ import { getPokemonSpecies } from '../data/pokemon-species';
 import { Type } from '../data/type';
 import { getBiomeKey } from '../field/arena';
 
+/** Original display Container around a codec copy, without a Pokemon constructor. */
+export function createCoopPokemonDisplay(scene: BattleScene, model: Pokemon, player = true): Pokemon {
+  const display = new Phaser.GameObjects.Container(scene, player ? 106 : 236, player ? 148 : 84);
+  Object.setPrototypeOf(display, Object.getPrototypeOf(model));
+  Object.assign(display, model, { scene });
+  Object.assign(display, { randSeedInt: () => { throw new Error('CLIENT_RULE_RNG_FORBIDDEN'); } });
+  (display as Pokemon).generateName();
+  return display as Pokemon;
+}
+
 /** Display copies only. Never run a Pokemon constructor (which consumes RNG),
  * and never attach Phaser state to the consumer's verified rule instances. */
 export class CoopBattlePresentation {
@@ -24,12 +34,7 @@ export class CoopBattlePresentation {
   private container(model: Pokemon, player: boolean): Pokemon {
     // Phaser's Container initializes events/transforms/list ownership. Copying
     // an uninitialized checkpoint directly into the display list cannot do so.
-    const display = new Phaser.GameObjects.Container(this.scene, player ? 106 : 236, player ? 148 : 84);
-    Object.setPrototypeOf(display, Object.getPrototypeOf(model));
-    Object.assign(display, model, { scene: this.scene });
-    Object.assign(display, { randSeedInt: () => { throw new Error('CLIENT_RULE_RNG_FORBIDDEN'); } });
-    (display as Pokemon).generateName();
-    return display as Pokemon;
+    return createCoopPokemonDisplay(this.scene, model, player);
   }
 
   private publicModel(view: any): Pokemon {

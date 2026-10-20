@@ -568,6 +568,7 @@ export const phaseStateFields = Object.freeze({
     "base": "PokemonPhase",
     "fields": {
       "pokeballType": "int",
+      "coopTargetId": "int",
       "originalY": "number"
     },
     "required": [

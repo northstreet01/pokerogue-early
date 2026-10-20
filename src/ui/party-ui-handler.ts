@@ -16,6 +16,7 @@ import PokemonIconAnimHandler, { PokemonIconAnimMode } from "./pokemon-icon-anim
 import { pokemonEvolutions } from "../data/pokemon-evolutions";
 import { addWindow } from "./window";
 import { SpeciesFormChangeItemTrigger } from "../data/pokemon-forms";
+import { SummaryUiMode } from './summary-ui-handler';
 
 const defaultMessage = 'Choose a Pokémon.';
 
@@ -60,6 +61,7 @@ export type PokemonModifierTransferSelectFilter = (pokemon: PlayerPokemon, modif
 export type PokemonMoveSelectFilter = (pokemonMove: PokemonMove) => string;
 
 export default class PartyUiHandler extends MessageUiHandler {
+  private readOnlySummary = false;
   private partyUiMode: PartyUiMode;
   private fieldIndex: integer;
 
@@ -89,6 +91,7 @@ export default class PartyUiHandler extends MessageUiHandler {
   private selectFilter: PokemonSelectFilter | PokemonModifierTransferSelectFilter;
   private moveSelectFilter: PokemonMoveSelectFilter;
   private tmMoveId: Moves;
+  private allowedOptions: Set<PartyOption> | undefined;
 
   private iconAnimHandler: PokemonIconAnimHandler;
 
@@ -154,6 +157,10 @@ export default class PartyUiHandler extends MessageUiHandler {
     partyContainer.add(partyCancelButton);
 
     this.partyCancelButton = partyCancelButton;
+    this.bindPointer(partyCancelButton.getAt(0), () => {
+      if (this.optionsMode || this.awaitingActionInput || this.pendingPrompt) return false;
+      this.setCursor(6);
+    }, Button.CANCEL);
 
     this.optionsContainer = this.scene.add.container((this.scene.game.canvas.width / 6) - 1, -1);
     partyContainer.add(this.optionsContainer);
@@ -184,6 +191,9 @@ export default class PartyUiHandler extends MessageUiHandler {
       ? args[4] as PokemonMoveSelectFilter
       : PartyUiHandler.FilterAllMoves;
     this.tmMoveId = args.length > 5 && args[5] ? args[5] : Moves.NONE;
+    this.allowedOptions = args[6]?.allowedOptions
+      ? new Set<PartyOption>([...args[6].allowedOptions, PartyOption.CANCEL]) : undefined;
+    this.readOnlySummary = args[6]?.readOnlySummary === true;
 
     this.partyContainer.setVisible(true);
     this.partyBg.setTexture(`party_bg${this.scene.currentBattle.double ? '_double' : ''}`);
@@ -216,6 +226,11 @@ export default class PartyUiHandler extends MessageUiHandler {
     if (this.optionsMode) {
       if (button === Button.ACTION) {
         const option = this.options[this.optionsCursor];
+        if (this.allowedOptions && !this.allowedOptions.has(option)
+          && option !== PartyOption.SCROLL_UP && option !== PartyOption.SCROLL_DOWN) {
+          ui.playError();
+          return false;
+        }
         const pokemon = this.scene.getParty()[this.cursor];
         if (this.partyUiMode === PartyUiMode.MODIFIER_TRANSFER && !this.transferMode && option !== PartyOption.CANCEL) {
           this.startTransfer();
@@ -293,7 +308,8 @@ export default class PartyUiHandler extends MessageUiHandler {
           }
         } else if (option === PartyOption.SUMMARY) {
           ui.playSelect();
-          ui.setModeWithoutClear(Mode.SUMMARY, pokemon).then(() =>  this.clearOptions());
+          const args = this.readOnlySummary ? [pokemon, SummaryUiMode.DEFAULT, 0, undefined, { readOnly: true }] : [pokemon];
+          ui.setModeWithoutClear(Mode.SUMMARY, ...args).then(() => this.clearOptions());
           return true;
         } else if (option === PartyOption.UNPAUSE_EVOLUTION) {
           this.clearOptions();
@@ -402,6 +418,10 @@ export default class PartyUiHandler extends MessageUiHandler {
       this.scene.add.existing(partySlot);
       this.partySlotsContainer.add(partySlot);
       this.partySlots.push(partySlot);
+      this.bindPointer(partySlot.getAt(0), () => {
+        if (this.optionsMode || this.awaitingActionInput || this.pendingPrompt) return false;
+        this.setCursor(slotIndex);
+      });
       if (this.cursor === slotIndex)
         partySlot.select();
     }
@@ -589,6 +609,7 @@ export default class PartyUiHandler extends MessageUiHandler {
         this.options.push(im);
     }
 
+    if (this.allowedOptions) this.options = this.options.filter(option => this.allowedOptions.has(option));
     this.optionsScrollTotal = this.options.length;
     let optionStartIndex = this.optionsScrollCursor;
     let optionEndIndex = Math.min(this.optionsScrollTotal, optionStartIndex + (!optionStartIndex || this.optionsScrollCursor + 8 >= this.optionsScrollTotal ? 8 : 7));
@@ -665,6 +686,13 @@ export default class PartyUiHandler extends MessageUiHandler {
       widestOptionWidth = Math.max(optionText.displayWidth, widestOptionWidth);
 
       this.optionsContainer.add(optionText);
+      const cursor = this.options.length - (o + 1);
+      this.bindPointer(optionText, () => {
+        if (!this.optionsMode || this.awaitingActionInput || this.pendingPrompt) return false;
+        const scrolling = [PartyOption.SCROLL_UP, PartyOption.SCROLL_DOWN].includes(this.options[cursor]);
+        this.setCursor(cursor);
+        return !scrolling;
+      });
     }
 
     this.optionsBg.width = Math.max(widestOptionWidth + 24, 94);
@@ -752,6 +780,8 @@ export default class PartyUiHandler extends MessageUiHandler {
 
   clear() {
     super.clear();
+    this.allowedOptions = undefined;
+    this.readOnlySummary = false;
     this.partyContainer.setVisible(false);
     this.clearPartySlots();
   }

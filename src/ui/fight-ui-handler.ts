@@ -143,6 +143,7 @@ export default class FightUiHandler extends UiHandler {
       if (m < moveset.length)
         moveText.setText(moveset[m].getName());
       this.movesContainer.add(moveText);
+      if (m < moveset.length) this.bindPointer(moveText, () => { this.setCursor(m); });
     }
   }
 

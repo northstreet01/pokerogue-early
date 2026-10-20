@@ -1,6 +1,7 @@
 import { captureModifierPoolState, restoreModifierPoolState } from './modifier-pool-state.mjs';
 import { createForcedSwitchDecision,createPreBattleSwitchDecision } from './switch-command.mjs';
 import { createLearnDecision } from './learn-command.mjs';
+import { createCaptureChoice } from './capture-choice.mjs';
 import { restoreContinuation } from './phase-continuation.mjs';
 import { safeDecisionKinds } from './safe-decisions.mjs';
 import { captureTurnCommands, restoreTurnCommands } from './command-state.mjs';
@@ -55,6 +56,15 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
     if (saved.presence !== 'absent') Object.defineProperty(target, key, { value: saved.presence === 'undefined' ? undefined : saved.value === null ? null : decode(saved.value), writable: true, enumerable: true, configurable: true });
   }
   function validateDecision(decision, candidate) {
+    if(decision.kind==='capture-choice'){
+      const seat=decision.requiredSeats?.[0],active=candidate.continuation?.currentPhase;
+      check(active?.kind==='original-phase'&&active.remaining==='capture-select'&&candidate.continuation.standbyPhase===null
+        &&phaseState?.isPhase(active.phase),'INVALID_CAPTURE_CHOICE');
+      const p=phaseState.capture(active.phase,candidate);
+      check(p.type==='AttemptCapturePhase'&&p.scope===seat
+        &&canonical(createCaptureChoice(decision.id,candidate,seat))===canonical(decision),'INVALID_CAPTURE_CHOICE');
+      return;
+    }
     if(['switch-confirm','switch-select'].includes(decision.kind)){
       const seat=decision.requiredSeats?.[0],active=candidate.continuation?.currentPhase;
       check(decision.requiredSeats?.length===1&&canonical(createPreBattleSwitchDecision(decision.id,candidate,seat,decision.kind))===canonical(decision),
@@ -78,6 +88,8 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       const active=candidate.continuation?.currentPhase;
       if(active?.remaining==='wait-switch')check(candidate.continuation.standbyPhase===null
         &&phaseState?.isPhase(active.phase)&&phaseState.capture(active.phase,candidate).type==='SwitchPhase'
+        &&phaseState.capture(active.phase,candidate).scope===decision.requiredSeats[0]
+        &&active.phase.isModal===true&&active.phase.doReturn===false
         &&decision.requiredSeats.length===1&&decision.requiredSeats[0]===active.phase.fieldIndex,
         'INVALID_SWITCH_DECISION');
       return;
@@ -100,7 +112,24 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
       const entry = candidate.roster.entries.find(e => e.pokemon.id === candidate.roster.field[seat]);
       check(entry && entry.owner === seat && entry.pokemon.hp > 0, 'INVALID_DECISION');
       const options = decision.options[seat];
-      check(Array.isArray(options) && options.length > 0 && options.length <= 10000 && options.every(o => o && typeof o.kind === 'string' && o.pokemonId === entry.pokemon.id), 'INVALID_DECISION');
+      check(Array.isArray(options) && options.length > 0 && options.length <= 10000
+        && options.every(o => {
+          if (!o || typeof o.kind !== 'string') return false;
+          if (o.kind === 'switch') {
+            try { exact(o, ['kind', 'pokemonId']); } catch { return false; }
+            const target = candidate.roster.entries.find(e => e.pokemon.id === o.pokemonId);
+            return target?.owner === seat && target.group === 'party' && target.index > 0
+              && target.pokemon.hp > 0 && !candidate.roster.field.includes(target.pokemon.id);
+          }
+          if (o.kind === 'ball') {
+            try { exact(o, ['kind', 'pokeballType', 'targetId']); } catch { return false; }
+            const target = candidate.roster.entries.find(e => e.owner === null && e.group === 'enemy'
+              && e.pokemon.id === o.targetId);
+            return Number.isInteger(o.pokeballType) && o.pokeballType >= 0 && o.pokeballType <= 5
+              && target?.pokemon.hp > 0 && candidate.roster.field.includes(target.pokemon.id);
+          }
+          return o.pokemonId === entry.pokemon.id;
+        }), 'INVALID_DECISION');
       check(new Set(options.map(canonical)).size === options.length, 'INVALID_DECISION');
     }
     if (decision.kind === 'wait-target') {

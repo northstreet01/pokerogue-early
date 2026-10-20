@@ -2,7 +2,7 @@ import type BattleScene from '../battle-scene';
 import { Phase } from '../phase';
 import { Mode } from '../ui/ui';
 import { capturePokemonState, restorePokemonState } from '../field/pokemon';
-import { CoopBattlePresentation } from './battle-presentation';
+import { CoopBattlePresentation, createCoopPokemonDisplay } from './battle-presentation';
 import { captureProfile } from './original-profile-entry';
 import { createOriginalClientModel } from './original-client-model.mjs';
 import { createSnapshotConsumer } from '../battle-core/coop-client.mjs';
@@ -12,7 +12,7 @@ import { GameModes } from '../game-mode';
 import { Command } from '../ui/command-ui-handler';
 import { ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
 import { AddPokeballModifier } from '../modifier/modifier';
-import { PartyUiMode } from '../ui/party-ui-handler';
+import { PartyUiMode, PartyOption } from '../ui/party-ui-handler';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -24,6 +24,10 @@ export default class CoopPlayPhase extends Phase {
   private budget!: HTMLDivElement;
   private roomLine!: HTMLDivElement;
   private controls!: HTMLDivElement;
+  private reserveLine!: HTMLDivElement;
+  private reserveInspectButton!: HTMLButtonElement;
+  private releaseTeamParty: (() => void) | null = null;
+  private teamMenuEpoch = 0;
   private socket: WebSocket | null = null;
   private consumer: any = null;
   private model: any = null;
@@ -48,7 +52,6 @@ export default class CoopPlayPhase extends Phase {
   private battleInputActive = false;
   private presentation: CoopBattlePresentation | null = null;
   private preparationSignature = '';
-  private releasePreparationParty: (() => void) | null = null;
   private switchSignature = '';
   private submitted = false;
   private profileDirty = false;
@@ -65,6 +68,7 @@ export default class CoopPlayPhase extends Phase {
     this.scene.events?.once('shutdown', () => {
       this.disposed = true;
       this.clearPreparationParty();
+      this.clearActiveSwitchParty();
       if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
       this.epoch = null; this.socket?.close(); this.presentation?.clear(); this.overlay.remove();
     });
@@ -90,7 +94,10 @@ export default class CoopPlayPhase extends Phase {
     this.budget = document.createElement('div'); this.budget.className = 'status';
     this.roomLine = document.createElement('div'); this.roomLine.className = 'status';
     this.controls = document.createElement('div');
-    this.panel.append(title, this.status, this.roomLine, this.budget, this.controls);
+    this.reserveLine = document.createElement('div'); this.reserveLine.className = 'status'; this.reserveLine.hidden = true;
+    this.reserveInspectButton = this.button('查看本局备用', () => this.openReserveRoster());
+    this.reserveInspectButton.hidden = true;
+    this.panel.append(title, this.status, this.roomLine, this.budget, this.reserveLine, this.reserveInspectButton, this.controls);
     this.overlay.append(this.panel);
     document.body.append(this.overlay);
     this.renderLobbyControls();
@@ -150,6 +157,7 @@ export default class CoopPlayPhase extends Phase {
       this.setStatus('连接已断开，正在重新连接…', true);
       this.consumer = null; this.epoch = null;
       this.clearPreparationParty();
+      this.clearActiveSwitchParty();
       this.inputReady = false; this.battleInputActive = false;
       void this.scene.ui.setMode(Mode.MESSAGE);
       this.reconnectTimer = setTimeout(() => this.connect(), 1000);
@@ -190,8 +198,10 @@ export default class CoopPlayPhase extends Phase {
           && message.revision === this.latest.revision) {
           this.inputReady = !message.blocked;
           this.submitted = !!message.submitted?.[this.seat!];
+          this.updateReserveAccess();
           if (this.submitted || !this.inputReady) {
             this.clearPreparationParty();
+            this.clearActiveSwitchParty();
             this.battleInputActive = false;
             this.preparationSignature = ''; this.switchSignature = '';
             if (this.latest.personal.decision.kind !== 'lobby') await this.scene.ui.setMode(Mode.MESSAGE);
@@ -226,8 +236,8 @@ export default class CoopPlayPhase extends Phase {
           return;
         }
         if (action?.kind === 'fight') this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select'].includes(action?.kind)) this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select'].includes(action?.kind))
+        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball'].includes(action?.kind)) this.submitted = true;
+        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball'].includes(action?.kind))
           await this.scene.ui.setMode(Mode.MESSAGE);
         if (action?.kind === 'profile-ready') this.profileDirty = false;
         if (this.latest?.personal.decision.kind === 'wait-actions') this.setStatus('行动已提交，等待队友／结算…');
@@ -297,6 +307,7 @@ export default class CoopPlayPhase extends Phase {
     const signature = `${snapshot.connectionEpoch}:${snapshot.decisionId}:${snapshot.revision}`;
     if (this.battleSignature === signature) return;
     this.clearPreparationParty();
+    this.clearActiveSwitchParty();
     this.battleInputActive = false;
     this.submitted = false;
     this.preparationSignature = '';
@@ -304,6 +315,7 @@ export default class CoopPlayPhase extends Phase {
     await this.scene.ui.setMode(Mode.MESSAGE);
     this.presentation ??= new CoopBattlePresentation(this.scene);
     await this.presentation.apply(snapshot, this.model.applied);
+    this.renderReserve();
     (this.scene as any).standbyPhase = this;
     (this.scene as any).waveCountText?.setText(String(snapshot.shared.waveIndex));
     this.battleSignature = signature;
@@ -312,8 +324,9 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private async openDecisionInput() {
+    if (this.releaseTeamParty) return;
     if (this.latest?.personal.decision.kind === 'preparation') await this.openPreparationMenu();
-    else if (['switch-confirm', 'switch-select'].includes(this.latest?.personal.decision.kind)) this.openSwitchPrompt();
+    else if (['switch-confirm', 'switch-select', 'wait-switch'].includes(this.latest?.personal.decision.kind)) await this.openSwitchPrompt();
     else this.openBattleCommand();
   }
 
@@ -369,56 +382,222 @@ export default class CoopPlayPhase extends Phase {
     if (type instanceof PokemonHpRestoreModifierType && !(type instanceof PokemonReviveModifierType)) {
       const personal = this.model.applied?.personal;
       if (!personal?.party?.length) throw new Error('PERSONAL_PARTY_MISSING');
-      this.clearPreparationParty();
-      const savedParty = (this.scene as any).party, savedBattle = this.scene.currentBattle;
-      const party = personal.party.map((entry: any) => {
-        const pokemon = restorePokemonState(capturePokemonState(entry.pokemon));
-        pokemon.scene = this.scene;
-        pokemon.generateName();
-        return pokemon;
-      });
-      const battle = Object.create(savedBattle);
-      // Each personal Party has one front slot; the other player's front is
-      // never part of this original target menu.
-      battle.double = false; battle.getBattlerCount = () => 1;
-      (this.scene as any).party = party;
-      this.scene.currentBattle = battle;
-      let active = true;
-      this.releasePreparationParty = () => {
-        active = false;
-        if ((this.scene as any).party === party) (this.scene as any).party = savedParty;
-        if (this.scene.currentBattle === battle) this.scene.currentBattle = savedBattle;
-      };
-      try {
-        await this.scene.ui.setMode(Mode.PARTY, PartyUiMode.MODIFIER, -1, (slotIndex: number) => {
-          if (!active) return;
-          const current = this.isPersonalInputCurrent(snapshot, epoch);
-          this.clearPreparationParty();
-          if (!current) return;
-          const entry = personal.party[slotIndex];
-          void (async () => {
-            this.preparationSignature = '';
-            await this.scene.ui.setMode(Mode.MESSAGE);
-            if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-            if (!entry) { await this.openPreparationMenu(); return; }
-            action.pokemonId = entry.id;
-            await this.sendAction(action, '已提交治疗领取…');
-          })().catch(error => this.setStatus(`奖励选择失败：${error?.message ?? error}`, true));
-        }, type.selectFilter);
-      } catch (error) {
-        this.clearPreparationParty(); this.preparationSignature = '';
-        await this.openPreparationMenu();
-        throw error;
-      }
+      await this.showTeamParty(personal.party, PartyUiMode.MODIFIER, async (slotIndex, option) => {
+        const entry = personal.party[slotIndex];
+        this.preparationSignature = '';
+        const menuEpoch = this.teamMenuEpoch;
+        await this.scene.ui.setMode(Mode.MESSAGE);
+        if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return;
+        if (!entry || option !== PartyOption.APPLY) { await this.openPreparationMenu(); return; }
+        action.pokemonId = entry.id;
+        await this.sendAction(action, '已提交治疗领取…');
+      }, type.selectFilter, [PartyOption.APPLY, PartyOption.SUMMARY]);
       return;
     }
     this.setStatus('该普通奖励尚不支持；请跳过奖励', true);
   }
 
   private clearPreparationParty() {
-    const release = this.releasePreparationParty;
-    this.releasePreparationParty = null;
+    this.clearTeamParty();
+  }
+
+  private clearActiveSwitchParty() {
+    this.clearTeamParty();
+  }
+
+  private updateReserveAccess() {
+    if (this.reserveInspectButton) this.reserveInspectButton.disabled = !this.inputReady || !!this.actionId || this.submitted;
+  }
+
+  private clearTeamParty() {
+    this.teamMenuEpoch++;
+    const release = this.releaseTeamParty;
+    this.releaseTeamParty = null;
     release?.();
+  }
+
+  private makeTeamPokemon(entry: any) {
+    return createCoopPokemonDisplay(this.scene, restorePokemonState(capturePokemonState(entry.pokemon)));
+  }
+
+  /** Original Party/Summary on loaded display copies; the verified model stays detached. */
+  private async showTeamParty(entries: any[], mode: PartyUiMode, select: (slot: number, option: PartyOption) => any,
+    filter: (pokemon: any) => string | null, allowedOptions: PartyOption[]) {
+    const snapshot = this.latest, epoch = this.epoch;
+    if (!this.isPersonalInputCurrent(snapshot, epoch)) return false;
+    this.clearPreparationParty(); this.clearActiveSwitchParty();
+    const menuEpoch = this.teamMenuEpoch;
+    await this.scene.ui.setMode(Mode.MESSAGE);
+    if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return false;
+    const savedParty = (this.scene as any).party, savedBattle = this.scene.currentBattle;
+    const party = entries.map(entry => this.makeTeamPokemon(entry));
+    const battle = Object.create(savedBattle);
+    battle.double = false; battle.getBattlerCount = () => 1;
+    (this.scene as any).party = party; this.scene.currentBattle = battle;
+    let active = true, settled = false, destroyed = false;
+    const dispose = () => {
+      if (destroyed) return;
+      destroyed = true;
+      for (const p of party) {
+        this.scene.tweens?.killTweensOf(p);
+        if ((p as any).battleInfo) this.scene.tweens?.killTweensOf((p as any).battleInfo);
+        p.destroy();
+      }
+    };
+    const release = () => {
+      active = false;
+      if ((this.scene as any).party === party) {
+        // Summary leaves Party alive underneath it. Close both immediately so
+        // a stale handler cannot act while an async mode transition finishes.
+        this.scene.ui.getHandler?.(Mode.SUMMARY)?.clear();
+        this.scene.ui.getHandler?.(Mode.PARTY)?.clear();
+        (this.scene as any).party = savedParty;
+        this.controls.replaceChildren();
+      }
+      if (this.scene.currentBattle === battle) this.scene.currentBattle = savedBattle;
+      if (settled) dispose();
+    };
+    this.releaseTeamParty = release;
+    try {
+      const loaded = await Promise.allSettled(party.map(async p => {
+        p.init();
+        (p as any).battleInfo?.setVisible(false);
+        await p.loadAssets();
+      }));
+      settled = true;
+      const failed = loaded.find(r => r.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
+      if (!active || !this.isPersonalInputCurrent(snapshot, epoch)) { release(); return false; }
+      if (this.scene.ui.getMode?.() === Mode.PARTY) await this.scene.ui.setMode(Mode.MESSAGE);
+      if (!active || !this.isPersonalInputCurrent(snapshot, epoch)) { release(); return false; }
+      await this.scene.ui.setMode(Mode.PARTY, mode, 0, (slot: number, option: PartyOption) => {
+        if (!active) return;
+        const current = this.isPersonalInputCurrent(snapshot, epoch);
+        this.clearTeamParty();
+        if (current) return Promise.resolve(select(slot, option)).catch(error => {
+          if (this.isPersonalInputCurrent(snapshot, epoch)) this.setStatus(`队伍选择失败：${error?.message ?? error}`, true);
+        });
+      }, filter, undefined, undefined, { allowedOptions, readOnlySummary: true });
+      if (!active || !this.isPersonalInputCurrent(snapshot, epoch)) {
+        release();
+        if (!this.releaseTeamParty && this.scene.ui.getMode?.() === Mode.PARTY) await this.scene.ui.setMode(Mode.MESSAGE);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      if (this.releaseTeamParty === release) this.clearTeamParty(); else release();
+      if (!this.isPersonalInputCurrent(snapshot, epoch)) return false;
+      this.preparationSignature = ''; this.switchSignature = ''; this.battleInputActive = false;
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      this.controls.replaceChildren(this.button('重试队伍菜单', () => {
+        if (this.isPersonalInputCurrent(snapshot, epoch)) return this.openDecisionInput();
+      }));
+      throw error;
+    } finally { settled = true; if (!active) dispose(); }
+  }
+
+  private canEditTeam(snapshot = this.latest) {
+    const decision = snapshot?.personal.decision, p = decision?.players;
+    return decision?.kind === 'preparation' && p && !p.ready && p.selection === null && p.subdecision === null;
+  }
+
+  private async returnToDecision(snapshot: any, epoch: string | null) {
+    const menuEpoch = this.teamMenuEpoch;
+    await this.scene.ui.setMode(Mode.MESSAGE);
+    if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return;
+    this.preparationSignature = ''; this.switchSignature = ''; this.battleInputActive = false;
+    await this.openDecisionInput();
+  }
+
+  private renderReservePager(page: number, pages: number, forSwap: boolean, snapshot: any, epoch: string | null) {
+    const row = document.createElement('div'); row.className = 'row';
+    const open = (select: boolean, next: number) => {
+      if (this.isPersonalInputCurrent(snapshot, epoch)) return this.openReserveRoster(select, next);
+    };
+    if (page > 0) row.append(this.button('上一页', () => open(forSwap, page - 1)));
+    if (page + 1 < pages) row.append(this.button('下一页', () => open(forSwap, page + 1)));
+    if (!forSwap && this.canEditTeam(snapshot)) row.append(this.button('选择备用换队', () => open(true, page)));
+    row.append(this.button('返回', async () => {
+      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+      this.clearTeamParty(); await this.returnToDecision(snapshot, epoch);
+    }));
+    this.controls.replaceChildren(row);
+  }
+
+  private async openReserveRoster(forSwap = false, page = 0) {
+    const snapshot = this.latest, epoch = this.epoch;
+    if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+    if (forSwap && !this.canEditTeam(snapshot)) { this.setStatus('请先取消准备并完成待处理选择', true); return; }
+    const reserve = this.model.applied.personal.reserve ?? [];
+    if (!reserve.length) { this.setStatus('当前没有本局备用'); return; }
+    const pages = Math.ceil(reserve.length / 6);
+    page = Math.max(0, Math.min(page, pages - 1));
+    const entries = reserve.slice(page * 6, page * 6 + 6);
+    if (await this.showTeamParty(entries, PartyUiMode.MODIFIER, async (slot, option) => {
+      const entry = entries[slot];
+      if (forSwap && entry && option === PartyOption.APPLY) await this.openSwapTarget(entry, page, snapshot, epoch);
+      else await this.returnToDecision(snapshot, epoch);
+    }, () => null, forSwap ? [PartyOption.APPLY, PartyOption.SUMMARY] : [PartyOption.SUMMARY])) {
+      this.renderReservePager(page, pages, forSwap, snapshot, epoch);
+      this.setStatus(`本局备用 ${page + 1}/${pages}：${forSwap ? '选择要加入队伍的成员' : '可查看原摘要；战后可换队'}`);
+    }
+  }
+
+  private async openSwapTarget(reserve: any, page: number, snapshot: any, epoch: string | null) {
+    if (!this.isPersonalInputCurrent(snapshot, epoch) || !this.canEditTeam(snapshot)) return;
+    const party = this.model.applied.personal.party;
+    const filter = (p: any) => reserve.pokemon.hp > 0 || party.some((e: any) => e.id !== p.id && e.pokemon.hp > 0)
+      ? null : '队伍至少需要一位可出场成员';
+    if (await this.showTeamParty(party, PartyUiMode.MODIFIER, async (slot, option) => {
+      if (!this.isPersonalInputCurrent(snapshot, epoch) || !this.canEditTeam(snapshot)) return;
+      const target = party[slot];
+      if (!target || option !== PartyOption.APPLY || filter(target.pokemon)) { await this.openReserveRoster(true, page); return; }
+      const name = (e: any) => { const p = restorePokemonState(capturePokemonState(e.pokemon)); p.generateName(); return p.name; };
+      this.setStatus(`将备用 ${name(reserve)} 与队员 ${name(target)} 交换？`);
+      const menuEpoch = this.teamMenuEpoch;
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      const current = () => this.isPersonalInputCurrent(snapshot, epoch) && menuEpoch === this.teamMenuEpoch && this.canEditTeam(snapshot);
+      if (!current()) return;
+      let chosen = false;
+      await this.scene.ui.setMode(Mode.CONFIRM, async () => {
+        if (chosen || !current()) return;
+        chosen = true;
+        await this.scene.ui.setMode(Mode.MESSAGE);
+        if (!current()) return;
+        await this.sendAction({ kind: 'preparation', operation: 'reserve-swap', partyId: target.id, reserveId: reserve.id },
+          '换队已提交，等待服务器确认…');
+      }, () => {
+        if (chosen || !current()) return;
+        chosen = true; void this.openSwapTarget(reserve, page, snapshot, epoch);
+      });
+    }, filter, [PartyOption.APPLY, PartyOption.SUMMARY])) {
+      this.controls.replaceChildren(); this.setStatus('请选择本人队伍中要交换的成员，包括当前前场');
+    }
+  }
+
+  private async openActiveSwitchParty() {
+    const snapshot = this.latest, epoch = this.epoch, decision = snapshot?.personal.decision;
+    if (!decision || decision.kind !== 'wait-actions' || !this.isPersonalInputCurrent(snapshot, epoch)
+      || this.seat === null) return;
+    const options = (decision.options ?? []).filter((option: any) => option.kind === 'switch');
+    if (!options.length) {
+      this.setStatus('当前没有可上场的后备宝可梦', true);
+      return;
+    }
+    const allowed = new Set(options.map((option: any) => option.pokemonId));
+    const personal = this.model.applied?.personal;
+    if (!personal?.party?.length) throw new Error('PERSONAL_PARTY_MISSING');
+    await this.showTeamParty(personal.party, PartyUiMode.SWITCH, async (slotIndex, option) => {
+      this.battleInputActive = false;
+      const entry = personal.party[slotIndex];
+      if (option !== PartyOption.SEND_OUT || !entry || !allowed.has(entry.id)) {
+        await this.returnToDecision(snapshot, epoch); return;
+      }
+      const menuEpoch = this.teamMenuEpoch;
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (this.isPersonalInputCurrent(snapshot, epoch) && menuEpoch === this.teamMenuEpoch)
+        await this.sendAction({ kind: 'switch', pokemonId: entry.id }, '已提交换人，等待服务器确认…');
+    }, (pokemon: any) => allowed.has(pokemon.id) ? null : '不能更换为该宝可梦', [PartyOption.SEND_OUT, PartyOption.SUMMARY]);
   }
 
   private renderPreparationControls(player: any, snapshot: any, epoch: string | null) {
@@ -432,6 +611,13 @@ export default class CoopPlayPhase extends Phase {
       if (!player.rewardResolved) { this.setStatus('请先处理奖励或跳过奖励', true); return; }
       return send('ready');
     }, true));
+    if (this.model?.applied?.personal?.reserve?.length) {
+      const edit = this.button('战后换队', () => {
+        if (this.isPersonalInputCurrent(snapshot, epoch)) return this.openReserveRoster(true);
+      });
+      edit.disabled = player.ready || player.subdecision !== null || player.selection !== null;
+      row.append(edit);
+    }
     this.controls.append(row);
   }
 
@@ -443,9 +629,9 @@ export default class CoopPlayPhase extends Phase {
       operation === 'ready' ? '准备已提交，等待服务器确认…' : operation === 'unready' ? '取消准备已提交…' : '跳过奖励已提交…');
   }
 
-  private openSwitchPrompt() {
+  private async openSwitchPrompt() {
     const decision = this.latest?.personal.decision;
-    if (!decision || !['switch-confirm', 'switch-select'].includes(decision.kind)
+    if (!decision || !['switch-confirm', 'switch-select', 'wait-switch'].includes(decision.kind)
       || this.seat === null || !decision.requiredSeats.includes(this.seat)
       || !this.inputReady || this.actionId || this.submitted) return;
     const snapshot = this.latest, epoch = this.epoch;
@@ -454,24 +640,33 @@ export default class CoopPlayPhase extends Phase {
     this.switchSignature = signature;
     const options = decision.options ?? [];
     this.controls.replaceChildren();
-    const row = document.createElement('div'); row.className = 'row';
+    const send = async (action: any, menuEpoch = this.teamMenuEpoch) => {
+      if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return;
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (this.isPersonalInputCurrent(snapshot, epoch) && menuEpoch === this.teamMenuEpoch) await this.sendAction(action, '已提交换人选择，等待服务器确认…');
+    };
     if (decision.kind === 'switch-confirm') {
       const keep = options.find((option: any) => option.accept === false);
-      if (!keep) { this.setStatus('战前换人选项缺失', true); return; }
-      row.append(this.button('保持当前出场者', () => {
-        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-        void this.sendAction({ kind: 'switch-confirm', pokemonId: keep.pokemonId, accept: false }, '已保持当前出场者…');
-      }, true));
+      const change = options.find((option: any) => option.accept === true);
+      if (!keep || !change) throw new Error('SWITCH_OPTIONS_MISSING');
+      this.setStatus('战前是否更换本人出场者？确认更换，取消保持当前成员');
+      const menuEpoch = this.teamMenuEpoch; let chosen = false;
+      const choose = (action: any) => { if (!chosen) { chosen = true; return send(action, menuEpoch); } };
+      await this.scene.ui.setMode(Mode.CONFIRM, () => choose(change), () => choose(keep));
     } else {
-      const cancel = options.find((option: any) => option.pokemonId === null);
-      if (!cancel) { this.setStatus('战前换人取消选项缺失', true); return; }
-      row.append(this.button('保持当前出场者', () => {
-        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-        void this.sendAction({ kind: 'switch-select', pokemonId: null }, '已保持当前出场者…');
-      }, true));
+      const forced = decision.kind === 'wait-switch', party = this.model.applied.personal.party;
+      const allowed = new Set(options.filter((o: any) => o.pokemonId !== null).map((o: any) => o.pokemonId));
+      this.setStatus(forced ? '请选择本人存活后备补位' : '请选择本人下一位出场者，取消可保持当前成员');
+      await this.showTeamParty(party, forced ? PartyUiMode.FAINT_SWITCH : PartyUiMode.POST_BATTLE_SWITCH,
+        async (slot: number, option: PartyOption) => {
+          const entry = party[slot];
+          const action = option === PartyOption.SEND_OUT && entry && allowed.has(entry.id)
+            ? options.find((o: any) => o.pokemonId === entry.id)
+            : !forced && option === PartyOption.CANCEL ? options.find((o: any) => o.pokemonId === null) : null;
+          if (action) await send(action);
+          else { this.switchSignature = ''; await this.openSwitchPrompt(); }
+        }, (p: any) => allowed.has(p.id) ? null : '请选择本人存活后备', [PartyOption.SEND_OUT, PartyOption.SUMMARY]);
     }
-    this.controls.append(row);
-    this.setStatus('战前换人：可保持当前出场者；更换队伍尚未接入');
   }
 
   getPokemon() { return this.scene.getPlayerField()[this.seat!]; }
@@ -483,8 +678,63 @@ export default class CoopPlayPhase extends Phase {
   interceptCommand(command: Command): boolean {
     if (!this.battleInputActive || !this.inputReady || this.actionId || this.submitted) return true;
     if (command === Command.FIGHT) return false;
-    this.setStatus('该战斗菜单尚未接入；当前可验证 FIGHT', true);
+    if (command === Command.POKEMON) {
+      void this.openActiveSwitchParty().catch(error =>
+        this.setStatus(`换人菜单失败：${error?.message ?? error}`, true));
+      return true;
+    }
+    if (command === Command.BALL) {
+      void this.openCaptureMenu().catch(error => this.setStatus(`选球菜单失败：${error?.message ?? error}`, true));
+      return true;
+    }
+    this.setStatus('该战斗菜单尚未接入；当前可验证 FIGHT／POKEMON／BALL', true);
     return true;
+  }
+
+  private async openCaptureMenu() {
+    const snapshot = this.latest, epoch = this.epoch, decision = snapshot?.personal.decision;
+    if (!decision || decision.kind !== 'wait-actions' || !this.isPersonalInputCurrent(snapshot, epoch)
+      || this.seat === null) return;
+    const options = (decision.options ?? []).filter((option: any) => option.kind === 'ball');
+    this.controls.replaceChildren();
+    if (!options.length) {
+      this.setStatus('当前没有合法捕获目标或可用精灵球', true);
+      return;
+    }
+    const cancel = async () => {
+      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+      this.battleInputActive = false;
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (this.isPersonalInputCurrent(snapshot, epoch)) this.openBattleCommand();
+    };
+    await this.scene.ui.setMode(Mode.BALL, {
+      counts: { ...snapshot.personal.resources.pokeballs },
+      allowed: options.map((o: any) => o.pokeballType), cancel,
+      select: async (ball: number) => {
+        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+        const option = options.find((o: any) => o.pokeballType === ball);
+        if (!option) return;
+        this.battleInputActive = false;
+        await this.scene.ui.setMode(Mode.MESSAGE);
+        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+        await this.sendAction({ kind: 'ball', pokeballType: option.pokeballType, targetId: option.targetId },
+          '已提交投球，等待服务器裁定…');
+      },
+    });
+    this.setStatus('选择精灵球；取消可返回 Command');
+  }
+
+  private renderReserve() {
+    const reserve = this.model?.applied?.personal?.reserve ?? [];
+    this.reserveLine.hidden = reserve.length === 0;
+    if (this.reserveInspectButton) { this.reserveInspectButton.hidden = !reserve.length; this.updateReserveAccess(); }
+    if (!reserve.length) { this.reserveLine.textContent = ''; return; }
+    this.reserveLine.textContent = `本局备用：${reserve.map((entry: any) => {
+      // The codec intentionally excludes the display name. Rebuild it through
+      // the original method, without constructors or rule-state changes.
+      if (!entry.pokemon.name) entry.pokemon.generateName();
+      return `${entry.pokemon.name ?? `#${entry.id}`} Lv.${entry.pokemon.level}`;
+    }).join('、')}`;
   }
 
   private openBattleCommand() {
@@ -581,6 +831,7 @@ export default class CoopPlayPhase extends Phase {
     if (this.actionId) { this.setStatus('操作已提交，等待回执…'); return false; }
     if (!this.inputReady) { this.setStatus('正在核对双方状态，请稍后提交'); return false; }
     this.clearPreparationParty();
+    this.clearActiveSwitchParty();
     const actionId = crypto.randomUUID();
     const message = { type: 'submitAction', roomId: this.roomId, runId: this.latest.runId,
       decisionId: this.latest.decisionId, expectedRevision: this.latest.revision, actionId, action };

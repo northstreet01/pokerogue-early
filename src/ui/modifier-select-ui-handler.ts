@@ -47,6 +47,10 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     const transferButtonText = addTextObject(this.scene, -4, -2, i18next.t("partyUiHandler:transfer"), TextStyle.PARTY);
     transferButtonText.setOrigin(1, 0);
     this.transferButtonContainer.add(transferButtonText);
+    this.bindPointer(transferButtonText, () => {
+      if (!this.awaitingActionInput || !this.transferButtonContainer.visible) return false;
+      this.setRowCursor(0); this.setCursor(1);
+    });
 
     this.rerollButtonContainer = this.scene.add.container(16, -64);
     this.rerollButtonContainer.setVisible(false);
@@ -55,6 +59,10 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     const rerollButtonText = addTextObject(this.scene, -4, -2, i18next.t("modifierSelectUiHandler:reroll"), TextStyle.PARTY);
     rerollButtonText.setOrigin(0, 0);
     this.rerollButtonContainer.add(rerollButtonText);
+    this.bindPointer(rerollButtonText, () => {
+      if (!this.awaitingActionInput || !this.rerollButtonContainer.visible) return false;
+      this.setRowCursor(0); this.setCursor(0);
+    });
 
     this.rerollCostText = addTextObject(this.scene, 0, 0, '', TextStyle.MONEY);
     this.rerollCostText.setOrigin(0, 0);
@@ -107,6 +115,11 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       this.scene.add.existing(option);
       this.modifierContainer.add(option);
       this.options.push(option);
+      option.setSize(96, 128);
+      this.bindPointer(option, () => {
+        if (!this.awaitingActionInput || generation !== this.displayGeneration) return false;
+        this.setRowCursor(1); this.setCursor(m);
+      });
     }
 
     for (let m = 0; m < shopTypeOptions.length; m++) {
@@ -122,6 +135,11 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       if (row >= this.shopOptionsRows.length)
         this.shopOptionsRows.push([]);
       this.shopOptionsRows[row].push(option);
+      option.setSize(96, 128);
+      this.bindPointer(option, () => {
+        if (!this.awaitingActionInput || generation !== this.displayGeneration) return false;
+        this.setRowCursor(this.shopOptionsRows.length - row + 1); this.setCursor(col);
+      });
     }
 
     const maxUpgradeCount = typeOptions.map(to => to.upgradeCount).reduce((max, current) => Math.max(current, max), 0);

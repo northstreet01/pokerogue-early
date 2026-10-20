@@ -1773,7 +1773,13 @@ export class TurnStartPhase extends FieldPhase {
             this.scene.pushPhase(new MovePhase(this.scene, pokemon, turnCommand.targets || turnCommand.move.targets, move, false, queuedMove.ignorePP));
           break;
         case Command.BALL:
-          this.scene.unshiftPhase(new AttemptCapturePhase(this.scene, turnCommand.targets[0] % 2, turnCommand.cursor));
+          const capturePhase = new AttemptCapturePhase(this.scene, turnCommand.targets[0] % 2, turnCommand.cursor);
+          // Co-op binds the acting owner before this queued phase is persisted.
+          // Solo retains the original queue and scene.
+          if ((this.scene as any).queueCaptureAttempt)
+            (this.scene as any).queueCaptureAttempt(capturePhase, o);
+          else
+            this.scene.unshiftPhase(capturePhase);
           break;
         case Command.POKEMON:
         case Command.RUN:
@@ -3290,6 +3296,8 @@ export class PokemonHealPhase extends CommonAnimPhase {
 
 export class AttemptCapturePhase extends PokemonPhase {
   private pokeballType: PokeballType;
+  // Optional co-op queued-instance binding; absent on the solo path.
+  declare coopTargetId?: integer;
   private pokeball: Phaser.GameObjects.Sprite;
   private originalY: number;
 
@@ -3462,59 +3470,65 @@ export class AttemptCapturePhase extends PokemonPhase {
     this.scene.gameData.updateSpeciesDexIvs(pokemon.species.speciesId, pokemon.ivs);
       
     this.scene.ui.showText(`${pokemon.name} was caught!`, null, () => {
-      const end = () => {
-        this.scene.pokemonInfoContainer.hide();
-        this.removePb();
-        this.end();
-      };
-      const removePokemon = () => {
-        this.scene.addFaintedEnemyScore(pokemon);
-        this.scene.getPlayerField().filter(p => p.isActive(true)).forEach(playerPokemon => playerPokemon.removeTagsBySourceId(pokemon.id));
-        pokemon.hp = 0;
-        pokemon.trySetStatus(StatusEffect.FAINT);
-        this.scene.clearEnemyHeldItemModifiers();
-        this.scene.field.remove(pokemon, true);
-      };
-      const addToParty = () => {
-        const newPokemon = pokemon.addToParty(this.pokeballType);
-        const modifiers = this.scene.findModifiers(m => m instanceof PokemonHeldItemModifier, false);
-        if (this.scene.getParty().filter(p => p.isShiny()).length === 6)
-          this.scene.validateAchv(achvs.SHINY_PARTY);
-        Promise.all(modifiers.map(m => this.scene.addModifier(m, true))).then(() => {
-          this.scene.updateModifiers(true);
-          removePokemon();
-          if (newPokemon)
-            newPokemon.loadAssets().then(end);
-          else
-            end();
-        });
-      };
-      Promise.all([ pokemon.hideInfo(), this.scene.gameData.setPokemonCaught(pokemon) ]).then(() => {
-        if (this.scene.getParty().length === 6) {
-          const promptRelease = () => {
-            this.scene.ui.showText(i18next.t("battle:partyFull", { pokemonName: (pokemon.name) }), null, () => {
-              this.scene.ui.setMode(Mode.CONFIRM, () => {
-                this.scene.ui.setMode(Mode.PARTY, PartyUiMode.RELEASE, this.fieldIndex, (slotIndex: integer, _option: PartyOption) => {
-                  this.scene.ui.setMode(Mode.MESSAGE).then(() => {
-                    if (slotIndex < 6)
-                      addToParty();
-                    else
-                      promptRelease();
-                  });
-                });
-              }, () => {
+      Promise.all([ pokemon.hideInfo(), this.scene.gameData.setPokemonCaught(pokemon) ])
+        .then(() => this.finishCatch());
+    }, 0, true);
+  }
+
+  // Resume the original post-catch choice without replaying the throw/RNG.
+  finishCatch(accept?: boolean) {
+    const pokemon = this.getPokemon() as EnemyPokemon;
+    const end = () => {
+      this.scene.pokemonInfoContainer.hide();
+      this.removePb();
+      this.end();
+    };
+    const removePokemon = () => {
+      this.scene.addFaintedEnemyScore(pokemon);
+      this.scene.getPlayerField().filter(p => p.isActive(true)).forEach(playerPokemon => playerPokemon.removeTagsBySourceId(pokemon.id));
+      pokemon.hp = 0;
+      pokemon.trySetStatus(StatusEffect.FAINT);
+      this.scene.clearEnemyHeldItemModifiers();
+      this.scene.field.remove(pokemon, true);
+    };
+    const addToParty = () => {
+      const newPokemon = pokemon.addToParty(this.pokeballType);
+      const modifiers = this.scene.findModifiers(m => m instanceof PokemonHeldItemModifier, false);
+      if (this.scene.getParty().filter(p => p.isShiny()).length === 6)
+        this.scene.validateAchv(achvs.SHINY_PARTY);
+      Promise.all(modifiers.map(m => this.scene.addModifier(m, true))).then(() => {
+        this.scene.updateModifiers(true);
+        removePokemon();
+        if (newPokemon)
+          newPokemon.loadAssets().then(end);
+        else
+          end();
+      });
+    };
+    if (accept === false) { removePokemon(); end(); return; }
+    if (this.scene.getParty().length === 6) {
+        const promptRelease = () => {
+          this.scene.ui.showText(i18next.t("battle:partyFull", { pokemonName: (pokemon.name) }), null, () => {
+            this.scene.ui.setMode(Mode.CONFIRM, () => {
+              this.scene.ui.setMode(Mode.PARTY, PartyUiMode.RELEASE, this.fieldIndex, (slotIndex: integer, _option: PartyOption) => {
                 this.scene.ui.setMode(Mode.MESSAGE).then(() => {
-                  removePokemon();
-                  end();
+                  if (slotIndex < 6)
+                    addToParty();
+                  else
+                    promptRelease();
                 });
               });
+            }, () => {
+              this.scene.ui.setMode(Mode.MESSAGE).then(() => {
+                removePokemon();
+                end();
+              });
             });
-          };
-          promptRelease();
-        } else
-          addToParty();
-      });
-    }, 0, true);
+          });
+        };
+        promptRelease();
+      } else
+        addToParty();
   }
 
   removePb() {

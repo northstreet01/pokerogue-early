@@ -33,6 +33,76 @@ function initialize(storage) {
 }
 const storage = value => ({ value, getItem(key) { assert.equal(key, 'prLang'); return this.value; }, setItem(key, value) { assert.equal(key, 'prLang'); this.value = value; } });
 
+// Follow Phaser's Text/TextStyle boundary: setStyle does not update the Text
+// object's padding or lineSpacing. This checks helper calls, not canvas layout.
+function textHarness(language) {
+  class Text {
+    constructor(...args) {
+      this.style = args.at(-1);
+      this.padding = this.style.padding;
+      this.lineSpacing = this.style.lineSpacing ?? 0;
+    }
+    setStyle(style) { this.style = style; return this; }
+    setPadding(padding) { this.padding = padding; return this; }
+    setLineSpacing(spacing) { this.lineSpacing = spacing; return this; }
+    setScale(scale) { this.scale = scale; return this; }
+    setShadow(...shadow) { this.shadow = shadow; return this; }
+  }
+  const helpers = loadTs('src/ui/text.ts', {
+    'phaser3-rex-plugins/plugins/gameobjects/tagtext/bbcodetext/BBCodeText': { default: Text },
+    'phaser3-rex-plugins/plugins/inputtext': { default: Text },
+    '../modifier/modifier-tier': { ModifierTier: {} },
+    '../data/enums/egg-type': { EggTier: {} },
+    '../i18n': { default: language }
+  });
+  return { ...helpers, scene: { add: { text: (...args) => new Text(...args), existing() {} } } };
+}
+
+test('reused original text receives the same language padding and spacing as newly created text', () => {
+  const language = { resolvedLanguage: 'en', language: 'en' };
+  const h = textHarness(language);
+  const reused = h.addTextObject(h.scene, 0, 0, 'existing', h.TextStyle.MESSAGE);
+  for (const lng of ['zh-Hans', 'en']) {
+    language.resolvedLanguage = lng;
+    h.setTextStyle(reused, h.TextStyle.MESSAGE);
+    const fresh = h.addTextObject(h.scene, 0, 0, 'fresh', h.TextStyle.MESSAGE);
+    assert.equal(reused.padding.bottom, fresh.padding.bottom);
+    assert.equal(reused.lineSpacing, fresh.lineSpacing);
+    assert.equal(reused.style.fontFamily, fresh.style.fontFamily);
+    assert.equal(reused.scale, fresh.scale);
+  }
+});
+
+test('text helpers preserve explicit zero/custom spacing and caller wrapping callbacks', () => {
+  const h = textHarness({ resolvedLanguage: 'zh-Hans', language: 'en' });
+  const callback = text => text;
+  const options = { lineSpacing: 0, wordWrap: { width: 120, callback }, padding: { bottom: 2 } };
+  const text = h.addTextObject(h.scene, 0, 0, '中文 text', h.TextStyle.MESSAGE, options);
+  const bbcode = h.addBBCodeTextObject(h.scene, 0, 0, '[b]中文[/b]', h.TextStyle.MESSAGE, options);
+  assert.equal(text.lineSpacing, 0);
+  assert.equal(bbcode.lineSpacing, 0);
+  h.setTextStyle(text, h.TextStyle.MESSAGE, { ...options, lineSpacing: 13 });
+  assert.equal(text.lineSpacing, 13);
+  assert.equal(text.padding.bottom, 2);
+  assert.equal(text.style.wordWrap.width, 120);
+  assert.equal(text.style.wordWrap.callback, callback);
+});
+
+test('normal and BBCode helpers use resolved language and fall back consistently when it is unavailable', () => {
+  const language = { resolvedLanguage: 'en', language: 'zh-Hans' };
+  const h = textHarness(language);
+  const before = [h.addTextObject(h.scene, 0, 0, '', h.TextStyle.MESSAGE),
+    h.addBBCodeTextObject(h.scene, 0, 0, '', h.TextStyle.MESSAGE)];
+  delete language.resolvedLanguage;
+  const after = [h.addTextObject(h.scene, 0, 0, '', h.TextStyle.MESSAGE),
+    h.addBBCodeTextObject(h.scene, 0, 0, '', h.TextStyle.MESSAGE)];
+  for (let i = 0; i < 2; i++) {
+    assert.equal(before[i].style.wordWrap.useAdvancedWrap, false);
+    assert.equal(after[i].style.wordWrap.useAdvancedWrap, true);
+    assert.notEqual(before[i].lineSpacing, after[i].lineSpacing);
+  }
+});
+
 test('first launch and invalid/unavailable preferences default to Chinese, existing English is retained', () => {
   for (const value of [undefined, null, '', 'bad', 'constructor', 'zh-Hant']) assert.equal(language.readLanguage(storage(value)), 'zh-Hans');
   assert.equal(language.readLanguage({ getItem() { throw Error('blocked'); } }), 'zh-Hans');

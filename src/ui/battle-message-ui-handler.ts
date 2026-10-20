@@ -34,6 +34,7 @@ export default class BattleMessageUiHandler extends MessageUiHandler {
     ui.add(bg);
 
     this.bg = bg;
+    this.bindPointer(bg, () => this.awaitingActionInput);
 
     this.commandWindow = addWindow(this.scene, 201, -1, 118, 46);
     this.commandWindow.setOrigin(0, 1);

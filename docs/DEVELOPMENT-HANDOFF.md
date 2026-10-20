@@ -1,5 +1,21 @@
 # 新窗口开发交接
 
+2026-10-21 VS-02B-10断电收尾：用户改定按原版每人最多6只，满员捕获必须取舍，不允许无限reserve。新Worker边界已实现“未满直接入party／满员放弃新捕获或原放生后接纳”；新版定向4/4、typecheck／Worker构建退出0。此前9b22a02c／d3d824c4的备用交换／分页方案已被用户纠正，不再作为最终目标。**仅部分完成**：新取舍原UI未接，旧备用按钮／旧reserve断言未完成清理，旧库存迁移和新版正式WS故障／重启／去重／隔离未完成，未跑最终完整回归，浏览器未执行。因用户要求即将断电，停止扩展，提交保存并仅推送独立评审备份；main不动，下一次先接新取舍UI和更新验收，不继续扩成长。详细范围／失败历史／最终构建见[本批记录](mvp-vs-02b10-reserve-team.md)。
+
+2026-10-21 VS-02B-09维护者修订：独立修复伙伴BALL跳过、双投球归属、逐阶段恢复检查点、原计分、待处理捕获事实归属与ID分配；原BallUiHandler接替网页投球按钮并补异步门控。规则修复da167bc4完整串行1022/1022、退出0；之后备用名称显示补丁UI34/34、退出0，未再次全套，最终构建见[验收记录](mvp-vs-02b09-review.md)。A仅限无持有物和原支持球种，B原球菜单待用户浏览器，备用原Summary仍未接；下一批只推进捕获备用战后换队至下一战可用。评审分支本地，未合并／未推送。
+
+2026-10-20 VS-02B-09 普通捕获：A 以稳定 ball/target option 驱动原 CommandPhase BALL／AttemptCapturePhase，原三次判定与转换，成功个体进入捕获者 reserve，私有投影与客户端 apply→capture 保留完整状态；直接 Worker 3/3，typecheck／runtime／build 通过。B 加合作页最小球选择与只读备用行，取消／outbox／receipt 门控保留；未复用完整原 BallUiHandler、未做双浏览器。正式双 WS／故障重启和普通球稳定随机回归未补；完整回归见本批记录。战后换队／M6 仍未做。
+
+2026-10-20 用户追加按键／鼠标修订：WASD方向、Enter确认、Esc取消、M菜单、C完成选队；鼠标接原选队、选项、Command／Fight／Target、Party、奖励等菜单，保留原回调、冷却、合作输入门控；文本输入框不再同时驱动画布。定向43/43、typecheck／生产build退出0，完整串行未重跑。用户自行测试后反馈“没发现问题”，只记本批可用性复核，不扩大为完整双端验收。分支fix/keyboard-mouse-controls，未合并／未推送，详见[输入修订记录](controls-review-2026-10-20.md)。下一批捕获开发须保留此最新输入修订。
+
+2026-10-20 VS-02B-08维护者复验：修复威吓插入阶段后另一席换错后备／恢复游标、Party跨await旧目标提交及放生等未接本地操作；接原ShowPartyExpBarPhase／HidePartyExpBarPhase，换人后退场参战者能按原方法获经验并进入整备。补真实双WS＋FormalRoomStore的单方输入重启、候选落盘失败重试、再次重启、去重和房间隔离；更正原WS成功例实际使用MemoryStore。最终定向51/51，typecheck／runtime build／生产build退出0；完整串行1006/1006、退出0（1028492.7826ms，无失败／取消／跳过），最终结果见[维护者验收](mvp-vs-02b08-review.md)。A限普通SEND_OUT切片，B原Party及Potion／文字视觉仍待用户浏览器验收，不宣称全机制。评审分支review/vs02b08-active-switch-fix，未合并／未推送。下一批普通捕获→本人本局备用持久化→原BALL菜单，战后换队另批；M6待处理成果不得丢，详细任务书仅本地。
+
+2026-10-19 VS-02B-08 战斗内主动换人：A 以稳定 pokemonId option 经原 CommandPhase POKEMON／TurnStart／SwitchSummonPhase 执行，个人 Party 视图分席换人，混合 FIGHT 与双方同轮换人可达下一输入；真实 Worker 4/4、真实双 WS 1/1、既有换人定向 23/23，最终完整串行 **1000/1000、退出 0**（1595758.506ms），typecheck／build 通过。B 接原 POKEMON→个人 Party UI，取消／拒绝／刷新清理和 outbox 门控保留，但双浏览器未执行，待用户验收。普通 SEND_OUT 之外、经验条阶段及主动换人专用故障／重启测试仍是缺口。详见 [VS-02B-08 记录](mvp-vs-02b08-active-switch.md)。
+
+2026-10-19 VS-02B-07 维护者独立复核：A 文字基础／B 顶部布局**部分通过**，浏览器视觉和 Potion 原 Party 仍交用户验收。修复合作入口原字体未注册、既有 Text 重设遗漏 padding／行距及显式零值、窄窗长错误与控制区换行；补正式 Worker 构建启动步骤，纠正来源提交含义和 early 固定基线混称。定向35/35、typecheck／生产build退出0（1m45s）；本次完整回归和浏览器未运行，不沿用旧计数。独立本地评审分支 `review/vs02b07-ui-text-fix`，main仍86798227，未合并／未推送，详见 [维护者验收](mvp-vs-02b07-review.md)。下一批仅战斗内普通主动换人 A正式运行器／事务、B原Command／本人Party／后续FIGHT，完整提示词仅本地；UI按用户实测反馈定点修，捕获／本局备用／战后换队等MVP范围不删。
+
+2026-10-19 VS-02B-07 文字与入口 UI：A 复用新版 Pokerogue 语言/场景文字度量，加入 CJK 字体回退、中文降字号、轻阴影、padding 与 advanced wrap；英文保持原度量。B 将 coop-play 顶部改为低高度可换行状态条，收紧房间/准备/预算与桌面控制，窄窗适配；原菜单仍用原窗口/像素资源。typecheck、生产 build 通过；浏览器项目交用户验收，未执行项保持待测。详见 [VS-02B-07 记录](mvp-vs-02b07-ui-text.md)。
+
 2026-10-19 VS-02B-06 维护者修订：原效果改为复用原 BattleScene.addModifier 与任务观察器收尾，显式拒绝误继承的 REVIVE；修复 Potion 原 Party 缺少 battler-count、取消重选、过期回调和临时视图清理，展示使用 codec 副本。A 的球／Potion Worker 与正式双 WS／FormalRoomStore 故障、重试、重启、重复 actionId、房间隔离切片通过；B 已实际完成球补给双浏览器领取（双方5→10）、重启刷新不重授予及第二战共同 FIGHT，Potion 目标原 UI 仍待用户测试，B 整体部分通过。最终 typecheck／build 退出0，完整串行回归992/992、退出0，无失败／跳过／取消，1053058.5728ms；见维护者记录。用户要求本轮收尾后推送；发布采用公开 main 的新父提交与经审查的最终树，不合并旧内部评审历史。下一批优先复用源项目最近几个可核实版本的文字排版与原 UI，浏览器测试可交用户执行，见下一批计划；捕获／主动换人／本局备用／战后换队仍是随后 MVP 必需项。
 
 [维护者记录](mvp-vs02b06-review.md) · [新版 UI 计划](coop-ui-text-next-plan.md) · [用户测试清单](vs02b06-manual-acceptance.md)

@@ -22,16 +22,36 @@ export enum TextStyle {
   TOOLTIP_CONTENT
 };
 
+function isCjkLanguage(): boolean {
+  const language = i18next.resolvedLanguage ?? i18next.language;
+  return language === 'zh-Hans' || language === 'zh-Hant' || language === 'ja';
+}
+
+function getLineSpacing(styleOptions: Phaser.Types.GameObjects.Text.TextStyle, bbCode = false): number {
+  return styleOptions.lineSpacing ?? (bbCode ? (isCjkLanguage() ? 8 : 10) : (isCjkLanguage() ? 6 : 5));
+}
+
 export function addTextObject(scene: Phaser.Scene, x: number, y: number, content: string, style: TextStyle, extraStyleOptions?: Phaser.Types.GameObjects.Text.TextStyle): Phaser.GameObjects.Text {
   const [ styleOptions, shadowColor, shadowSize ] = getTextStyleOptions(style, extraStyleOptions);
 
   const ret = scene.add.text(x, y, content, styleOptions);
   ret.setScale(0.1666666667);
   ret.setShadow(shadowSize, shadowSize, shadowColor);
-  if (!(styleOptions as Phaser.Types.GameObjects.Text.TextStyle).lineSpacing)
-    ret.setLineSpacing(5);
+  ret.setLineSpacing(getLineSpacing(styleOptions as Phaser.Types.GameObjects.Text.TextStyle));
 
   return ret;
+}
+
+/** Re-apply the same language/scene metrics to an existing original text object. */
+export function setTextStyle(obj: Phaser.GameObjects.Text, style: TextStyle, extraStyleOptions?: Phaser.Types.GameObjects.Text.TextStyle): void {
+  const [ styleOptions, shadowColor, shadowSize ] = getTextStyleOptions(style, extraStyleOptions);
+  obj.setStyle(styleOptions as Phaser.Types.GameObjects.Text.TextStyle);
+  // Phaser Text.setStyle updates TextStyle only; padding and lineSpacing live
+  // on Text itself and must also be updated when reusing an existing object.
+  obj.setPadding((styleOptions as Phaser.Types.GameObjects.Text.TextStyle).padding);
+  obj.setScale(0.1666666667);
+  obj.setShadow(shadowSize, shadowSize, shadowColor);
+  obj.setLineSpacing(getLineSpacing(styleOptions as Phaser.Types.GameObjects.Text.TextStyle));
 }
 
 export function addBBCodeTextObject(scene: Phaser.Scene, x: number, y: number, content: string, style: TextStyle, extraStyleOptions?: Phaser.Types.GameObjects.Text.TextStyle): BBCodeText {
@@ -41,8 +61,7 @@ export function addBBCodeTextObject(scene: Phaser.Scene, x: number, y: number, c
   scene.add.existing(ret);
   ret.setScale(0.1666666667);
   ret.setShadow(shadowSize, shadowSize, shadowColor);
-  if (!(styleOptions as BBCodeText.TextStyle).lineSpacing)
-    ret.setLineSpacing(10);
+  ret.setLineSpacing(getLineSpacing(styleOptions as Phaser.Types.GameObjects.Text.TextStyle, true));
 
   return ret;
 }
@@ -57,17 +76,22 @@ export function addTextInputObject(scene: Phaser.Scene, x: number, y: number, wi
   return ret;
 }
 
-function getTextStyleOptions(style: TextStyle, extraStyleOptions?: Phaser.Types.GameObjects.Text.TextStyle): [ Phaser.Types.GameObjects.Text.TextStyle | InputText.IConfig, string, integer ] {
+export function getTextStyleOptions(style: TextStyle, extraStyleOptions?: Phaser.Types.GameObjects.Text.TextStyle): [ Phaser.Types.GameObjects.Text.TextStyle | InputText.IConfig, string, integer ] {
+  const cjk = isCjkLanguage();
+  // Phaser/Canvas does not synthesize a CJK face for the pixel font. Keep the
+  // original face first and fall back only for scripts it cannot render.
+  const fontFamily = cjk ? 'emerald, "Noto Sans SC", "Microsoft YaHei", sans-serif' : 'emerald';
   let shadowColor: string;
-  let shadowSize = 6;
+  let shadowSize = 4.5;
 
   let styleOptions: Phaser.Types.GameObjects.Text.TextStyle = {
-    fontFamily: 'emerald',
+    fontFamily,
     fontSize: '96px',
     color: getTextColor(style, false),
     padding: {
-      bottom: 6
-    }
+      bottom: cjk ? 8 : 6
+    },
+    wordWrap: { useAdvancedWrap: cjk }
   };
 
   switch (style) {
@@ -79,21 +103,23 @@ function getTextStyleOptions(style: TextStyle, extraStyleOptions?: Phaser.Types.
     case TextStyle.MESSAGE:
     case TextStyle.SETTINGS_LABEL:
     case TextStyle.SETTINGS_SELECTED:
-      styleOptions.fontSize = '96px';
+      styleOptions.fontSize = cjk ? '88px' : '96px';
+      shadowSize = 3.5;
       break;
     case TextStyle.BATTLE_INFO:
     case TextStyle.MONEY:
     case TextStyle.TOOLTIP_TITLE:
-      styleOptions.fontSize = '72px';
-      shadowSize = 4.5;
+      styleOptions.fontSize = cjk ? '68px' : '72px';
+      shadowSize = 4;
       break;
     case TextStyle.PARTY:
     case TextStyle.PARTY_RED:
-      styleOptions.fontFamily = 'pkmnems';
-      styleOptions.fontSize = '66px';
+      styleOptions.fontFamily = cjk ? 'pkmnems, "Noto Sans SC", "Microsoft YaHei", sans-serif' : 'pkmnems';
+      styleOptions.fontSize = cjk ? '62px' : '66px';
+      shadowSize = 3.5;
       break;
     case TextStyle.TOOLTIP_CONTENT:
-      styleOptions.fontSize = '64px';
+      styleOptions.fontSize = cjk ? '60px' : '64px';
       shadowSize = 4;
       break;
   }
@@ -102,14 +128,16 @@ function getTextStyleOptions(style: TextStyle, extraStyleOptions?: Phaser.Types.
 
   if (extraStyleOptions) {
     if (extraStyleOptions.fontSize) {
-      const sizeRatio = parseInt(extraStyleOptions.fontSize.toString().slice(0, -2)) / parseInt(styleOptions.fontSize.toString().slice(0, -2));
-      shadowSize *= sizeRatio;
+      const requested = Number.parseInt(String(extraStyleOptions.fontSize), 10);
+      const base = Number.parseInt(String(styleOptions.fontSize), 10);
+      if (Number.isFinite(requested) && Number.isFinite(base) && base > 0)
+        shadowSize *= requested / base;
     }
     styleOptions = Object.assign(styleOptions, extraStyleOptions);
   }
 
   // Phaser's advanced wrapping also breaks CJK text that has no spaces.
-  styleOptions.wordWrap = { useAdvancedWrap: i18next.language === 'zh-Hans', ...styleOptions.wordWrap };
+  styleOptions.wordWrap = { useAdvancedWrap: cjk, ...styleOptions.wordWrap };
   return [ styleOptions, shadowColor, shadowSize ];
 }
 

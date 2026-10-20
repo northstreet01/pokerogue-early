@@ -19,7 +19,7 @@ function stageOf(context) {
   const decision = context.checkpoint?.decision;
   if (!decision) return 'initializing';
   if (decision.kind === 'preparation') return 'preparation';
-  if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select') return 'switch';
+  if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') return 'switch';
   if (decision.kind === 'wait-actions') return 'battle';
   if (decision.kind === 'wait-target') return 'target';
   if (decision.kind === 'continuing') return decision.reason === 'next-battle' ? 'next-battle' : 'resolving';
@@ -119,8 +119,8 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       const entry = pokemonId === null ? null
         : checkpoint.roster.entries.find(item => (item.pokemon?.fields?.id ?? item.pokemon?.id) === pokemonId);
       const intent = {
-        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`,
-        owner: entry ? entry.owner : null,
+        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`,
+        owner: [0, 1].includes(raw.owner) ? raw.owner : entry ? entry.owner : null,
         source: 'scene',
         recipient: null,
         type: raw.kind,
@@ -132,7 +132,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
     return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
   function scopeEvent(event, checkpoint) {
-    if (event.kind === 'preparation-open' && (event.seat === 0 || event.seat === 1))
+    if (['preparation-open', 'preparation-reserve-swap'].includes(event.kind) && (event.seat === 0 || event.seat === 1))
       return { ...event, scope: event.seat };
     if (event.pokemonId !== undefined) {
       const entry = checkpoint.roster.entries.find(item => (item.pokemon?.fields?.id ?? item.pokemon?.id) === event.pokemonId);
@@ -155,7 +155,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       const decision = checkpoint.decision;
       if (decision.kind === 'wait-actions' || decision.kind === 'preparation'
         || decision.kind === 'wait-target' || decision.kind === 'ended'
-        || decision.kind === 'switch-confirm' || decision.kind === 'switch-select') break;
+        || decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') break;
       check(decision.kind === 'continuing', 'UNSUPPORTED_DECISION');
       if (decision.reason === 'next-battle') await apply('native-next');
       else if (frontPhase(checkpoint) === 'SelectModifierPhase') await apply('native-preparation');
@@ -271,7 +271,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       if (decision.kind === 'preparation')
         return { id: decision.id, requiredSeats: [...decision.requiredSeats], collection: 'incremental' };
       if (decision.kind === 'wait-actions' || decision.kind === 'wait-target'
-        || decision.kind === 'switch-confirm' || decision.kind === 'switch-select')
+        || decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice')
         return { id: decision.id, requiredSeats: [...decision.requiredSeats], collection: 'all' };
       if (decision.kind === 'continuing')
         return { id: decision.id, requiredSeats: [], collection: 'auto' };
@@ -292,7 +292,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       if (context.lobby) { await validateLobbyAction(room, action); return; }
       const decision = context.checkpoint.decision;
       if (decision.kind === 'wait-actions') {
-        check(action?.kind === 'fight', 'INVALID_ACTION');
+        check(['fight', 'switch', 'ball'].includes(action?.kind), 'INVALID_ACTION');
         await request(room, 'native-validate', { checkpoint: context.checkpoint, seat, action: COPY(action) });
         return;
       }
@@ -300,7 +300,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         await request(room, 'native-validate-preparation', { checkpoint: context.checkpoint, seat, action: COPY(action) });
         return;
       }
-      if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select') {
+      if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') {
         await request(room, 'native-validate-switch', { checkpoint: context.checkpoint, seat, action: COPY(action) });
         return;
       }
@@ -382,7 +382,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         const seats = Object.keys(inputs ?? {});
         check(seats.length === 1 && (seats[0] === '0' || seats[0] === '1'), 'INCOMPLETE_PREPARATION_INPUTS');
         await apply('native-prepare-action', { checkpoint, seat: Number(seats[0]), action: COPY(inputs[seats[0]]) });
-      } else if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select') {
+      } else if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') {
         check(inputs && Object.keys(inputs).length === 1, 'INCOMPLETE_SWITCH_INPUTS');
         await apply('native-switch', { checkpoint, inputs: COPY(inputs) });
       } else check(decision.kind === 'continuing', 'UNSAFE_ADVANCE');

@@ -155,6 +155,10 @@ export default class PartyUiHandler extends MessageUiHandler {
     partyContainer.add(partyCancelButton);
 
     this.partyCancelButton = partyCancelButton;
+    this.bindPointer(partyCancelButton.getAt(0), () => {
+      if (this.optionsMode || this.awaitingActionInput || this.pendingPrompt) return false;
+      this.setCursor(6);
+    }, Button.CANCEL);
 
     this.optionsContainer = this.scene.add.container((this.scene.game.canvas.width / 6) - 1, -1);
     partyContainer.add(this.optionsContainer);
@@ -410,6 +414,10 @@ export default class PartyUiHandler extends MessageUiHandler {
       this.scene.add.existing(partySlot);
       this.partySlotsContainer.add(partySlot);
       this.partySlots.push(partySlot);
+      this.bindPointer(partySlot.getAt(0), () => {
+        if (this.optionsMode || this.awaitingActionInput || this.pendingPrompt) return false;
+        this.setCursor(slotIndex);
+      });
       if (this.cursor === slotIndex)
         partySlot.select();
     }
@@ -674,6 +682,13 @@ export default class PartyUiHandler extends MessageUiHandler {
       widestOptionWidth = Math.max(optionText.displayWidth, widestOptionWidth);
 
       this.optionsContainer.add(optionText);
+      const cursor = this.options.length - (o + 1);
+      this.bindPointer(optionText, () => {
+        if (!this.optionsMode || this.awaitingActionInput || this.pendingPrompt) return false;
+        const scrolling = [PartyOption.SCROLL_UP, PartyOption.SCROLL_DOWN].includes(this.options[cursor]);
+        this.setCursor(cursor);
+        return !scrolling;
+      });
     }
 
     this.optionsBg.width = Math.max(widestOptionWidth + 24, 94);

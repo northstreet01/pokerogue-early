@@ -35,6 +35,7 @@ export default class CommandUiHandler extends UiHandler {
     for (let c = 0; c < commands.length; c++) {
       const commandText = addTextObject(this.scene, c % 2 === 0 ? 0 : 55.8, c < 2 ? 0 : 16, commands[c], TextStyle.WINDOW);
       this.commandsContainer.add(commandText);
+      this.bindPointer(commandText, () => { this.setCursor(c); });
     }
   }
 

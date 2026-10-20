@@ -1,5 +1,7 @@
 # 新窗口开发交接
 
+2026-10-20 用户追加按键／鼠标修订：WASD方向、Enter确认、Esc取消、M菜单、C完成选队；鼠标接原选队、选项、Command／Fight／Target、Party、奖励等菜单，保留原回调、冷却、合作输入门控；文本输入框不再同时驱动画布。定向43/43、typecheck／生产build退出0，完整串行未重跑。用户自行测试后反馈“没发现问题”，只记本批可用性复核，不扩大为完整双端验收。分支fix/keyboard-mouse-controls，未合并／未推送，详见[输入修订记录](controls-review-2026-10-20.md)。下一批捕获开发须保留此最新输入修订。
+
 2026-10-20 VS-02B-08维护者复验：修复威吓插入阶段后另一席换错后备／恢复游标、Party跨await旧目标提交及放生等未接本地操作；接原ShowPartyExpBarPhase／HidePartyExpBarPhase，换人后退场参战者能按原方法获经验并进入整备。补真实双WS＋FormalRoomStore的单方输入重启、候选落盘失败重试、再次重启、去重和房间隔离；更正原WS成功例实际使用MemoryStore。最终定向51/51，typecheck／runtime build／生产build退出0；完整串行1006/1006、退出0（1028492.7826ms，无失败／取消／跳过），最终结果见[维护者验收](mvp-vs-02b08-review.md)。A限普通SEND_OUT切片，B原Party及Potion／文字视觉仍待用户浏览器验收，不宣称全机制。评审分支review/vs02b08-active-switch-fix，未合并／未推送。下一批普通捕获→本人本局备用持久化→原BALL菜单，战后换队另批；M6待处理成果不得丢，详细任务书仅本地。
 
 2026-10-19 VS-02B-08 战斗内主动换人：A 以稳定 pokemonId option 经原 CommandPhase POKEMON／TurnStart／SwitchSummonPhase 执行，个人 Party 视图分席换人，混合 FIGHT 与双方同轮换人可达下一输入；真实 Worker 4/4、真实双 WS 1/1、既有换人定向 23/23，最终完整串行 **1000/1000、退出 0**（1595758.506ms），typecheck／build 通过。B 接原 POKEMON→个人 Party UI，取消／拒绝／刷新清理和 outbox 门控保留，但双浏览器未执行，待用户验收。普通 SEND_OUT 之外、经验条阶段及主动换人专用故障／重启测试仍是缺口。详见 [VS-02B-08 记录](mvp-vs-02b08-active-switch.md)。

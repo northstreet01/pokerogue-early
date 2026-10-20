@@ -212,6 +212,12 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     this.starterSelectContainer.add(this.genOptionsText);
 
     this.updateGenOptions();
+    this.bindPointer(this.genOptionsText, (_pointer, _x, y) => {
+      if (this.statsMode || this.pendingPrompt) return false;
+      this.startCursorObj.setVisible(false);
+      this.setGenMode(true);
+      this.setCursor(Math.min(2, Math.floor(y / this.genOptionsText.height * 3)));
+    }, null);
 
     this.starterSelectGenIconContainers = new Array(gens.length).fill(null).map((_, i) => {
       const container = this.scene.add.container(149, 9);
@@ -257,6 +263,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     const startLabel = addTextObject(this.scene, 124, 162, i18next.t("common:start"), TextStyle.TOOLTIP_CONTENT);
     startLabel.setOrigin(0.5, 0);
     this.starterSelectContainer.add(startLabel);
+    this.bindPointer(startLabel, () => {}, Button.SUBMIT);
 
     this.startCursorObj = this.scene.add.nineslice(111, 160, 'select_cursor', null, 26, 15, 1, 1, 1, 1);
     this.startCursorObj.setVisible(false);
@@ -285,6 +292,13 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
         icon.setFrame(species.getIconId(defaultProps.female, defaultProps.formIndex, defaultProps.shiny));
         icon.setTint(0);
         this.starterSelectGenIconContainers[g].add(icon);
+        const speciesCursor = s;
+        this.bindPointer(icon, () => {
+          if (this.statsMode || this.pendingPrompt) return false;
+          this.startCursorObj.setVisible(false);
+          this.setGenMode(false);
+          this.setCursor(speciesCursor);
+        });
         this.iconAnimHandler.addOrUpdate(icon, PokemonIconAnimMode.NONE);
         s++;
       }

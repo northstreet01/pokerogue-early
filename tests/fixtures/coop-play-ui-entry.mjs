@@ -1,4 +1,8 @@
 export { default as CoopPlayPhase } from '../../src/coop/play-phase';
+export { default as BattleScene } from '../../src/battle-scene';
+export { default as UI } from '../../src/ui/ui';
+export { default as UiHandler } from '../../src/ui/ui-handler';
+export { default as CommandUiHandler } from '../../src/ui/command-ui-handler';
 export { default as PartyUiHandler, PartyOption } from '../../src/ui/party-ui-handler';
 export { default as StarterSelectUiHandler } from '../../src/ui/starter-select-ui-handler';
 export { Mode } from '../../src/ui/ui';

@@ -43,6 +43,13 @@ export default class TargetSelectUiHandler extends UiHandler {
       return false;
 
     this.setCursor(this.targets.indexOf(this.cursor) > -1 ? this.cursor : this.targets[0]);
+    for (const index of this.targets) {
+      const target = this.scene.getField()[index];
+      if (target) this.bindPointer(target.getSprite(), () => {
+        if (!this.targets.includes(index)) return false;
+        this.setCursor(index);
+      });
+    }
 
     return true;
   }

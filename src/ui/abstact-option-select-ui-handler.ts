@@ -76,6 +76,14 @@ export default abstract class AbstractOptionSelectUiHandler extends UiHandler {
     this.optionSelectBg.height = this.getWindowHeight();
 
     this.optionSelectText.setPositionRelative(this.optionSelectBg, 16, 9);
+    this.bindPointer(this.optionSelectText, (_pointer, _x, y) => {
+      const options = this.getOptionsWithScroll();
+      const cursor = Math.min(options.length - 1, Math.floor(y / this.optionSelectText.height * options.length));
+      const scrolling = [scrollUpLabel, scrollDownLabel].includes(options[cursor]?.label);
+      this.setCursor(cursor);
+      // Scroll arrows move the viewport, never activate the adjacent entry.
+      return !scrolling;
+    });
   }
 
   show(args: any[]): boolean {

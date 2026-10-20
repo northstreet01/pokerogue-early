@@ -39,6 +39,10 @@ export default class BallUiHandler extends UiHandler {
     optionsText.setPositionRelative(this.pokeballSelectBg, 42, 9);
     optionsText.setLineSpacing(12);
     this.pokeballSelectContainer.add(optionsText);
+    this.bindPointer(optionsText, (_pointer, _x, y) => {
+      const count = Object.keys(this.scene.pokeballCounts).length + 1;
+      this.setCursor(Math.min(count - 1, Math.floor(y / optionsText.height * count)));
+    });
 
     this.countsText = addTextObject(this.scene, 0, 0, '', TextStyle.WINDOW, { maxLines: 5 });
     this.countsText.setPositionRelative(this.pokeballSelectBg, 18, 9);

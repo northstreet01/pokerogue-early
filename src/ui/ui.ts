@@ -194,6 +194,13 @@ export default class UI extends Phaser.GameObjects.Container {
     return handler.processInput(button);
   }
 
+  processPointerInput(handler: UiHandler, select: () => boolean | void, button: Button | null): boolean {
+    if (this.overlayActive || !handler.active || this.getHandler() !== handler
+      || handler instanceof AwaitableUiHandler && handler.tutorialActive)
+      return false;
+    return (this.scene as BattleScene).processUiPointer(button, select);
+  }
+
   showText(text: string, delay?: integer, callback?: Function, callbackDelay?: integer, prompt?: boolean, promptDelay?: integer): void {
     if (prompt && text.indexOf('$') > -1) {
       const messagePages = text.split(/\$/g).map(m => m.trim());

@@ -13,6 +13,7 @@ import { Command } from '../ui/command-ui-handler';
 import { ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
 import { AddPokeballModifier } from '../modifier/modifier';
 import { PartyUiMode, PartyOption } from '../ui/party-ui-handler';
+import { getPokeballName } from '../data/pokeball';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -24,6 +25,7 @@ export default class CoopPlayPhase extends Phase {
   private budget!: HTMLDivElement;
   private roomLine!: HTMLDivElement;
   private controls!: HTMLDivElement;
+  private reserveLine!: HTMLDivElement;
   private socket: WebSocket | null = null;
   private consumer: any = null;
   private model: any = null;
@@ -92,7 +94,8 @@ export default class CoopPlayPhase extends Phase {
     this.budget = document.createElement('div'); this.budget.className = 'status';
     this.roomLine = document.createElement('div'); this.roomLine.className = 'status';
     this.controls = document.createElement('div');
-    this.panel.append(title, this.status, this.roomLine, this.budget, this.controls);
+    this.reserveLine = document.createElement('div'); this.reserveLine.className = 'status'; this.reserveLine.hidden = true;
+    this.panel.append(title, this.status, this.roomLine, this.budget, this.reserveLine, this.controls);
     this.overlay.append(this.panel);
     document.body.append(this.overlay);
     this.renderLobbyControls();
@@ -230,8 +233,8 @@ export default class CoopPlayPhase extends Phase {
           return;
         }
         if (action?.kind === 'fight') this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select', 'switch'].includes(action?.kind)) this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select', 'switch'].includes(action?.kind))
+        if (['preparation', 'switch-confirm', 'switch-select', 'switch', 'ball'].includes(action?.kind)) this.submitted = true;
+        if (['preparation', 'switch-confirm', 'switch-select', 'switch', 'ball'].includes(action?.kind))
           await this.scene.ui.setMode(Mode.MESSAGE);
         if (action?.kind === 'profile-ready') this.profileDirty = false;
         if (this.latest?.personal.decision.kind === 'wait-actions') this.setStatus('行动已提交，等待队友／结算…');
@@ -309,6 +312,7 @@ export default class CoopPlayPhase extends Phase {
     await this.scene.ui.setMode(Mode.MESSAGE);
     this.presentation ??= new CoopBattlePresentation(this.scene);
     await this.presentation.apply(snapshot, this.model.applied);
+    this.renderReserve();
     (this.scene as any).standbyPhase = this;
     (this.scene as any).waveCountText?.setText(String(snapshot.shared.waveIndex));
     this.battleSignature = signature;
@@ -563,8 +567,49 @@ export default class CoopPlayPhase extends Phase {
         this.setStatus(`换人菜单失败：${error?.message ?? error}`, true));
       return true;
     }
-    this.setStatus('该战斗菜单尚未接入；当前可验证 FIGHT／POKEMON', true);
+    if (command === Command.BALL) {
+      this.openCaptureMenu();
+      return true;
+    }
+    this.setStatus('该战斗菜单尚未接入；当前可验证 FIGHT／POKEMON／BALL', true);
     return true;
+  }
+
+  private openCaptureMenu() {
+    const snapshot = this.latest, epoch = this.epoch, decision = snapshot?.personal.decision;
+    if (!decision || decision.kind !== 'wait-actions' || !this.isPersonalInputCurrent(snapshot, epoch)
+      || this.seat === null) return;
+    const options = (decision.options ?? []).filter((option: any) => option.kind === 'ball');
+    this.controls.replaceChildren();
+    if (!options.length) {
+      this.setStatus('当前没有合法捕获目标或可用精灵球', true);
+      return;
+    }
+    const row = document.createElement('div'); row.className = 'row';
+    for (const option of options) {
+      row.append(this.button(`投出 ${getPokeballName(option.pokeballType)}`, () => {
+        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+        this.battleInputActive = false;
+        void this.scene.ui.setMode(Mode.MESSAGE).then(() =>
+          this.sendAction({ kind: 'ball', pokeballType: option.pokeballType, targetId: option.targetId },
+            '已投出精灵球，等待服务器裁定…'));
+      }, true));
+    }
+    row.append(this.button('返回', () => {
+      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+      this.battleInputActive = false;
+      void this.scene.ui.setMode(Mode.MESSAGE).then(() => this.openBattleCommand());
+    }));
+    this.controls.append(row);
+    this.setStatus('选择精灵球；取消可返回 Command');
+  }
+
+  private renderReserve() {
+    const reserve = this.model?.applied?.personal?.reserve ?? [];
+    this.reserveLine.hidden = reserve.length === 0;
+    if (!reserve.length) { this.reserveLine.textContent = ''; return; }
+    this.reserveLine.textContent = `本局备用：${reserve.map((entry: any) =>
+      `${entry.pokemon.name ?? `#${entry.id}`} Lv.${entry.pokemon.level}`).join('、')}`;
   }
 
   private openBattleCommand() {

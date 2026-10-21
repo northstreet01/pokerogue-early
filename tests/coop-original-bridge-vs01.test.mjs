@@ -14,6 +14,61 @@ import { createOriginalClientModel } from '../src/coop/original-client-model.mjs
 import { fullCaptureChoice, capturedPreparation } from './helpers/native-reserve-fixture.mjs';
 import { learningFixture } from './helpers/native-learning-fixture.mjs';
 import { naturalLearning } from './helpers/native-natural-learning.mjs';
+import { defaultTrainerRoute } from './helpers/native-default-trainer.mjs';
+
+test('VS-02B-12 default natural wave five: formal WS entry, first input restart, durable retry and isolated round',
+ {timeout:120000},async()=>{
+  const route=await defaultTrainerRoute();const checkpoint=route.c;await route.h.close();
+  const disk=await temporaryStore();let env,rejectRevision=null;
+  const fixture={seed:route.config.seed,identities:route.profiles.map(p=>p.trainer),
+    parties:[[1,4,7],[906,909,912]],eggState:{players:[[],[]]}};
+  const start=()=>{const real=new FormalRoomStore(disk.directory);return startEnv({fixture,initialCheckpoint:checkpoint,
+    store:{load:()=>real.load(),save:room=>{if(room.revision===rejectRevision)throw Error('trainer candidate failure');return real.save(room);}}});};
+  try{
+    env=await start();const room=await createRoom(env);
+    let state=await syncBoth(env,room.a,room.b,room.sa,room.sb);
+    assert.equal(state.sa.shared.waveIndex,5);assert.equal(state.sa.personal.decision.kind,'wait-actions');
+    const authority=env.service.rooms.get(room.roomId).checkpoint;
+    assert.equal(authority.nativeCheckpoint.battle.battleType,1);
+    assert.ok(state.sa.personal.decision.options.every(o=>o.kind!=='ball'));
+    const isolated=await createRoom(env),isolatedBefore=canonical(env.service.rooms.get(isolated.roomId).checkpoint);
+    const tokens=[room.a,room.b].map(c=>c.messages.find(m=>m.type==='welcome'&&m.roomId).resumeToken);
+    const resume=async()=>{const clients=[await connect(env,'trainer-A'),await connect(env,'trainer-B')];
+      for(const [seat,client]of clients.entries()){client.send({type:'resumeSeat',roomId:room.roomId,resumeToken:tokens[seat]});await client.wait(m=>m.type==='snapshot');}return clients;};
+    const actions=[state.sa,state.sb].map(s=>s.personal.decision.options.find(o=>o.kind==='fight'
+      &&[43,39,45].includes(s.personal.party[0].pokemon.fields.moveset[o.cursor]?.fields.moveId)
+      &&(o.target===null||o.target>=2)));
+    assert.ok(actions.every(Boolean));
+    const initial=state.sa,initialPeer=state.sb,before=canonical(authority);
+    const envelope={type:'submitAction',roomId:room.roomId,runId:room.runId,decisionId:initial.decisionId,
+      expectedRevision:initial.revision,actionId:'trainer-first',action:actions[0]};
+    room.a.send(envelope);const receipt=await room.a.wait(m=>m.type==='actionReceipt'&&m.actionId===envelope.actionId);
+    assert.equal(receipt.accepted,true);
+    await env.close();env=await start();let [a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),before);
+    assert.deepEqual(env.service.rooms.get(room.roomId).inputs,{0:actions[0]});
+    rejectRevision=initial.revision+1;const failure=b.next(m=>m.type==='error'&&m.code==='STORAGE_FAILED');
+    await submit(b,state.sb,actions[1]);await failure;
+    const failed=(await disk.store.load()).find(r=>r.roomId===room.roomId);
+    assert.equal(canonical(failed.checkpoint),before);assert.deepEqual(failed.inputs,{0:actions[0],1:actions[1]});
+    await env.close();rejectRevision=null;env=await start();[a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    if(state.sa.revision===initial.revision)state=await syncBoth(env,a,b,await a.waitRevisionAfter(initial.revision),await b.waitRevisionAfter(initial.revision));
+    assert.equal(state.sa.personal.decision.kind,'wait-actions');assert.ok(state.sa.revision>initial.revision);
+    for(const [seat,snapshot]of [state.sa,state.sb].entries()){
+      const old=[initial,initialPeer][seat].personal.party[0].pokemon.fields.moveset;
+      assert.equal(snapshot.personal.party[0].pokemon.fields.moveset[actions[seat].cursor].fields.ppUsed,old[actions[seat].cursor].fields.ppUsed+1);
+    }
+    a.send(envelope);assert.deepEqual(await a.wait(m=>m.type==='actionReceipt'&&m.actionId===envelope.actionId),receipt);
+    const conflict=a.next(m=>m.type==='error'&&m.code==='ACTION_ID_CONFLICT');
+    a.send({...envelope,action:{...actions[0],cursor:99}});await conflict;
+    assert.equal(canonical((await disk.store.load()).find(r=>r.roomId===isolated.roomId).checkpoint),isolatedBefore);
+    const committed=canonical(env.service.rooms.get(room.roomId).checkpoint);
+    await env.close();env=await start();[a,b]=await resume();await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),committed);
+  }finally{if(env)await env.close();await disk.cleanup();}
+ });
 
 // VS-01 internal seam proof: two real WebSocket clients, the formal coordinator,
 // the eight-method original adapter, a room-scoped original Worker, real

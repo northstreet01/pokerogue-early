@@ -51,7 +51,7 @@ import { CheckTrappedAbAttr, applyCheckTrappedAbAttrs } from '../data/ability';
 import * as Utils from '../utils';
 import { Command } from '../ui/command-ui-handler';
 import { Moves } from '../data/enums/moves';
-import { requireContract as check } from '../battle-core/coop-contract.mjs';
+import { canonical, requireContract as check } from '../battle-core/coop-contract.mjs';
 import { advanceProgressionChoice } from '../battle-core/progression-choice-runner.mjs';
 import { createLearnDecision, inspectLearnMove } from '../battle-core/learn-command.mjs';
 import { recoverVictoryParties } from '../battle-core/victory-aftermath-runner.mjs';
@@ -167,6 +167,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     if (!p.isFainted(true)) root.field.add(p);
   }
   c.arena.scene = root;
+  if (c.battle?.trainer) c.battle.trainer.scene = root;
   const trackers = [root, ...views].map(scene => createRuleTaskTracker(scene));
   const disposePorts = [root, ...views].map(scene => bindPresentationPort(scene, (kind, payload) => events.push({ kind, ...payload })));
   root.deferEncounterPersistence = () => {
@@ -181,7 +182,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.trainer = root.arenaPlayer = root.arenaEnemy = root.arenaNextEnemy = new DisplayTarget();
   root.charSprite = { showCharacter: () => Promise.resolve(), hide: () => Promise.resolve() };
   root.showFieldOverlay = root.hideFieldOverlay = () => Promise.resolve();
-  root.pbTray = root.pbTrayEnemy = { hide() {} };
+  root.pbTray = root.pbTrayEnemy = { hide() {}, showPbTray() {} };
   root.modifierBar = root.enemyModifierBar = { updateModifiers() {} };
   root.partyExpBar = {
     showPokemonExp(pokemon, exp) {
@@ -203,9 +204,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.add = { existing() {}, sprite: (..._args: any[]) => new DisplayTarget() };
   root.load = { atlas() {}, image() {}, spritesheet() {}, audio() {},
     isLoading() { return false; }, start() {},
-    once(event, fn) { if (event === 'complete') void Promise.resolve().then(() => {
-      try { fn(); } catch (error) { console.error('TRAINER_LOAD_CALLBACK', error); }
-    }); } };
+    once(event, fn) { if (event === 'complete') schedule(fn); } };
   root.anims = { generateFrameNames() { return []; }, create() {} };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
   root.validateAchv = (achv) => { intents.push({ kind: 'achievement-check', id: achv.id }); return false; };
@@ -288,7 +287,17 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   };
   const generate = BattleScene.prototype.generateEnemyModifiers;
   root.generateEnemyModifiers = () => observeRulePromise(root, generate.call(root));
-  root.newBattle = (...args) => BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true);
+  root.newBattle = (...args) => {
+    const wave = args[0] ?? (root.currentBattle?.waveIndex ?? 0) + 1;
+    const fixed = wave === 5 ? fixedBattles[wave] : null;
+    const oldDouble = fixed?.double;
+    // Only the synchronous original constructor reads this config. Restore it
+    // before any asynchronous encounter work or subsequent request can run.
+    try {
+      if (fixed) fixed.double = true;
+      return BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true);
+    } finally { if (fixed) fixed.double = oldDouble; }
+  };
   function bindPhase(p, existingScope?: number) {
     // Capture is personal, but its Victory starts the shared encounter/EXP
     // lifecycle. Do not let the catcher's temporary reserve view own it.
@@ -383,7 +392,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         const battle = Object.create(c.battle); battle.getBattlerCount = () => 1;
         patch((p as any).scene, 'currentBattle', battle);
       }
-      if (p instanceof SwitchSummonPhase) {
+      if (p instanceof SwitchSummonPhase && (p as any).player) {
         (p as any).fieldIndex = scope;
         const swap = SwitchSummonPhase.prototype.switchAndSummon;
         const summon = SummonPhase.prototype.summon;
@@ -1050,11 +1059,26 @@ export async function nextNativeBattle(runtime, checkpoint) {
   check(![0,1].some(seat => hasLegacyCaptures(c,seat)), 'LEGACY_CAPTURE_PENDING');
   const fixed = fixedBattles[c.battle.waveIndex + 1];
   check(!fixed || (c.battle.waveIndex + 1 === 5 && fixed.battleType === BattleType.TRAINER), 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
-  const oldDouble = fixed?.double;
-  if (fixed) fixed.double = true;
-  try {
     const result = await advanceNextBattle(c, codec, {
       phaseKind: p => p.constructor.name,
+      validateTrainerTransition(before, after) {
+        const expected = codec.restore(codec.capture(before));
+        const binding = bindNativeScene(expected, runtime.scene.gameData);
+        try {
+          expected.battle.waveIndex = after.battle.waveIndex;
+          expected.arena.updatePoolsForTimeOfDay();
+          expected.arena.removeAllTags();
+          for (const id of before.roster.field.slice(0, 2)) {
+            const pokemon = expected.roster.entries.find(e => e.pokemon.id === id)?.pokemon;
+            if (pokemon) { pokemon.resetTurnData(); pokemon.resetSummonData(); }
+          }
+          const reference = codec.capture(expected), actual = codec.capture(after);
+          const resets = s => s.roster.entries.filter(e => e.owner !== null)
+            .map(e => ({id:e.pokemon.fields.id, summonData:e.pokemon.fields.summonData??null, turnData:e.pokemon.fields.turnData??null}));
+          return canonical(reference.arena) === canonical(actual.arena)
+            && canonical(resets(reference)) === canonical(resets(actual));
+        } finally { binding.dispose(); }
+      },
       validateBranch(candidate) {
         check(candidate.battle.battleType === 0 || candidate.battle.waveIndex === 5
           && candidate.battle.battleType === BattleType.TRAINER, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
@@ -1070,9 +1094,6 @@ export async function nextNativeBattle(runtime, checkpoint) {
         && candidate.battle.enemyParty.some(p => p.id === m.pokemonId) && m.stackCount > 0 && m.virtualStackCount === 0)
     }, { decisionId: `native-${c.battle.waveIndex + 1}-0` });
     return { checkpoint: codec.capture(result.context), events: result.events, intents };
-  } finally {
-    if (fixed) fixed.double = oldDouble;
-  }
 }
 
 function releaseNativePartyMember(c, binding, seat, index, callback) {

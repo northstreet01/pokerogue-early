@@ -123,6 +123,11 @@ test('fresh default collection reaches original wave five, restores Trainer call
     assert.deepEqual(entered.checkpoint.roster.field.slice(0,2),[null,null],'original Return awaits original Summon');
     const names=entered.events.filter(e=>e.kind==='phase-start').map(e=>e.phase);
     for(const name of ['NewBattlePhase','ReturnPhase','ShowTrainerPhase','NextEncounterPhase'])assert.ok(names.includes(name),name);
+    assert.ok(entered.events.some(e=>e.kind==='dialogue'&&e.text));
+    const view=await h.request('native-project',{checkpoint:entered.checkpoint,seat:0});
+    assert.ok(view.shared.trainer.name);
+    assert.equal(typeof view.shared.trainer.spriteKey,'string');
+    assert.equal(Object.hasOwn(view.shared,'enemyParty'),false,'public projection must not leak the enemy party');
     await h.close();h=await createOriginalRuleHost(route.config);
     const restored=await h.request('native-next',JSON.parse(JSON.stringify(before)));
     assert.deepEqual(restored,entered,'same original trainer, variant, enemy party and RNG after restart');
@@ -151,6 +156,10 @@ test('fresh default collection reaches original wave five, restores Trainer call
     for(const seat of [0,1])assert.equal(owned(c,seat)[0].pokemon.fields.moveset[inputs[seat].cursor].fields.ppUsed,pp[seat]+1);
     assert.ok(round.events.some(e=>e.kind==='phase-start'&&e.phase==='EnemyCommandPhase'));
     assert.ok(round.events.some(e=>e.kind==='phase-start'&&e.phase==='MoveEffectPhase'));
+    const animation=round.events.find(e=>e.kind==='battle-animation');
+    assert.ok(animation,'the round must expose a replayable animation event');
+    assert.ok(animation.sourceId&&animation.targetId);
+    assert.ok(animation.moveId!==undefined||animation.commonAnim!==undefined);
   }finally{await h.close();}
 });
 

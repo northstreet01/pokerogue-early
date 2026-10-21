@@ -314,6 +314,10 @@ export default class CoopPlayPhase extends Phase {
     await this.scene.ui.setMode(Mode.MESSAGE);
     this.presentation ??= new CoopBattlePresentation(this.scene);
     await this.presentation.apply(snapshot, this.model.applied);
+    await this.presentation.playEvents(snapshot.events ?? [], {
+      revision: snapshot.revision, decisionId: snapshot.decisionId,
+      isCurrent: () => this.epoch === snapshot.connectionEpoch && !this.disposed,
+    });
     this.renderReserve();
     (this.scene as any).standbyPhase = this;
     (this.scene as any).waveCountText?.setText(String(snapshot.shared.waveIndex));

@@ -373,6 +373,37 @@ test('a rejected personal receipt restores the same preparation decision control
   assert.equal(p.latest.personal.decision.players.rewardResolved, false);
 });
 
+test('authoritative snapshot events are replayed once in order and never mutate rule state', async () => {
+  const calls = [];
+  const scene = { ui: {
+    setMode: async () => {},
+    showText: (text, _delay, callback) => { calls.push(text); callback?.(); },
+    showDialogue: (text, _speaker, _arg, callback) => { calls.push(text); callback?.(); },
+  }, tweens: { add: config => { config.onComplete?.(); return { stop() {} }; }, killTweensOf() {} }, getField: () => [] };
+  const presentation = new api.CoopBattlePresentation(scene);
+  const events = [
+    { kind: 'message', text: 'first', eventId: 'room:1:0', eventIndex: 0 },
+    { kind: 'dialogue', text: 'trainer', speaker: 'Youngster', eventId: 'room:1:1', eventIndex: 1 },
+  ];
+  await presentation.playEvents(events, { revision: 1, isCurrent: () => true });
+  assert.deepEqual(calls, ['first', 'trainer']);
+  await presentation.playEvents(events, { revision: 1, isCurrent: () => true });
+  assert.deepEqual(calls, ['first', 'trainer'], 'a replayed snapshot event id is not displayed twice');
+});
+
+test('trainer entrance events reuse the original trainer sprite and tween without server state', async () => {
+  const positions = [], tweens = [];
+  const trainer = { setVisible(value) { positions.push(['visible', value]); return this; },
+    setX(value) { positions.push(['x', value]); return this; } };
+  const scene = { trainer, tweens: { add: config => { tweens.push(config); config.onComplete?.(); return { stop() {} }; },
+    killTweensOf() {} } };
+  const presentation = new api.CoopBattlePresentation(scene);
+  await presentation.playEvents([{ kind: 'phase-start', phase: 'ShowTrainerPhase', eventId: 'trainer:1',
+    eventIndex: 0 }], { revision: 1, isCurrent: () => true });
+  assert.deepEqual(positions, [['visible', true], ['x', -72]]);
+  assert.equal(tweens[0].x, 106);
+});
+
 test('original display uses authoritative biome and day/night offset across seats and refresh', async () => {
   const sprite = () => ({ setTexture() { return this; }, setPosition() { return this; }, setVisible() { return this; } });
   const base = player => ({ base: sprite(), player, props: [], add() {}, setPosition() { return this; }, setVisible() { return this; } });

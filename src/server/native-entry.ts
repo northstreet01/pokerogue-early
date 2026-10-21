@@ -276,6 +276,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     return Promise.resolve();
   },
     showDialogue: (...args: any[]) => {
+      events.push({ kind: 'dialogue', text: args[0] ?? null, speaker: args[1] ?? null });
       const callback = [...args].reverse().find(arg => typeof arg === 'function');
       schedule(callback);
     },
@@ -284,9 +285,14 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       events.push({ kind: 'message', text, ...(owner >= 0 ? {scope:owner} : {}) }); schedule(callback);
     } };
   root.damageNumberHandler = { add: (p, amount, result = HitResult.EFFECTIVE, critical = false) =>
-    events.push({ kind: 'damage-display', pokemonId: p.id, amount, result, critical }) };
+    events.push({ kind: 'damage-display', pokemonId: p.id, amount, result, critical, remainingHp: p.hp }) };
   BattleAnim.prototype.play = function (scene: any, callback) {
-    scene.nativeEvents.push({ kind: 'battle-animation', animation: this.constructor.name });
+    const animation = this as any;
+    const event: any = { kind: 'battle-animation', animation: this.constructor.name,
+      sourceId: animation.user?.id ?? null, targetId: animation.target?.id ?? null };
+    if (animation.move !== undefined) event.moveId = animation.move;
+    if (animation.anim !== undefined) event.commonAnim = animation.anim;
+    scene.nativeEvents.push(event);
     scene.time.delayedCall(0, callback);
   };
   const update = BattleScene.prototype.updateModifiers;
@@ -1270,6 +1276,15 @@ export function projectNativeSnapshot(runtime, payload) {
     battleType: c.battle.battleType,
     battleSpec: c.battle.battleSpec,
     biome: c.arena.biomeType,
+    // Public trainer presentation only; never expose the enemy party, seed or AI state.
+    trainer: c.battle.battleType === BattleType.TRAINER && c.battle.trainer ? {
+      type: c.battle.trainer.config.trainerType,
+      variant: c.battle.trainer.variant,
+      name: c.battle.trainer.name ?? null,
+      partnerName: c.battle.trainer.partnerName ?? null,
+      spriteKey: c.battle.trainer.getKey(),
+      double: c.battle.trainer.isDouble(),
+    } : null,
     // Public day/night presentation schedule; never expose the seed or RNG state.
     waveCycleOffset: c.scene.waveCycleOffset,
     terrainColorRatio: c.arena.getBgTerrainColorRatioForBiome(),

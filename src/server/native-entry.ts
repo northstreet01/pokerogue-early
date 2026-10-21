@@ -5,7 +5,7 @@ import { NewBattlePhase, EncounterPhase, ShowTrainerPhase, SummonPhase, SummonMi
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
-import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase } from '../phases';
+import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase, TrainerVictoryPhase, MoneyRewardPhase } from '../phases';
 import { SelectModifierPhase } from '../phases';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase } from '../phases';
 import { Mode } from '../ui/ui';
@@ -86,7 +86,7 @@ class DisplayTarget {
 
 const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, AttemptCapturePhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, AttemptCapturePhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
@@ -180,6 +180,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.updateFieldScale = root.setFieldScale = () => Promise.resolve();
   root.updateUIPositions = root.updateWaveCountText = root.updateMoneyText = root.updateScoreText = () => {};
   root.trainer = root.arenaPlayer = root.arenaEnemy = root.arenaNextEnemy = new DisplayTarget();
+  root.showEnemyTrainer = root.hideEnemyTrainer = () => {};
+  root.validateVoucher = () => false;
   root.charSprite = { showCharacter: () => Promise.resolve(), hide: () => Promise.resolve() };
   root.showFieldOverlay = root.hideFieldOverlay = () => Promise.resolve();
   root.pbTray = root.pbTrayEnemy = { hide() {}, showPbTray() {} };
@@ -208,7 +210,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.anims = { generateFrameNames() { return []; }, create() {} };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
   root.validateAchv = (achv) => { intents.push({ kind: 'achievement-check', id: achv.id }); return false; };
-  root.validateVoucher = () => { throw new Error('VOUCHER_POLICY_UNCONFIRMED'); };
+  root.validateVoucher = () => false;
   root.time = { delayedCall: (delay, fn, args = [], scope = null) => schedule(() => fn.apply(scope, args), delay) };
   root.time.addEvent = config => {
     check(config.repeat !== -1, 'UNSUPPORTED_REPEATING_RULE_TIMER');
@@ -766,6 +768,9 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
           return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
         }
       }
+      if (p instanceof MoneyRewardPhase)
+        throw Object.assign(new Error('TRAINER_MONEY_REWARD_POLICY_UNCONFIRMED'),
+          { code: 'TRAINER_MONEY_REWARD_POLICY_UNCONFIRMED' });
       check(supportsPhase(p), 'UNSUPPORTED_NATIVE_ENTRY_PHASE');
       const result = await binding.execute(p);
       const id = `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`;

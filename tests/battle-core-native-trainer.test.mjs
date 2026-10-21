@@ -72,3 +72,20 @@ test('default route resumes after a real trainer enemy faint without committing 
     assert.equal(c.battle.battleType,1);
   }finally{await h.close();}
 });
+
+test('default route stops at the explicit trainer money-policy boundary after victory',async()=>{
+  const {h,c:source}=await defaultTrainerRoute();
+  try{
+    let c=(await h.request('native-next',source)).checkpoint;
+    c=(await h.request('native-run-to-boundary',c)).checkpoint;
+    let boundary=null;
+    for(let round=0;round<16&&!boundary;round++){
+      try{
+        const result=await progressDefault(h,c);
+        c=result.checkpoint;
+        if(c.decision.kind==='continuing')c=(await h.request('native-run-to-boundary',c)).checkpoint;
+      }catch(error){boundary=error;}
+    }
+    assert.equal(boundary?.code,'TRAINER_MONEY_REWARD_POLICY_UNCONFIRMED');
+  }finally{await h.close();}
+});

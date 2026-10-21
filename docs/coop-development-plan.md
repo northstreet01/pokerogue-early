@@ -1,5 +1,9 @@
 # 分模块开发计划与进度
 
+本轮最终验证（VS-02B-12维护者，源码59c2bb25）：完整串行1071/1071、退出0，1086494.5792ms，无失败/取消/跳过/todo；typecheck/Worker/生产build通过（build52.34秒）。当前仍不是完整训练家遭遇通过：A部分、B未开始、浏览器未执行，下一片12R只补倒下/后备和胜利到6。
+
+2026-10-21 VS-02B-12维护者复验：默认收藏真实selected→前4波→原wave5 Trainer召回/遭遇/召唤→双方合法输入及一个非击倒FIGHT回合已获自动生产证据；源码59c2bb25，native2/2、正式双WS1/1/typecheck通过，最终构建/完整回归见[复验](mvp-vs-02b12-review.md)。直接修复异步场景/端口、事务保护和原状态重置核验。正常攻击遇训练家敌方倒下仍报UNSUPPORTED_COOP_ENEMY_FAINT，后备/胜利/奖金/整备/wave6未完成；A整体部分、B未开始，浏览器未执行，不算训练家或MVP通过。下一片12R优先关闭该倒下/补位生产接缝再接胜利到6，继续用当前默认收藏，不等待M6或固定卡比兽/露力丽。
+
 2026-10-21 VS-02B-12：wave5固定训练家入口部分接入（只放行wave5、原Trainer/NewBattle/NextEncounter/ShowTrainer，训练家显示端口）；自然路径已构造训练家但NextEncounter异步闭包仍报INCOMPLETE_NATIVE_PHASE，没有wave5战斗/胜利/整备/wave6。next-battle 22/22、typecheck/Worker/build通过；完整回归未跑，B未开始。详见[本批记录](mvp-vs-02b12-wave5.md)。
 
 2026-10-21 VS-02B-11R维护者复验：自然学招有限自动生产链通过验收（原合法Azurill四招＋Snorlax，正常战斗wave4升6→泡沫光线替换/放弃→恢复→新招真实FIGHT），正式双WS从自然检查点验证写盘失败/重启/去重/隔离。直接修复挣扎选项、原缺员召唤/个人下标、原过关半血恢复、PostTurnStatusEffect及展示事件默认值。native15/15、学招WS4/4、typecheck/Worker/build通过；最终完整串行1068/1068、退出0（1067866.5445ms，无失败/取消/跳过），生产build约74秒。B原UI浏览器待用户，合法资料前置条件见[手测清单](vs02b11r-manual-acceptance.md)。源码/测试b4e856a3，独立评审分支未合并/未推送；[维护者复验](mvp-vs-02b11r-review.md)。下一片只接当前硬阻断原wave5 Youngster→wave6，不删除固定遭遇、不扩大整套训练家/进化/M6。

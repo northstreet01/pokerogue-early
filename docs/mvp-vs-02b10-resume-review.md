@@ -37,3 +37,5 @@
 17a10199首轮全套暴露上次9b22a02c新增的强制换人scope检查不兼容既有共享场景runner：原合法modal Switch保存null scope，但fieldIndex仍是唯一owner。未删除owner断言、未改冻结fixture；在phase-state capture／restore把这个旧表示规范化为原fieldIndex，保留当前decision的scope=seat、modal=true、doReturn=false和fieldIndex=seat检查。显式冲突scope仍拒绝，原shared/null表示与显式正确scope执行出同一原换人结果。
 
 修订定向64/64、退出0，41139.7893ms，含原faint／battle-items／phase-state及本批队伍。新增明确冲突scope及两个标志拒绝，旧null恢复等价；首轮全套已主动中止，工具退出1、没有完整TAP收尾，不计任何全套通过。原日志保留full-interrupted-switch-scope.tap，执行HEAD／源码清单另存execution-first文件；修复后从新提交重新执行完整串行。
+
+75ca4d80第二轮全套又定位到既有replacement负例：测试在断言外调用codec.restore构造isModal=false的损坏输入，新的严格检查已在此处拒绝。改为明确断言restore抛INVALID_SWITCH_DECISION，再用内存损坏的live phase验证执行入口也拒绝，且原context不变；没有放宽生产规则或删掉负例。replacement定向10/10、退出0，9539.9491ms。第二轮同样主动中止，工具退出1、无完整TAP收尾，不计全套通过；保留full-interrupted-negative-assertion.tap。此次仅测试／文档变更，75ca4d80的最终类型检查／Worker构建／生产build对应源码不变（build退出0、49.69s），最终全套会从更新后的测试提交重新执行。

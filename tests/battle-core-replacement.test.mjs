@@ -81,7 +81,10 @@ test('forced-switch inputs reject wrong seat, stale or invalid instances and uns
     await assert.rejects(advanceForcedSwitch(c,inputs,codec,driver,{decisionId:'invalid-switch'}));assert.deepEqual(codec.capture(c),saved);
   }
   const bad=copy(saved);bad.continuation.currentPhase.phase.fields.isModal.value=false;
-  const malformed=codec.restore(bad);await assert.rejects(advanceReplacement(malformed,inputs),/UNSAFE_SWITCH_BOUNDARY/);
+  assert.throws(()=>codec.restore(bad),/INVALID_SWITCH_DECISION/);
+  const malformed=codec.restore(saved);malformed.continuation.currentPhase.phase.isModal=false;
+  await assert.rejects(advanceReplacement(malformed,inputs),/INVALID_SWITCH_DECISION/);
+  assert.deepEqual(codec.capture(c),saved);
 });
 
 test('resumed summon stages require explicit resume and never re-enter execute/start',async()=>{

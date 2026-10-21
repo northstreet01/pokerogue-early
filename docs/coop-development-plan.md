@@ -1,5 +1,7 @@
 # 分模块开发计划与进度
 
+2026-10-21 VS-02B-11R维护者复验：自然学招有限自动生产链通过验收（原合法Azurill四招＋Snorlax，正常战斗wave4升6→泡沫光线替换/放弃→恢复→新招真实FIGHT），正式双WS从自然检查点验证写盘失败/重启/去重/隔离。直接修复挣扎选项、原缺员召唤/个人下标、原过关半血恢复、PostTurnStatusEffect及展示事件默认值。native15/15、学招WS4/4、typecheck/Worker/build通过；最终完整串行1068/1068、退出0（1067866.5445ms，无失败/取消/跳过），生产build约74秒。B原UI浏览器待用户，合法资料前置条件见[手测清单](vs02b11r-manual-acceptance.md)。源码/测试b4e856a3，独立评审分支未合并/未推送；[维护者复验](mvp-vs-02b11r-review.md)。下一片只接当前硬阻断原wave5 Youngster→wave6，不删除固定遭遇、不扩大整套训练家/进化/M6。
+
 2026-10-21 VS-02B-11R 自然学招：修复 SummonMissingPhase 与存活席位 requiredSeats，让倒下/空场席位不再被要求提交；诊断案例已越过原召唤，但仍未自然触发 LevelUp→LearnMove，后续有空 fight options 的 INVALID_DECISION 和未支持 native phase 阻断。受影响 native 定向75/75、typecheck／Worker／build通过，完整串行1059/1059无失败（但无自然学招用例）；没有自然成功、正式双 WS 或浏览器。详见[本批记录](mvp-vs-02b11r-natural-learn.md)。
 
 2026-10-21 VS-02B-11 维护者复验：独立修复 phase scope 比较／席位1错绑、暂停队列重复、Worker 自动学招显示端口、原后备 fieldIndex=-1、学招私有投影隔离、Confirm/Summary 显示生命周期与二次放弃／重选。真实 Worker＋既有学招26/26、原UI控制器49/49、正式双WS／FormalRoomStore学招故障恢复2/2通过；后者从明确合成学招起点开始，新招实际FIGHT通过。普通战斗自然触发链仍未关闭，浏览器待用户，A/B整体部分通过，不扩进化。最终完整串行1059/1059、退出0（1043319.5987ms，无失败／取消／跳过），typecheck／Worker／生产build均0（build51.18s）。源码／测试基点f429331d，独立评审分支未合并／未推送；详见[维护者复验](mvp-vs-02b11-review.md)。

@@ -1,6 +1,6 @@
 import BattleScene from '../battle-scene';
 import Pokemon, { FieldPosition } from '../field/pokemon';
-import { NewBattlePhase, EncounterPhase, SummonPhase, PostSummonPhase, ToggleDoublePositionPhase,
+import { NewBattlePhase, EncounterPhase, SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase,
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
@@ -70,7 +70,7 @@ class DisplayTarget {
   destroy() {}
 }
 
-const supportedPhases = [SummonPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase,
+const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
   FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, AttemptCapturePhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
@@ -279,7 +279,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       : p.player === true || p instanceof CommandPhase || p instanceof CheckSwitchPhase || p instanceof SwitchPhase ? p.fieldIndex
         : p.pokemon?.isPlayer() ? c.roster.entries.find(e => e.pokemon === p.pokemon)?.owner : null;
     phaseScopes.set(p, scope);
-    if (p instanceof SummonPhase && (p as any).player) (p as any).partyMemberIndex = 0;
+    if (p instanceof SummonPhase && (p as any).player && !(p instanceof SummonMissingPhase))
+      (p as any).partyMemberIndex = 0;
     p.scene = scope === null ? root : views[scope];
     return scope;
   }
@@ -491,7 +492,11 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
 function actionDecision(c, root, id) {
   const saved = c.battle.captureRandomState();
   try {
-    const options = withOriginalRules({ ...c, sceneRandom: new SceneRandom(c.sceneRandom.capture()) }, () => Object.fromEntries([0, 1].map(seat => {
+    const seats = [0, 1].filter(seat => {
+      const pokemon = root.getPlayerField()[seat];
+      return pokemon && pokemon.isActive(true) && pokemon.hp > 0;
+    });
+    const options = withOriginalRules({ ...c, sceneRandom: new SceneRandom(c.sceneRandom.capture()) }, () => Object.fromEntries(seats.map(seat => {
       const pokemon = root.getPlayerField()[seat];
       const switchOptions = c.roster.entries.filter(e => e.owner === seat && e.group === 'party'
         && e.index > 0 && e.pokemon.hp > 0 && !c.roster.field.includes(e.pokemon.id))
@@ -519,7 +524,7 @@ function actionDecision(c, root, id) {
         ...captureOptions,
       ]];
     })));
-    return { id, kind: 'wait-actions', requiredSeats: [0, 1], options };
+    return { id, kind: 'wait-actions', requiredSeats: seats, options };
   } finally { c.battle.restoreRandomState(saved); }
 }
 
@@ -685,6 +690,21 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
       const next = binding.root.phaseQueuePrepend.at(-1) ?? binding.root.phaseQueue[0];
       if (next instanceof SelectModifierPhase) return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
       const p = selectNextPhase(binding.root, () => populatePhaseQueue(binding.root, () => new TurnInitPhase(binding.root))).phase;
+      if (p instanceof SummonMissingPhase) {
+        const seat = binding.bindPhase(p);
+        const party = c.roster.entries.filter(entry => entry.owner === seat && entry.group === 'party')
+          .sort((a, b) => a.index - b.index);
+        const current = party[(p as any).partyMemberIndex];
+        if (!current || current.pokemon.isFainted()) {
+          const replacement = party.find(entry => entry.pokemon.hp > 0);
+          if (!replacement) {
+            await binding.execute(p, () => p.end());
+            c.decision = { id: `native-${c.battle.waveIndex}-${index + 1}`, kind: 'continuing', requiredSeats: [], reason: 'effects' };
+            continue;
+          }
+          (p as any).partyMemberIndex = replacement.index;
+        }
+      }
       if (p instanceof LearnMovePhase) {
         const partyIndex = (p as any).partyMemberIndex, moveId = (p as any).moveId;
         const seat = binding.bindPhase(p);
@@ -837,7 +857,8 @@ export async function submitNativeActions(runtime, payload) {
           const p = selectNextPhase(binding.root, () => { throw new Error('NATIVE_COMMAND_QUEUE_EMPTY'); }).phase;
           await binding.execute(p);
         }
-        check([0, 1].every(seat => [Command.FIGHT, Command.POKEMON, Command.BALL].includes(candidate.battle.turnCommands[seat]?.command)),
+        const inputSeats = Object.keys(inputs).map(Number);
+        check(inputSeats.every(seat => [Command.FIGHT, Command.POKEMON, Command.BALL].includes(candidate.battle.turnCommands[seat]?.command)),
           'INCOMPLETE_NATIVE_COMMANDS');
         intents = binding.intents;
         return { completed: true, pendingTasks: 0, events: binding.events, grants: [] };

@@ -52,14 +52,23 @@ test('fresh default collection reaches original wave five, restores Trainer call
   }finally{await h.close();}
 });
 
-test('default route identifies trainer faint as an unimplemented boundary without committing the failed candidate',async()=>{
+test('default route resumes after a real trainer enemy faint without committing a failed candidate',async()=>{
   const {h,c:source}=await defaultTrainerRoute();
   try{
     let c=(await h.request('native-next',source)).checkpoint;
     c=(await h.request('native-run-to-boundary',c)).checkpoint;
-    c=(await progressDefault(h,c)).checkpoint;
-    const before=structuredClone(c);
-    await assert.rejects(h.request('native-run-to-boundary',c),/UNSUPPORTED_COOP_ENEMY_FAINT/);
-    assert.deepEqual(c,before);
+    let sawFaint=false;
+    for(let round=0;round<12;round++){
+      const result=await progressDefault(h,c);
+      const phases=result.events.filter(e=>e.kind==='phase-start').map(e=>e.phase);
+      if(phases.includes('FaintPhase'))sawFaint=true;
+      c=result.checkpoint;
+      if(sawFaint&&c.decision.kind==='continuing')
+        c=(await h.request('native-run-to-boundary',c)).checkpoint;
+      if(sawFaint&&c.decision.kind==='wait-actions')break;
+    }
+    assert.ok(sawFaint,'ordinary trainer attacks must produce a real enemy faint');
+    assert.equal(c.decision.kind,'wait-actions');
+    assert.equal(c.battle.battleType,1);
   }finally{await h.close();}
 });

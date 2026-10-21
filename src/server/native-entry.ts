@@ -289,14 +289,14 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.generateEnemyModifiers = () => observeRulePromise(root, generate.call(root));
   root.newBattle = (...args) => {
     const wave = args[0] ?? (root.currentBattle?.waveIndex ?? 0) + 1;
-    const fixed = wave === 5 ? fixedBattles[wave] : null;
-    const oldDouble = fixed?.double;
-    // Only the synchronous original constructor reads this config. Restore it
-    // before any asynchronous encounter work or subsequent request can run.
-    try {
-      if (fixed) fixed.double = true;
-      return BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true);
-    } finally { if (fixed) fixed.double = oldDouble; }
+    const fixed = fixedBattles[wave]?.battleType === BattleType.TRAINER ? fixedBattles[wave] : null;
+  const oldDouble = fixed?.double;
+  // Only the synchronous original constructor reads this config. Restore it
+  // before any asynchronous encounter work or subsequent request can run.
+  try {
+    if (fixed) fixed.double = true;
+    return BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true);
+  } finally { if (fixed) fixed.double = oldDouble; }
   };
   function bindPhase(p, existingScope?: number) {
     // Capture is personal, but its Victory starts the shared encounter/EXP
@@ -1058,7 +1058,7 @@ export async function nextNativeBattle(runtime, checkpoint) {
   const c = codec.restore(checkpoint), intents = [];
   check(![0,1].some(seat => hasLegacyCaptures(c,seat)), 'LEGACY_CAPTURE_PENDING');
   const fixed = fixedBattles[c.battle.waveIndex + 1];
-  check(!fixed || (c.battle.waveIndex + 1 === 5 && fixed.battleType === BattleType.TRAINER), 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
+  check(!fixed || fixed.battleType === BattleType.TRAINER, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
     const result = await advanceNextBattle(c, codec, {
       phaseKind: p => p.constructor.name,
       validateTrainerTransition(before, after) {
@@ -1080,8 +1080,8 @@ export async function nextNativeBattle(runtime, checkpoint) {
         } finally { binding.dispose(); }
       },
       validateBranch(candidate) {
-        check(candidate.battle.battleType === 0 || candidate.battle.waveIndex === 5
-          && candidate.battle.battleType === BattleType.TRAINER, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
+        check(candidate.battle.battleType === 0 || candidate.battle.battleType === BattleType.TRAINER,
+          'UNSUPPORTED_NATIVE_NEXT_BATTLE');
         check(candidate.battle.battleSpec === 0 && candidate.battle.waveIndex % 10 !== 0, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
         check(candidate.players.every(player => player.modifiers.length === 0), 'UNSUPPORTED_NATIVE_ENCOUNTER_PLAYER_MODIFIERS');
       },
@@ -1093,6 +1093,8 @@ export async function nextNativeBattle(runtime, checkpoint) {
       validateEnemyModifiers: candidate => candidate.enemyModifiers.every(m => m instanceof PokemonHeldItemModifier
         && candidate.battle.enemyParty.some(p => p.id === m.pokemonId) && m.stackCount > 0 && m.virtualStackCount === 0)
     }, { decisionId: `native-${c.battle.waveIndex + 1}-0` });
+    if (result.context.battle.battleType === BattleType.TRAINER)
+      check(!result.context.battle.trainer.config.isBoss, 'UNSUPPORTED_NATIVE_TRAINER_BOSS');
     return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 

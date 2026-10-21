@@ -18,12 +18,21 @@ export function queueFaintContinuation(phase,rules){
     check(context.battle===phase.scene.currentBattle,'INVALID_COOP_FAINT');
     if(!phase.player){
       check((phase.battlerIndex===2||phase.battlerIndex===3)&&phase.fieldIndex===phase.battlerIndex-2
-        &&context.battle.battleType===BattleType.WILD&&context.roster.field[phase.battlerIndex]===pokemon.id
+        &&context.roster.field[phase.battlerIndex]===pokemon.id
         &&pokemon.isFainted()&&context.roster.entries.some(e=>e.owner===null&&e.pokemon===pokemon),
+        'UNSUPPORTED_COOP_ENEMY_FAINT');
+      check(context.battle.battleType===BattleType.WILD||context.battle.battleType===BattleType.TRAINER,
         'UNSUPPORTED_COOP_ENEMY_FAINT');
       // Keep the original per-enemy Victory queued, unstarted. No automatic
       // retargeting; experience and aftermath require their own trusted driver.
       phase.scene.unshiftPhase(new VictoryPhase(phase.scene,phase.battlerIndex));
+      if(context.battle.battleType===BattleType.TRAINER){
+        check(context.battle.trainer,'INVALID_COOP_TRAINER_FAINT');
+        const hasReservePartyMember=context.battle.enemyParty.some(p=>p.isActive()&&!p.isOnField()
+          &&p.trainerSlot===pokemon.trainerSlot);
+        if(hasReservePartyMember)
+          phase.scene.pushPhase(new SwitchSummonPhase(phase.scene,phase.fieldIndex,-1,false,false,false));
+      }
       return;
     }
     check(phase.fieldIndex===phase.battlerIndex,'UNSUPPORTED_COOP_FAINT');

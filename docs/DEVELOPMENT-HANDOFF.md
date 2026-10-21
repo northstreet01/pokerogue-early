@@ -1,5 +1,7 @@
 # 新窗口开发交接
 
+2026-10-21 VS-02B-11R 自然学招：修复 SummonMissingPhase 与存活席位 requiredSeats，让倒下/空场席位不再被要求提交；诊断案例已越过原召唤，但仍未自然触发 LevelUp→LearnMove，后续有空 fight options 的 INVALID_DECISION 和未支持 native phase 阻断。受影响 native 定向75/75、typecheck／Worker／build通过；没有自然成功、正式双 WS 或浏览器，完整回归待本轮。详见[本批记录](mvp-vs-02b11r-natural-learn.md)。
+
 2026-10-21 VS-02B-11 维护者复验：独立修复 phase scope 比较／席位1错绑、暂停队列重复、Worker 自动学招显示端口、原后备 fieldIndex=-1、学招私有投影隔离、Confirm/Summary 显示生命周期与二次放弃／重选。真实 Worker＋既有学招26/26、原UI控制器49/49、正式双WS／FormalRoomStore学招故障恢复2/2通过；后者从明确合成学招起点开始，新招实际FIGHT通过。普通战斗自然触发链仍未关闭，浏览器待用户，A/B整体部分通过，不扩进化。最终完整串行1059/1059、退出0（1043319.5987ms，无失败／取消／跳过），typecheck／Worker／生产build均0（build51.18s）。源码／测试基点f429331d，独立评审分支未合并／未推送；详见[维护者复验](mvp-vs-02b11-review.md)。
 
 2026-10-21 VS-02B-11 升级学招：A 代码接入原 LearnMovePhase 的 known／empty／满四招暂停、native progression 与 adapter 路由；B 接原 Confirm／SummaryUiMode.LEARN_MOVE 显示副本和 outbox 提交。既有 level-up／learn driver 18/18、typecheck／Worker／生产build通过，完整串行1046/1046无失败（但无新增生产学招用例）；仍**没有**真实自然升级生产 Worker、正式双 WS／重启／去重、原学招 UI 自动交互或双浏览器证据。A/B 均只能算可审查代码子集。详见[本批记录](mvp-vs-02b11-learn-move.md)。

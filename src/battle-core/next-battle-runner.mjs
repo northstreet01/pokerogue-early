@@ -41,8 +41,10 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
       state.currentPhase=null;events.push(...returned.events);
       d=selectNextPhase(state,()=>check(false,'NEXT_BATTLE_QUEUE_EMPTY')).phase;
     }
+    const nextKind=d?.kind==='original-phase'?driver.phaseKind(d.phase):null;
+    const unexpected=typeof nextKind==='string'?nextKind.replace(/([a-z])([A-Z])/g,'$1_$2').toUpperCase():null;
     check(d?.kind==='original-phase'&&d.remaining==='start'&&driver.phaseKind(d.phase)===kind,
-      'UNSUPPORTED_NEXT_BATTLE_PHASE');
+      unexpected?`UNSUPPORTED_NEXT_BATTLE_PHASE_${unexpected}`:'UNSUPPORTED_NEXT_BATTLE_PHASE');
     const r=await driver.execute(c,d.phase);
     check(r?.completed===true&&r.pendingTasks===0&&Array.isArray(r.events)&&Array.isArray(r.grants)
       &&r.grants.length===0,'INCOMPLETE_NEXT_BATTLE_PHASE');

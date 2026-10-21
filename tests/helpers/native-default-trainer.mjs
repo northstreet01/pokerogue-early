@@ -58,3 +58,22 @@ export async function progressDefault(h,c){
   }
   return progressNatural(h,c);
 }
+
+// Normal default-profile combat only, retaining the real last input boundary
+// so formal persistence tests can exercise the winning turn themselves.
+export async function defaultTrainerVictory(){
+  const route=await defaultTrainerRoute();const h=route.h;let c=route.c,beforeVictory;
+  const events=[];
+  try{
+    for(let n=0;n<45;n++){
+      if(c.decision.kind==='wait-actions')beforeVictory=c;
+      const result=await progressDefault(h,c);events.push(...result.events);c=result.checkpoint;
+      const front=c.continuation.phaseQueuePrepend.at(-1)??c.continuation.phaseQueue[0];
+      if(c.battle.battleType===1&&front?.phase.type==='SelectModifierPhase'){
+        assert.ok(c.roster.entries.filter(e=>e.owner===null).every(e=>e.pokemon.fields.hp===0));
+        assert.ok(beforeVictory);return {...route,c,beforeVictory,events};
+      }
+    }
+    assert.fail('ordinary trainer victory must reach normal preparation');
+  }catch(error){await h.close();throw error;}
+}

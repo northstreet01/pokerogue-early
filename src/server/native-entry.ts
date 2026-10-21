@@ -14,6 +14,7 @@ import { GameStats } from '../system/game-stats';
 import { BattleAnim } from '../data/battle-anims';
 import { createOriginalRuntime, constructOriginalPokemon, constructSelectedStarterInstance, capturePokemonState } from './original-runtime';
 import Trainer from '../field/trainer';
+import { TrainerSlot } from '../data/trainer-config';
 import { restoreStarterSelection } from '../coop/original-starter-selection';
 import { originalDecisionStateCodec as codec, originalPhaseStateCodec as phases } from '../original-phase-checkpoints';
 import { originalOwnedEggStateCodec } from '../original-phase-checkpoints';
@@ -65,6 +66,7 @@ import { recoverVictoryParties } from '../battle-core/victory-aftermath-runner.m
 (Trainer.prototype as any).getTintSprites = function () { return [new DisplayTarget()]; };
 (Trainer.prototype as any).tint = function () { return this; };
 (Trainer.prototype as any).clearTint = function () { return this; };
+(Trainer.prototype as any).destroy = function () {}; // Renderer disposal of the previous encounter only.
 
 // Explicit display targets; unknown rendering methods remain unavailable.
 class DisplayTarget {
@@ -86,7 +88,7 @@ class DisplayTarget {
 
 const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, AttemptCapturePhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, AttemptCapturePhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
@@ -149,6 +151,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       getPlayerField: () => root.getPlayerField(), getEnemyField: () => root.getEnemyField(),
       getField: active => root.getField(active), getPokemonById: id => root.getPokemonById(id),
       getPlayerPokemon: () => root.getPlayerPokemon() });
+    Object.defineProperty(view,'money',{configurable:true,get:()=>c.players[seat].money,set:value=>{c.players[seat].money=value;}});
+    view.validateAchv = achv => { intents.push({kind:'achievement-check',id:achv.id,owner:seat});return false; };
     for (const name of ['applyModifiers', 'applyModifier', 'findModifiers', 'findModifier', 'getModifiers', 'removeModifier'])
       view[name] = BattleScene.prototype[name];
     for (const key of ['phaseQueue', 'phaseQueuePrepend', 'nextCommandPhaseQueue', 'phaseQueuePrependSpliceIndex', 'currentPhase', 'standbyPhase', 'waveSeed'])
@@ -181,7 +185,6 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.updateUIPositions = root.updateWaveCountText = root.updateMoneyText = root.updateScoreText = () => {};
   root.trainer = root.arenaPlayer = root.arenaEnemy = root.arenaNextEnemy = new DisplayTarget();
   root.showEnemyTrainer = root.hideEnemyTrainer = () => {};
-  root.validateVoucher = () => false;
   root.charSprite = { showCharacter: () => Promise.resolve(), hide: () => Promise.resolve() };
   root.showFieldOverlay = root.hideFieldOverlay = () => Promise.resolve();
   root.pbTray = root.pbTrayEnemy = { hide() {}, showPbTray() {} };
@@ -210,7 +213,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.anims = { generateFrameNames() { return []; }, create() {} };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
   root.validateAchv = (achv) => { intents.push({ kind: 'achievement-check', id: achv.id }); return false; };
-  root.validateVoucher = () => false;
+  root.validateVoucher = () => { throw new Error('VOUCHER_POLICY_UNCONFIRMED'); };
   root.time = { delayedCall: (delay, fn, args = [], scope = null) => schedule(() => fn.apply(scope, args), delay) };
   root.time.addEvent = config => {
     check(config.repeat !== -1, 'UNSUPPORTED_REPEATING_RULE_TIMER');
@@ -276,7 +279,10 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       const callback = [...args].reverse().find(arg => typeof arg === 'function');
       schedule(callback);
     },
-    showText: (text, _delay, callback) => { events.push({ kind: 'message', text }); schedule(callback); } };
+    showText: (text, _delay, callback) => {
+      const owner = root.currentPhase instanceof MoneyRewardPhase ? views.indexOf(root.currentPhase.scene) : -1;
+      events.push({ kind: 'message', text, ...(owner >= 0 ? {scope:owner} : {}) }); schedule(callback);
+    } };
   root.damageNumberHandler = { add: (p, amount, result = HitResult.EFFECTIVE, critical = false) =>
     events.push({ kind: 'damage-display', pokemonId: p.id, amount, result, critical }) };
   BattleAnim.prototype.play = function (scene: any, callback) {
@@ -292,13 +298,13 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.newBattle = (...args) => {
     const wave = args[0] ?? (root.currentBattle?.waveIndex ?? 0) + 1;
     const fixed = fixedBattles[wave]?.battleType === BattleType.TRAINER ? fixedBattles[wave] : null;
-  const oldDouble = fixed?.double;
-  // Only the synchronous original constructor reads this config. Restore it
-  // before any asynchronous encounter work or subsequent request can run.
-  try {
-    if (fixed) fixed.double = true;
-    return BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true);
-  } finally { if (fixed) fixed.double = oldDouble; }
+    const oldDouble = fixed?.double;
+    // Only the synchronous original constructor reads this config. Restore it
+    // before any asynchronous encounter work or subsequent request can run.
+    try {
+      if (fixed) fixed.double = true;
+      return BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true);
+    } finally { if (fixed) fixed.double = oldDouble; }
   };
   function bindPhase(p, existingScope?: number) {
     // Capture is personal, but its Victory starts the shared encounter/EXP
@@ -351,6 +357,15 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       || p.isFainted() && c.roster.field[slot] === p.id) ? p.id : null);
     for (const key of ['seed', 'waveSeed', 'waveCycleOffset', 'offsetGym', 'score']) c.scene[key] = root[key];
     if (Object.prototype.hasOwnProperty.call(root, 'lastEnemyTrainer')) c.scene.lastEnemyTrainer = root.lastEnemyTrainer;
+    for (const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue']) root[key] = root[key].flatMap(p => {
+      if (!(p instanceof MoneyRewardPhase) || views.includes((p as any).scene)) return [p];
+      check(c.battle.battleType === BattleType.TRAINER && !c.battle.trainer.config.isBoss
+        && (p as any).moneyMultiplier === c.battle.trainer.config.moneyMultiplier,'UNSUPPORTED_NATIVE_MONEY_REWARD');
+      check(root.phaseQueuePrependSpliceIndex === -1,'UNSAFE_MONEY_QUEUE_SPLIT');
+      // One original award becomes two owned original phases. Their persisted
+      // scopes prevent either share from being reapplied after restoration.
+      return views.map(view => new MoneyRewardPhase(view,(p as any).moneyMultiplier));
+    });
     for (const key of ['phaseQueue', 'phaseQueuePrepend', 'nextCommandPhaseQueue']) c.continuation[key] = root[key].map(p => {
       const scope = bindPhase(p); phases.capture(p, c, scope);
       if (!ids.has(p)) ids.set(p, nextId++);
@@ -387,9 +402,17 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         root.pokeballCounts = c.players[captureSeat].pokeballCounts;
       }
       const scope = bindPhase(p); root.currentPhase = p;
+      if (p instanceof MoneyRewardPhase) check((scope === 0 || scope === 1)
+        && c.battle.battleType === BattleType.TRAINER && !c.battle.trainer.config.isBoss
+        && (p as any).moneyMultiplier === c.battle.trainer.config.moneyMultiplier,'INVALID_TRAINER_MONEY_SCOPE');
       const changes = [];
       const patch = (object, key, value) => { changes.push([object, key, Object.getOwnPropertyDescriptor(object, key)]);
         Object.defineProperty(object, key, { value, writable: true, configurable: true }); };
+      if (p instanceof MoneyRewardPhase) patch((p as any).scene,'getWaveMoneyAmount',multiplier => {
+        const total = BattleScene.prototype.getWaveMoneyAmount.call(root,multiplier);
+        check(Number.isSafeInteger(total) && total >= 0 && total % 2 === 0,'INVALID_TRAINER_MONEY_TOTAL');
+        return total / 2;
+      });
       if (p instanceof SwitchPhase) {
         const battle = Object.create(c.battle); battle.getBattlerCount = () => 1;
         patch((p as any).scene, 'currentBattle', battle);
@@ -433,6 +456,14 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
             events.push({ kind: 'capture-cancelled', reason: 'target-left', pokemonId: (p as any).coopTargetId });
             p.end();
           } else if (resume) resume();
+          else if (p instanceof SwitchSummonPhase && !(p as any).player && (p as any).slotIndex === -1
+            && !c.battle.enemyParty.slice(c.battle.getBattlerCount()).some(pokemon => !pokemon.isFainted()
+              && (!c.battle.trainer.isDouble() || pokemon.trainerSlot === (!(p as any).fieldIndex ? TrainerSlot.TRAINER : TrainerSlot.TRAINER_PARTNER)))) {
+            // Both faints can queue a replacement before either consumes the
+            // final reserve. Do not run a second summon/ability for a dead slot.
+            events.push({kind:'enemy-switch-cancelled',reason:'no-reserve',fieldIndex:(p as any).fieldIndex});
+            Phase.prototype.end.call(p);
+          }
           else if (p instanceof SummonMissingPhase && (p as any).player) {
             const party = parties[scope];
             if (!party.some(pokemon => !pokemon.isFainted())) Phase.prototype.end.call(p);
@@ -768,9 +799,6 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
           return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
         }
       }
-      if (p instanceof MoneyRewardPhase)
-        throw Object.assign(new Error('TRAINER_MONEY_REWARD_POLICY_UNCONFIRMED'),
-          { code: 'TRAINER_MONEY_REWARD_POLICY_UNCONFIRMED' });
       check(supportsPhase(p), 'UNSUPPORTED_NATIVE_ENTRY_PHASE');
       const result = await binding.execute(p);
       const id = `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`;
@@ -1087,7 +1115,7 @@ export async function nextNativeBattle(runtime, checkpoint) {
       validateBranch(candidate) {
         check(candidate.battle.battleType === 0 || candidate.battle.battleType === BattleType.TRAINER,
           'UNSUPPORTED_NATIVE_NEXT_BATTLE');
-        check(candidate.battle.battleSpec === 0 && candidate.battle.waveIndex % 10 !== 0, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
+        check(candidate.battle.battleSpec === 0, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
         check(candidate.players.every(player => player.modifiers.length === 0), 'UNSUPPORTED_NATIVE_ENCOUNTER_PLAYER_MODIFIERS');
       },
       async execute(candidate, p) {
@@ -1100,6 +1128,7 @@ export async function nextNativeBattle(runtime, checkpoint) {
     }, { decisionId: `native-${c.battle.waveIndex + 1}-0` });
     if (result.context.battle.battleType === BattleType.TRAINER)
       check(!result.context.battle.trainer.config.isBoss, 'UNSUPPORTED_NATIVE_TRAINER_BOSS');
+    else check(!result.context.battle.enemyParty.some(p => p.isBoss()), 'UNSUPPORTED_NATIVE_ENCOUNTER_BOSS');
     return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 

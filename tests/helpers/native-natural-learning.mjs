@@ -63,12 +63,14 @@ export async function naturalLearning() {
     assert.ok(total<=14);
     let c = (await h.request('native-open-selected-to-input', naturalSelection)).checkpoint;
     const initial = structuredClone(c), trace = [];
+    let beforeLearning;
     for (let n=0; n<180 && c.decision.kind!=='learn-move'; n++) {
+      beforeLearning = c;
       const result = await progressNatural(h,c);
       trace.push({wave:c.battle.waveIndex,kind:c.decision.kind,events:result.events});
       c = result.checkpoint;
     }
     assert.equal(c.decision.kind,'learn-move','ordinary battles must naturally reach a full-moveset decision');
-    return {h,c,initial,trace};
+    return {h,c,initial,trace,beforeLearning};
   } catch(error) {await h.close();throw error;}
 }

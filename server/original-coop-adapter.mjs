@@ -120,7 +120,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       const entry = pokemonId === null ? null
         : checkpoint.roster.entries.find(item => (item.pokemon?.fields?.id ?? item.pokemon?.id) === pokemonId);
       const intent = {
-        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`,
+        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${raw.kind==='achievement-check'&&[0,1].includes(raw.owner)?raw.owner+':':''}${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`,
         owner: [0, 1].includes(raw.owner) ? raw.owner : entry ? entry.owner : null,
         source: 'scene',
         recipient: null,
@@ -139,6 +139,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
     return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
   function scopeEvent(event, checkpoint) {
+    if (event.kind === 'message' && [0,1].includes(event.scope)) return { ...event };
     if (['preparation-open', 'legacy-capture-choice'].includes(event.kind) && (event.seat === 0 || event.seat === 1))
       return { ...event, scope: event.seat };
     if (event.pokemonId !== undefined) {
@@ -162,7 +163,8 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       const decision = checkpoint.decision;
       if (decision.kind === 'wait-actions' || decision.kind === 'preparation'
         || decision.kind === 'wait-target' || decision.kind === 'ended'
-        || decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') break;
+        || decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch'
+        || decision.kind === 'capture-choice' || decision.kind === 'learn-move') break;
       check(decision.kind === 'continuing', 'UNSUPPORTED_DECISION');
       if (decision.reason === 'next-battle') await apply('native-next');
       else if (frontPhase(checkpoint) === 'SelectModifierPhase') await apply('native-preparation');

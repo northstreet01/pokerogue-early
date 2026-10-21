@@ -14,7 +14,130 @@ import { createOriginalClientModel } from '../src/coop/original-client-model.mjs
 import { fullCaptureChoice, capturedPreparation } from './helpers/native-reserve-fixture.mjs';
 import { learningFixture } from './helpers/native-learning-fixture.mjs';
 import { naturalLearning } from './helpers/native-natural-learning.mjs';
-import { defaultTrainerRoute } from './helpers/native-default-trainer.mjs';
+import { defaultTrainerRoute,defaultTrainerVictory } from './helpers/native-default-trainer.mjs';
+import { trainerReserveFixture } from './helpers/native-trainer-reserve.mjs';
+
+test('VS-02B-12R equal trainer prize: durable winning-turn retry, owned messages and natural next encounter FIGHT',
+ {timeout:120000},async()=>{
+  const route=await defaultTrainerVictory(),checkpoint=route.beforeVictory;await route.h.close();
+  const disk=await temporaryStore();let env,rejectRevision=null;
+  const fixture={seed:route.config.seed,identities:route.profiles.map(p=>p.trainer),parties:[[1,4,7],[906,909,912]],eggState:{players:[[],[]]}};
+  const start=()=>{const real=new FormalRoomStore(disk.directory);return startEnv({fixture,initialCheckpoint:checkpoint,
+    store:{load:()=>real.load(),save:room=>{if(room.revision===rejectRevision)throw Error('trainer prize candidate failure');return real.save(room);}}});};
+  try{
+    env=await start();const room=await createRoom(env);
+    let state=await syncBoth(env,room.a,room.b,room.sa,room.sb);
+    const initial=[state.sa,state.sb],before=canonical(env.service.rooms.get(room.roomId).checkpoint);
+    const actions=initial.map(s=>s.personal.decision.options.find(o=>o.kind==='fight'&&(o.target===null||o.target>=2)
+      &&[52,55,22,670].includes(s.personal.party[0].pokemon.fields.moveset[o.cursor]?.fields.moveId)));
+    assert.ok(actions.every(Boolean));
+    const isolated=await createRoom(env),isolatedBefore=canonical(env.service.rooms.get(isolated.roomId).checkpoint);
+    const tokens=[room.a,room.b].map(c=>c.messages.find(m=>m.type==='welcome'&&m.roomId).resumeToken);
+    const resume=async()=>{const clients=[await connect(env,'prize-A'),await connect(env,'prize-B')];
+      for(const [seat,client]of clients.entries()){client.send({type:'resumeSeat',roomId:room.roomId,resumeToken:tokens[seat]});await client.wait(m=>m.type==='snapshot');}return clients;};
+    const envelope={type:'submitAction',roomId:room.roomId,runId:room.runId,decisionId:initial[0].decisionId,
+      expectedRevision:initial[0].revision,actionId:'trainer-prize',action:actions[0]};
+    room.a.send(envelope);const receipt=await room.a.wait(m=>m.type==='actionReceipt'&&m.actionId===envelope.actionId);assert.equal(receipt.accepted,true);
+    await env.close();env=await start();let [a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),before);
+    rejectRevision=initial[0].revision+1;const failure=b.next(m=>m.type==='error'&&m.code==='STORAGE_FAILED');await submit(b,state.sb,actions[1]);await failure;
+    assert.equal(canonical((await disk.store.load()).find(r=>r.roomId===room.roomId).checkpoint),before);
+    await env.close();rejectRevision=null;env=await start();[a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    if(state.sa.revision===initial[0].revision)state=await syncBoth(env,a,b,await a.waitRevisionAfter(initial[0].revision),await b.waitRevisionAfter(initial[0].revision));
+    assert.equal(state.sa.personal.decision.kind,'preparation');
+    for(const [seat,snapshot]of [state.sa,state.sb].entries()){
+      assert.equal(snapshot.personal.resources.money,initial[seat].personal.resources.money+55);
+      assert.equal(snapshot.events.filter(e=>e.kind==='message'&&e.scope===seat).length,1);
+      assert.ok(snapshot.events.every(e=>e.scope==='shared'||e.scope===seat));
+    }
+    const stable=canonical(env.service.rooms.get(room.roomId).checkpoint);
+    await env.close();env=await start();[a,b]=await resume();state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),stable);
+    a.send(envelope);assert.deepEqual(await a.wait(m=>m.type==='actionReceipt'&&m.actionId===envelope.actionId),receipt);
+    const conflict=a.next(m=>m.type==='error'&&m.code==='ACTION_ID_CONFLICT');a.send({...envelope,action:{...actions[0],cursor:99}});await conflict;
+    assert.equal(canonical((await disk.store.load()).find(r=>r.roomId===isolated.roomId).checkpoint),isolatedBefore);
+    const active={...room,a,b};state=await finishPreparation(env,active,state);state=await finishSwitches(env,active,state);
+    assert.equal(state.sa.shared.waveIndex,6);assert.equal(state.sa.personal.decision.kind,'wait-actions');
+    state=await submitBoth(env,active,state.sa,state.sb,[fightAction(state.sa),fightAction(state.sb)]);
+    assert.ok(state.sa.events.some(e=>e.kind==='phase-start'&&e.phase==='MoveEffectPhase'));
+    assert.equal(state.sa.personal.resources.money,55);assert.equal(state.sb.personal.resources.money,55);
+  }finally{if(env)await env.close();await disk.cleanup();}
+ });
+
+for(const scenario of ['natural-faint','original-reserve'])test(`VS-02B-12R ${scenario}: durable trainer faint/replacement retry, one-input restart and isolation`,
+ {timeout:120000},async()=>{
+  const route=scenario==='natural-faint'?await defaultTrainerRoute():await trainerReserveFixture();
+  let checkpoint=route.c;
+  if(scenario==='natural-faint'){
+    checkpoint=(await route.h.request('native-next',checkpoint)).checkpoint;
+    checkpoint=(await route.h.request('native-run-to-boundary',checkpoint)).checkpoint;
+  }
+  await route.h.close();
+  const disk=await temporaryStore();let env,rejectRevision=null;
+  const fixture={seed:route.config.seed,identities:route.profiles.map(p=>p.trainer),parties:[[1,4,7],[906,909,912]],eggState:{players:[[],[]]}};
+  const start=()=>{const real=new FormalRoomStore(disk.directory);return startEnv({fixture,initialCheckpoint:checkpoint,
+    store:{load:()=>real.load(),save:room=>{if(room.revision===rejectRevision)throw Error('trainer faint candidate failure');return real.save(room);}}});};
+  try{
+    env=await start();const room=await createRoom(env);
+    let state=await syncBoth(env,room.a,room.b,room.sa,room.sb);
+    const initial=[state.sa,state.sb],before=canonical(env.service.rooms.get(room.roomId).checkpoint);
+    const actions=initial.map(s=>s.personal.decision.options.find(o=>o.kind==='fight'&&(o.target===null||o.target===2)
+      &&[52,55,22,670].includes(s.personal.party[0].pokemon.fields.moveset[o.cursor]?.fields.moveId)));
+    assert.ok(actions.every(Boolean));
+    assert.ok(initial.every(s=>s.personal.decision.options.every(o=>o.kind!=='ball')));
+    const isolated=await createRoom(env),isolatedBefore=canonical(env.service.rooms.get(isolated.roomId).checkpoint);
+    const tokens=[room.a,room.b].map(c=>c.messages.find(m=>m.type==='welcome'&&m.roomId).resumeToken);
+    const resume=async()=>{const clients=[await connect(env,'trainer-faint-A'),await connect(env,'trainer-faint-B')];
+      for(const [seat,client]of clients.entries()){client.send({type:'resumeSeat',roomId:room.roomId,resumeToken:tokens[seat]});await client.wait(m=>m.type==='snapshot');}return clients;};
+    const envelope={type:'submitAction',roomId:room.roomId,runId:room.runId,decisionId:initial[0].decisionId,
+      expectedRevision:initial[0].revision,actionId:'trainer-faint-first',action:actions[0]};
+    room.a.send(envelope);const receipt=await room.a.wait(m=>m.type==='actionReceipt'&&m.actionId===envelope.actionId);assert.equal(receipt.accepted,true);
+    await env.close();env=await start();let [a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),before);
+    assert.deepEqual(env.service.rooms.get(room.roomId).inputs,{0:actions[0]});
+    rejectRevision=initial[0].revision+1;
+    const failure=b.next(m=>m.type==='error'&&m.code==='STORAGE_FAILED');await submit(b,state.sb,actions[1]);await failure;
+    const failed=(await disk.store.load()).find(r=>r.roomId===room.roomId);
+    assert.equal(canonical(failed.checkpoint),before);assert.deepEqual(failed.inputs,{0:actions[0],1:actions[1]});
+    await env.close();rejectRevision=null;env=await start();[a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    if(state.sa.revision===initial[0].revision)state=await syncBoth(env,a,b,await a.waitRevisionAfter(initial[0].revision),await b.waitRevisionAfter(initial[0].revision));
+    assert.equal(state.sa.personal.decision.kind,'wait-actions');
+    const phases=state.sa.events.filter(e=>e.kind==='phase-start').map(e=>e.phase);
+    assert.ok(phases.includes('FaintPhase'));assert.ok(phases.includes('VictoryPhase'));
+    const committed=env.service.rooms.get(room.roomId).checkpoint;
+    assert.ok(committed.nativeCheckpoint.roster.entries.some(e=>e.owner===null&&e.pokemon.fields.hp===0
+      &&checkpoint.battle.enemyParty.includes(e.pokemon.fields.id)),'an actual enemy faint, not merely a player faint');
+    if(scenario==='original-reserve'){
+      assert.ok(phases.includes('SwitchSummonPhase'));
+      assert.ok(committed.nativeCheckpoint.roster.field.slice(2).some(id=>checkpoint.battle.enemyParty.slice(2).includes(id)));
+    }
+    assert.deepEqual(committed.nativeCheckpoint.players,checkpoint.players);
+    a.send(envelope);assert.deepEqual(await a.wait(m=>m.type==='actionReceipt'&&m.actionId===envelope.actionId),receipt);
+    const conflict=a.next(m=>m.type==='error'&&m.code==='ACTION_ID_CONFLICT');a.send({...envelope,action:{...actions[0],cursor:99}});await conflict;
+    assert.equal(canonical((await disk.store.load()).find(r=>r.roomId===isolated.roomId).checkpoint),isolatedBefore);
+    const stable=canonical(committed);await env.close();env=await start();[a,b]=await resume();
+    await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),stable,'same HP/PP/EXP/enemy roster after second restart');
+  }finally{if(env)await env.close();await disk.cleanup();}
+ });
+
+test('VS-02B-12R naturally triggered full learning is a stable formal input boundary', {timeout:120000},async()=>{
+  const route=await naturalLearning();const checkpoint=route.beforeLearning,expected=route.c;await route.h.close();
+  assert.equal(checkpoint.decision.kind,'continuing');
+  let env;
+  try{
+    env=await startEnv({fixture:{seed:checkpoint.scene.seed,identities:[{trainerId:1,secretId:2},{trainerId:3,secretId:4}],
+      parties:[[1,4,7],[906,909,912]],eggState:{players:[[],[]]}},initialCheckpoint:checkpoint});
+    const room=await createRoom(env),state=await syncBoth(env,room.a,room.b,room.sa,room.sb);
+    assert.equal(state.sa.personal.decision.kind,'learn-move');
+    assert.deepEqual(env.service.rooms.get(room.roomId).checkpoint.nativeCheckpoint,expected);
+    assert.ok(!room.a.messages.some(m=>m.type==='error'&&m.code==='ADAPTER_FAILED'));
+  }finally{if(env)await env.close();}
+});
 
 test('VS-02B-12 default natural wave five: formal WS entry, first input restart, durable retry and isolated round',
  {timeout:120000},async()=>{

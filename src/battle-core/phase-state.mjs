@@ -187,6 +187,10 @@ export function createPhaseStateCodec({constructors, evolution, formChange, modi
     const spec=schema(s.type);
     check(s.fields&&Object.keys(s.fields).every(k=>Object.hasOwn(spec.fields,k))&&spec.required.every(k=>Object.hasOwn(s.fields,k)),'INVALID_PHASE_FIELD');
     const values=Object.fromEntries(Object.entries(s.fields).map(([key,value])=>[key,encode(value,spec.fields[key],context,true,graph)]));
+    // Older shared-scene forced SwitchPhases stored null scope. Their original
+    // fieldIndex still identifies the sole owner. Canonicalize that legacy
+    // representation; explicit conflicting scopes remain invalid at decisions.
+    if(s.type==='SwitchPhase'&&s.scope===null&&values.isModal===true&&values.doReturn===false)s.scope=values.fieldIndex;
     for(const key of spec.required)if(['pokemon','move','ints','weather','modifierType','formChange','bool','egg'].includes(spec.fields[key]))
       check(values[key]!=null,'INVALID_PHASE_FIELD');
     check(s.presentation&&Object.keys(s.presentation).every(k=>spec.display.includes(k)&&k!=='scene'&&!rendererFields.has(k)),'INVALID_PHASE_PRESENTATION');
@@ -217,6 +221,7 @@ export function createPhaseStateCodec({constructors, evolution, formChange, modi
       &&(Object.hasOwn(spec.fields,k)||spec.display.includes(k))),'INVALID_PHASE_FIELD');
     const fields=Object.fromEntries(Object.entries(spec.fields).filter(([k])=>Object.hasOwn(descriptors,k))
       .map(([key,rule])=>[key,encode(descriptors[key].value,rule,context,false,graph)]));
+    if(type==='SwitchPhase'&&scope===null&&fields.isModal?.value===true&&fields.doReturn?.value===false)scope=fields.fieldIndex?.value;
     const presentation=Object.fromEntries(spec.display.filter(k=>k!=='scene'&&!rendererFields.has(k)&&Object.hasOwn(descriptors,k))
       .map(k=>[k,descriptors[k].value===undefined?{presence:'undefined'}:{presence:'value',value:descriptors[k].value}]));
     const snapshot={version:1,type,scope,fields,presentation};restore(snapshot,context);scopes.set(value,scope);return snapshot;

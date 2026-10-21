@@ -158,6 +158,15 @@ test('actual native faint requires an owned forced replacement and survives per-
     const action = c.decision.options[1][0], before = JSON.stringify(c);
     const wrongScope = structuredClone(c); wrongScope.continuation.currentPhase.phase.scope = 0;
     await assert.rejects(h.request('native-validate-checkpoint', wrongScope), e => e.code === 'INVALID_SWITCH_DECISION');
+    const oldSharedScope=structuredClone(c);oldSharedScope.continuation.currentPhase.phase.scope=null;
+    await h.request('native-validate-checkpoint',oldSharedScope);
+    const normalized=(await h.request('native-switch',{checkpoint:oldSharedScope,inputs:{1:action}})).checkpoint;
+    const scoped=(await h.request('native-switch',{checkpoint:c,inputs:{1:action}})).checkpoint;
+    assert.deepEqual(normalized,scoped,'legacy null scope binds the same actual owner, never another seat');
+    for(const flag of ['isModal','doReturn']){
+      const corrupt=structuredClone(c);corrupt.continuation.currentPhase.phase.fields[flag].value=flag==='doReturn';
+      await assert.rejects(h.request('native-validate-checkpoint',corrupt),e=>e.code==='INVALID_SWITCH_DECISION');
+    }
     await h.request('native-validate-switch', { checkpoint: c, seat: 1, action });
     for (const bad of [{ ...action, pokemonId: c.roster.field[0] }, { ...action, pokemonId: null }])
       await assert.rejects(h.request('native-validate-switch', { checkpoint: c, seat: 1, action: bad }));

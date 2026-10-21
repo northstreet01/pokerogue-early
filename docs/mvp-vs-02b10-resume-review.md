@@ -31,3 +31,9 @@
 菜单依旧使用原Pokemon显示容器、codec副本及原资源加载，不运行Pokemon构造／规则RNG，不在客户端更改party归属／数量／HP／PP／资源。原摘要仍只读，取消／重复快照／新revision／epoch／加载期间断线／同快照重开菜单会清理副本并失效旧回调。新捕获拒绝或outbox写入失败可重新选择；已用确认不会重复提交。原Party RELEASE实际方法定向证实合作不执行本地删除，而单人仍执行原放生。
 
 新版UI＋输入定向50/50、退出0，13694.434ms，正常1..50，无失败／取消／跳过／todo。该测试使用真实控制器及原Party／Summary输入方法，资源端口无画布；不能当作双浏览器画面验收。最终typecheck／Worker／生产build及完整串行结果另记，尚未执行的浏览器项目继续待用户。
+
+### 完整回归发现的兼容修复
+
+17a10199首轮全套暴露上次9b22a02c新增的强制换人scope检查不兼容既有共享场景runner：原合法modal Switch保存null scope，但fieldIndex仍是唯一owner。未删除owner断言、未改冻结fixture；在phase-state capture／restore把这个旧表示规范化为原fieldIndex，保留当前decision的scope=seat、modal=true、doReturn=false和fieldIndex=seat检查。显式冲突scope仍拒绝，原shared/null表示与显式正确scope执行出同一原换人结果。
+
+修订定向64/64、退出0，41139.7893ms，含原faint／battle-items／phase-state及本批队伍。新增明确冲突scope及两个标志拒绝，旧null恢复等价；首轮全套已主动中止，工具退出1、没有完整TAP收尾，不计任何全套通过。原日志保留full-interrupted-switch-scope.tap，执行HEAD／源码清单另存execution-first文件；修复后从新提交重新执行完整串行。

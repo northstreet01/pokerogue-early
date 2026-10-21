@@ -4,7 +4,7 @@ import { NewBattlePhase, EncounterPhase, SummonPhase, PostSummonPhase, ToggleDou
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
-import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase } from '../phases';
+import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase } from '../phases';
 import { SelectModifierPhase } from '../phases';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase } from '../phases';
 import { Mode } from '../ui/ui';
@@ -22,7 +22,7 @@ import { emptyContinuation } from '../battle-core/phase-continuation.mjs';
 import { advanceQueuedRulePhase } from '../battle-core/rule-phase-runner.mjs';
 import { withOriginalRules } from '../../server/original-random-context.mjs';
 import { SceneRandom } from '../battle-core/decision-state.mjs';
-import { getMoveTargets } from '../data/move';
+import { getMoveTargets, allMoves } from '../data/move';
 import { resolveFightIntent } from '../battle-core/fight-command.mjs';
 import { advanceCollectedFightCommands } from '../battle-core/fight-command.mjs';
 import { bindCoopModifierScope } from '../battle-core/modifier-scope.mjs';
@@ -50,6 +50,8 @@ import * as Utils from '../utils';
 import { Command } from '../ui/command-ui-handler';
 import { Moves } from '../data/enums/moves';
 import { requireContract as check } from '../battle-core/coop-contract.mjs';
+import { advanceProgressionChoice } from '../battle-core/progression-choice-runner.mjs';
+import { createLearnDecision, inspectLearnMove } from '../battle-core/learn-command.mjs';
 
 // Explicit display targets; unknown rendering methods remain unavailable.
 class DisplayTarget {
@@ -70,7 +72,7 @@ class DisplayTarget {
 
 const supportedPhases = [SummonPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, AttemptCapturePhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, AttemptCapturePhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
@@ -631,6 +633,46 @@ export async function stepNativeEntry(runtime, checkpoint) {
 
 // Continuous original queue execution, without restoring Pokemon/Battle/Arena
 // between phases. Recovery executes the same bodies via native-step instead.
+// Learning is a personal one-seat decision. The phase remains the original
+// suspended LearnMovePhase; only the confirmed forget branch or cancel end is
+// resumed, then the normal queue continues.
+function progressionContext(c, seat) {
+  const d = c.decision, current = c.continuation.currentPhase, phase = current?.phase;
+  check(d.kind === 'learn-move' && d.requiredSeats.length === 1 && d.requiredSeats[0] === seat
+    && current?.kind === 'original-phase' && current.remaining === 'learn-apply'
+    && c.continuation.standbyPhase === null && phase instanceof LearnMovePhase
+    && phases.capture(phase, c) === seat, 'INVALID_PROGRESSION_PHASE');
+  const party = c.roster.entries.filter(entry => entry.owner === seat && entry.group === 'party')
+    .sort((a, b) => a.index - b.index);
+  check(party[(phase as any).partyMemberIndex], 'INVALID_PROGRESSION_PHASE');
+  return { d, current, phase, party };
+}
+
+export function validateNativeProgression(runtime, payload) {
+  check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
+  const c = codec.restore(payload.checkpoint);
+  const { d, phase } = progressionContext(c, payload.seat);
+  codec.validateAction(c, payload.seat, payload.action);
+  check((phase as any).moveId === d.learn.moveId, 'INVALID_PROGRESSION_PHASE');
+  return true;
+}
+
+export async function chooseNativeProgression(runtime, payload) {
+  check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
+  const c = codec.restore(payload.checkpoint);
+  const seat = payload.seat;
+  const result = await advanceProgressionChoice(c, { [seat]: payload.action }, codec, originalSafeDecisionCodec, {
+    async resumeLearning(candidate, phase, { action }) {
+      const binding = bindNativeScene(candidate, runtime.scene.gameData);
+      try {
+        if (action.slot === null) return await binding.execute(phase, () => phase.end());
+        return await binding.execute(phase, () => phase.forgetMove(action.slot, Mode.MESSAGE));
+      } finally { binding.dispose(); }
+    },
+  }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}` });
+  return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
+}
+
 export async function runNativeUntilBoundary(runtime, checkpoint) {
   const c = codec.restore(checkpoint);
   check(c.decision.kind === 'continuing' && c.decision.reason === 'effects'
@@ -641,6 +683,25 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
       const next = binding.root.phaseQueuePrepend.at(-1) ?? binding.root.phaseQueue[0];
       if (next instanceof SelectModifierPhase) return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
       const p = selectNextPhase(binding.root, () => populatePhaseQueue(binding.root, () => new TurnInitPhase(binding.root))).phase;
+      if (p instanceof LearnMovePhase) {
+        const partyIndex = (p as any).partyMemberIndex, moveId = (p as any).moveId;
+        const seat = [0, 1].find(owner => c.roster.entries.some(entry => entry.owner === owner
+          && entry.group === 'party' && entry.index === partyIndex));
+        check(seat !== undefined, 'INVALID_LEARN_OWNER');
+        const entry = c.roster.entries.find(item => item.owner === seat && item.group === 'party'
+          && item.index === partyIndex);
+        check(entry, 'INVALID_LEARN_OWNER');
+        const selection = inspectLearnMove(entry.pokemon, moveId);
+        if (selection.kind === 'choose') {
+          const id = `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`;
+          phases.capture(p, c, seat);
+          c.continuation.currentPhase = { kind: 'original-phase', phaseId: Math.max(-1,
+            ...Object.values(c.continuation).flat().filter((d: any) => d?.phaseId !== undefined).map((d: any) => d.phaseId)) + 1,
+            phase: p, remaining: 'learn-apply' };
+          c.decision = createLearnDecision(id, c, seat, entry.pokemon.id, moveId, id => !!allMoves[id]);
+          return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
+        }
+      }
       check(supportsPhase(p), 'UNSUPPORTED_NATIVE_ENTRY_PHASE');
       const result = await binding.execute(p);
       const id = `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`;

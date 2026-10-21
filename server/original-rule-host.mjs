@@ -42,7 +42,7 @@ export async function createOriginalRuleHost({ seed, identity, randomState, time
     readiness,
     request(operation, payload = null) {
       if (closed) return Promise.reject(failure('ORIGINAL_RUNTIME_CLOSED'));
-      if (!['catalogs', 'state', 'construct', 'construct-starter', 'roundtrip', 'validate-profile', 'normalize-profile', 'native-start', 'native-step', 'native-open-to-input', 'native-open-selected', 'native-open-selected-to-input', 'native-run-to-boundary', 'native-validate', 'native-submit', 'native-preparation', 'native-prepare-action', 'native-next', 'native-switch', 'native-validate-preparation', 'native-validate-switch', 'native-validate-checkpoint', 'native-validate-eggs', 'native-project'].includes(operation)) return Promise.reject(failure('UNSUPPORTED_RUNTIME_OPERATION'));
+      if (!['catalogs', 'state', 'construct', 'construct-starter', 'roundtrip', 'validate-profile', 'normalize-profile', 'native-start', 'native-step', 'native-open-to-input', 'native-open-selected', 'native-open-selected-to-input', 'native-run-to-boundary', 'native-validate', 'native-submit', 'native-preparation', 'native-prepare-action', 'native-next', 'native-switch', 'native-validate-preparation', 'native-validate-switch', 'native-progression', 'native-validate-progression', 'native-validate-checkpoint', 'native-validate-eggs', 'native-project'].includes(operation)) return Promise.reject(failure('UNSUPPORTED_RUNTIME_OPERATION'));
       const id = ++sequence;
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => { void close('ORIGINAL_RUNTIME_TIMEOUT'); }, timeoutMs);

@@ -19,7 +19,8 @@ import { validateProfile, priceProfile } from '../coop/original-profile-entry';
 import { openNativeBattle, openNativeSelectedBattle, stepNativeEntry, openNativeBattleToInput,
   openNativeSelectedBattleToInput, validateNativeAction, submitNativeActions,
   openNativePreparation, chooseNativePreparation, nextNativeBattle, chooseNativeSwitch, runNativeUntilBoundary,
-  validateNativePreparation, validateNativeSwitch, validateNativeCheckpoint, validateNativeEggs, projectNativeSnapshot } from './native-entry';
+  validateNativePreparation, validateNativeSwitch, validateNativeCheckpoint, validateNativeEggs, projectNativeSnapshot,
+  chooseNativeProgression, validateNativeProgression } from './native-entry';
 
 export { originalDecisionStateCodec, capturePokemonState, restorePokemonState };
 export { PlayerPokemon } from '../field/pokemon';
@@ -151,6 +152,8 @@ export async function executeRuntimeOperation(runtime: ReturnType<typeof createO
   if (operation === 'native-next') return nextNativeBattle(runtime, payload);
   if (operation === 'native-switch') return chooseNativeSwitch(runtime, payload);
   if (operation === 'native-validate-preparation') return validateNativePreparation(runtime, payload);
+  if (operation === 'native-progression') return chooseNativeProgression(runtime, payload);
+  if (operation === 'native-validate-progression') return validateNativeProgression(runtime, payload);
   if (operation === 'native-validate-switch') return validateNativeSwitch(runtime, payload);
   if (operation === 'native-validate-checkpoint') return validateNativeCheckpoint(runtime, payload);
   if (operation === 'native-validate-eggs') return validateNativeEggs(runtime, payload);

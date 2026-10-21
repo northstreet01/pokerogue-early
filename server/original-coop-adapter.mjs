@@ -22,6 +22,7 @@ function stageOf(context) {
   if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') return 'switch';
   if (decision.kind === 'wait-actions') return 'battle';
   if (decision.kind === 'wait-target') return 'target';
+  if (decision.kind === 'learn-move') return 'learning';
   if (decision.kind === 'continuing') return decision.reason === 'next-battle' ? 'next-battle' : 'resolving';
   if (decision.kind === 'ended') return 'ended';
   return 'unknown';
@@ -277,7 +278,8 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       if (decision.kind === 'preparation')
         return { id: decision.id, requiredSeats: [...decision.requiredSeats], collection: 'incremental' };
       if (decision.kind === 'wait-actions' || decision.kind === 'wait-target'
-        || decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice')
+        || decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice'
+        || decision.kind === 'learn-move')
         return { id: decision.id, requiredSeats: [...decision.requiredSeats], collection: 'all' };
       if (decision.kind === 'continuing')
         return { id: decision.id, requiredSeats: [], collection: 'auto' };
@@ -308,6 +310,10 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       }
       if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') {
         await request(room, 'native-validate-switch', { checkpoint: context.checkpoint, seat, action: COPY(action) });
+        return;
+      }
+      if (decision.kind === 'learn-move') {
+        await request(room, 'native-validate-progression', { checkpoint: context.checkpoint, seat, action: COPY(action) });
         return;
       }
       throw Object.assign(new Error('INVALID_ACTION'), { code: 'INVALID_ACTION' });
@@ -391,6 +397,11 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       } else if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') {
         check(inputs && Object.keys(inputs).length === 1, 'INCOMPLETE_SWITCH_INPUTS');
         await apply('native-switch', { checkpoint, inputs: COPY(inputs) });
+      } else if (decision.kind === 'learn-move') {
+        check(inputs && Object.keys(inputs).length === 1, 'INCOMPLETE_PROGRESSION_INPUTS');
+        const seat = Number(Object.keys(inputs)[0]);
+        check(seat === 0 || seat === 1, 'INVALID_SEAT');
+        await apply('native-progression', { checkpoint, seat, action: COPY(inputs[seat]) });
       } else check(decision.kind === 'continuing', 'UNSAFE_ADVANCE');
       const intermediate = contextFor(room, null, checkpoint, intents, context.formatVersion);
       const result = await runToStable(room, intermediate);

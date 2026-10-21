@@ -103,8 +103,8 @@ export class CoopBattlePresentation {
     const targetIndex = target ? field.indexOf(target) : -1;
     if (targetIndex < 0) { await wait(120); return; }
     if (Number.isInteger(event.moveId)) {
-      await initMoveAnim(event.moveId);
-      await loadMoveAnimAssets(this.scene, [event.moveId], true);
+      await within(initMoveAnim(event.moveId), 1200);
+      await within(loadMoveAnimAssets(this.scene, [event.moveId], true), 1500);
       const animation = new MoveAnim(event.moveId, user, targetIndex);
       await within(new Promise<void>(resolve => animation.play(this.scene, resolve)), 900);
     } else if (event.commonAnim !== undefined) {
@@ -141,7 +141,7 @@ export class CoopBattlePresentation {
   private async playExperience(event: any) {
     const target = this.displayedById.get(event.pokemonId);
     if (!target) return;
-    await this.scene.partyExpBar?.showPokemonExp?.(target, event.exp);
+    await within(Promise.resolve(this.scene.partyExpBar?.showPokemonExp?.(target, event.exp)), 500);
   }
 
   private async fade(ms: number) {
@@ -217,7 +217,7 @@ export class CoopBattlePresentation {
     if (trainer?.spriteKey && this.scene.trainer) {
       try {
         if (!this.scene.textures.exists(trainer.spriteKey)) {
-          await trainerConfigs[trainer.type]?.loadAssets(this.scene, trainer.variant);
+          await within(trainerConfigs[trainer.type].loadAssets(this.scene, trainer.variant), 2000);
         }
         this.scene.trainer.setTexture(trainer.spriteKey).setPosition(-72, 80).setVisible(true);
         this.trainerSprite = this.scene.trainer;

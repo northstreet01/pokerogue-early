@@ -313,17 +313,29 @@ export default class CoopPlayPhase extends Phase {
     this.switchSignature = '';
     await this.scene.ui.setMode(Mode.MESSAGE);
     this.presentation ??= new CoopBattlePresentation(this.scene);
-    await this.presentation.apply(snapshot, this.model.applied);
-    await this.presentation.playEvents(snapshot.events ?? [], {
-      revision: snapshot.revision, decisionId: snapshot.decisionId,
-      isCurrent: () => this.epoch === snapshot.connectionEpoch && !this.disposed,
-    });
+    try {
+      await this.withPresentationTimeout(this.presentation.apply(snapshot, this.model.applied), 5000);
+      await this.withPresentationTimeout(this.presentation.playEvents(snapshot.events ?? [], {
+        revision: snapshot.revision, decisionId: snapshot.decisionId,
+        isCurrent: () => this.epoch === snapshot.connectionEpoch && !this.disposed,
+      }), 4000);
+    } catch (error: any) {
+      // Presentation is never allowed to hold the authoritative ACK forever.
+      this.setStatus(`战斗展示回放失败：${error?.message ?? error}`, true);
+    }
     this.renderReserve();
     (this.scene as any).standbyPhase = this;
     (this.scene as any).waveCountText?.setText(String(snapshot.shared.waveIndex));
     this.battleSignature = signature;
     this.setStatus(snapshot.personal.decision.kind === 'wait-actions'
       ? '等待双方状态核验…' : `已到安全停点：${snapshot.personal.decision.kind}`);
+  }
+
+  private withPresentationTimeout<T>(task: Promise<T>, ms: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([task, new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('PRESENTATION_TIMEOUT')), ms);
+    })]).finally(() => { if (timer) clearTimeout(timer); });
   }
 
   private async openDecisionInput() {

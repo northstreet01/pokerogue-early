@@ -327,9 +327,14 @@ export default class BattleScene extends Phaser.Scene {
 
 		this.loadImage('logo', '');
 
-		// Load arena images
+		// Load arena images. Early aliases (metropolis/jungle/island) reuse
+		// existing slum/tall_grass/beach assets; preload must not request the
+		// enum aliases that have no image files.
+		const arenaKeys = new Set<string>();
 		Utils.getEnumValues(Biome).map(bt => {
-			const btKey = Biome[bt].toLowerCase();
+			const btKey = getBiomeKey(bt);
+			if (arenaKeys.has(btKey)) return;
+			arenaKeys.add(btKey);
 			const isBaseAnimated = btKey === 'end';
 			const baseAKey = `${btKey}_a`;
 			const baseBKey = `${btKey}_b`;

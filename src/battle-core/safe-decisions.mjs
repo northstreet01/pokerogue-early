@@ -112,6 +112,12 @@ export function createSafeDecisionCodec({evolution,modifierType,hasBiome,hasMove
 // Advances coordination flags only. Original game effects are explicit trusted
 // hooks; missing hooks fail before mutating a candidate. Returning new state is
 // atomic, and publish/receipt/grant commit remains the formal service's job.
+export function nextSafeDecisionId(id) {
+  const match=/^(.*?)(?:~(\d+))?$/.exec(id),step=Number(match[2]??0)+1;
+  check(Number.isSafeInteger(step)&&`${match[1]}~${step}`.length<=128,'DECISION_SEQUENCE_EXHAUSTED');
+  return `${match[1]}~${step}`;
+}
+
 export async function applySafeDecisionAction(context,seat,action,codec,safe,hooks) {
   safe.validateAction(context,seat,action);
   let candidate=codec.restore(codec.capture(context));const d=candidate.decision,events=[],grants=[];
@@ -171,9 +177,7 @@ export async function applySafeDecisionAction(context,seat,action,codec,safe,hoo
   // Each reopened choice gets a distinct ID, even if it remains in the same
   // map/preparation stage. Preserve M1's old-decision/old-ACK rejection rule.
   if(candidate.decision.id===context.decision.id){
-    const match=/^(.*?)(?:~(\d+))?$/.exec(candidate.decision.id),step=Number(match[2]??0)+1;
-    check(Number.isSafeInteger(step)&&`${match[1]}~${step}`.length<=128,'DECISION_SEQUENCE_EXHAUSTED');
-    candidate.decision.id=`${match[1]}~${step}`;
+    candidate.decision.id=nextSafeDecisionId(candidate.decision.id);
   }
   codec.capture(candidate);return {context:candidate,events:copy(events),grants:copy(grants)};
 }

@@ -54,14 +54,14 @@ export async function enterNextNative(h, c, switchTo = null) {
 
 // Full parties are constructed through the production selected-starter Worker.
 // Only the initial master-ball inventory is synthetic for deterministic success.
-export async function fullCaptureChoice() {
+export async function fullCaptureChoice({ both = false } = {}) {
   const identities = [{trainerId:1,secretId:2},{trainerId:3,secretId:4}];
   const h = await createOriginalRuleHost({ seed:'capture-review-5', identity:identities[0] });
   try {
     const selection = speciesId => ({version:2,speciesId,dexAttr:'149',nature:0,moveset:null,
       pokerus:false,ivs:[31,30,29,28,27,26],eggMoves:0});
     let c = (await h.request('native-open-selected-to-input', { identities,
-      starterSelections:[[1,4,7],[906,909,912,25,133,152]].map(p=>p.map(selection)),
+      starterSelections:[both ? [1,4,7,25,133,152] : [1,4,7],[906,909,912,25,133,152]].map(p=>p.map(selection)),
       eggState:{players:[[],[]]} })).checkpoint;
     for(let turn=0;turn<12&&!c.decision.options?.[1]?.some(o=>o.kind==='ball');turn++) {
       assert.equal(c.decision.kind,'wait-actions');
@@ -70,10 +70,12 @@ export async function fullCaptureChoice() {
     }
     const ball = {...c.decision.options[1].find(o=>o.kind==='ball'),pokeballType:4};
     assert.equal(ball.kind,'ball');c.players[1].pokeballCounts[4]=1;c.decision.options[1].push(ball);
+    if(both){c.players[0].pokeballCounts[4]=1;c.decision.options[0].push({...ball})}
     const before = structuredClone(c);
-    c = (await h.request('native-submit',{checkpoint:c,inputs:{0:attack(c,0),1:ball}})).checkpoint;
+    c = (await h.request('native-submit',{checkpoint:c,inputs:{0:both?ball:attack(c,0),1:ball}})).checkpoint;
+    const submitted = structuredClone(c);
     const result = await h.request('native-run-to-boundary',c);
     assert.equal(result.checkpoint.decision.kind,'capture-choice');
-    return {h,c:result.checkpoint,before,result};
+    return {h,c:result.checkpoint,before,result,submitted};
   } catch(error) {await h.close();throw error;}
 }

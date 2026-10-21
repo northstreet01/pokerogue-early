@@ -22,7 +22,7 @@ async function open(seed = 'vs02b09-capture') {
   return { h, c };
 }
 
-test('native capture converts the wild individual into the catcher reserve and is durably clear', async () => {
+test('native capture joins the catcher party below six and is durably clear', async () => {
   const { h, c } = await open();
   try {
     const targetId = c.decision.options[0].find(o => o.kind === 'ball').targetId;
@@ -45,7 +45,9 @@ test('native capture converts the wild individual into the catcher reserve and i
       }
       run = (await h.request('native-run-to-boundary', run)).checkpoint;
     }
-    const reserve = run.roster.entries.filter(e => e.owner === 0 && e.group === 'reserve');
+    const reserve = run.roster.entries.filter(e => e.owner === 0 && e.group === 'party' && e.pokemon.fields.id === 0);
+    assert.equal(run.roster.entries.filter(e => e.owner === 0 && e.group === 'party').length,4);
+    assert.equal(run.roster.entries.filter(e => e.group === 'reserve').length,0);
     assert.equal(reserve.length, 1);
     assert.equal(reserve[0].pokemon.fields.species, c.roster.entries.find(e => e.pokemon.fields.id === targetId).pokemon.fields.species);
     assert.equal(reserve[0].pokemon.fields.hp, c.roster.entries.find(e => e.pokemon.fields.id === targetId).pokemon.fields.hp);
@@ -58,9 +60,10 @@ test('native capture converts the wild individual into the catcher reserve and i
     assert.equal(shared.shared.field.includes(targetId), false, 'captured instance left the shared field');
     assert.ok(['preparation', 'wait-actions', 'continuing', 'ended'].includes(run.decision.kind));
     const projected = await h.request('native-project', { checkpoint: run, seat: 0 });
-    assert.equal(projected.personal.reserve.length, 1);
-    assert.equal(projected.personal.reserve[0].id, reserve[0].pokemon.fields.id);
-    assert.equal(JSON.stringify(projected.personal.reserve[0].pokemon), JSON.stringify(reserve[0].pokemon));
+    assert.equal(projected.personal.reserve.length, 0);
+    const projectedCapture=projected.personal.party.find(e=>e.id===reserve[0].pokemon.fields.id);
+    assert.ok(projectedCapture);
+    assert.equal(JSON.stringify(projectedCapture.pokemon), JSON.stringify(reserve[0].pokemon));
   } finally { await h.close(); }
 });
 
@@ -96,6 +99,8 @@ test('JSON restoration preserves submitted capture commands before rule executio
 });
 
 const offensive = (c, seat) => c.decision.options[seat].find(o => o.kind === 'fight' && (o.target === null || o.target >= 2));
+// These fixed fixtures allocate stable ID 0 to the first converted individual.
+const captures = c => c.roster.entries.filter(e => e.owner !== null && e.group === 'party' && e.pokemon.fields.id === 0);
 const reserves = c => c.roster.entries.filter(e => e.group === 'reserve');
 const pp = (c, seat) => c.roster.entries.find(e => e.pokemon.fields.id === c.roster.field[seat]).pokemon.fields.moveset;
 
@@ -123,9 +128,10 @@ test('ordinary successful seat-1 capture retains original score and linked durab
     const ball = c.decision.options[1].find(o => o.kind === 'ball' && o.pokeballType === 0);
     const submitted = (await h.request('native-submit', { checkpoint: c, inputs: { 0: offensive(c, 0), 1: ball } })).checkpoint;
     const result = await h.request('native-run-to-boundary', submitted);
-    const [caught] = reserves(result.checkpoint);
+    const [caught] = captures(result.checkpoint);
     assert.equal(caught.owner, 1);
-    assert.equal(reserves(result.checkpoint).length, 1);
+    assert.equal(captures(result.checkpoint).length, 1);
+    assert.equal(reserves(result.checkpoint).length, 0);
     assert.ok(result.checkpoint.scene.score > c.scene.score, 'original capture score reaches shared BattleEnd');
     const pending = result.intents.find(i => i.kind === 'capture-pending');
     assert.equal(pending.pokemonId, caught.pokemon.fields.id);
@@ -150,8 +156,9 @@ test('two same-instance captures persist separate phase owners; a departed targe
     }
     const sub = (await h.request('native-submit', { checkpoint: c, inputs })).checkpoint;
     const expected = (await h.request('native-run-to-boundary', sub)).checkpoint;
-    assert.equal(reserves(expected).length, 1);
-    const owner = reserves(expected)[0].owner;
+    assert.equal(captures(expected).length, 1);
+    assert.equal(reserves(expected).length, 0);
+    const owner = captures(expected)[0].owner;
     assert.equal(expected.players[owner].pokeballCounts[4], 0);
     assert.equal(expected.players[1 - owner].pokeballCounts[4], 1);
     let restored = sub;

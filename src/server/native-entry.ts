@@ -41,6 +41,8 @@ import { createPreBattleSwitchDecision, createForcedSwitchDecision } from '../ba
 import { advanceForcedSwitch } from '../battle-core/forced-switch-runner.mjs';
 import PartyUiHandler, { PartyOption, PartyUiMode } from '../ui/party-ui-handler';
 import { createCaptureChoice, validateCaptureChoice } from '../battle-core/capture-choice.mjs';
+import { hasLegacyCaptures, legacyCaptureOptions, validateLegacyCapture } from '../battle-core/legacy-capture.mjs';
+import { nextSafeDecisionId } from '../battle-core/safe-decisions.mjs';
 import { PokemonHeldItemModifier, AddPokeballModifier, PokemonHpRestoreModifier } from '../modifier/modifier';
 import { EncoreTag, TrappedTag } from '../data/battler-tags';
 import { CheckTrappedAbAttr, applyCheckTrappedAbAttrs } from '../data/ability';
@@ -117,7 +119,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     updateSpeciesDexIvs: (speciesId, ivs) => intents.push({ kind: 'dex-ivs', speciesId, ivs: [...ivs] }),
     setPokemonCaught: p => { intents.push({ kind: 'capture-pending', pokemonId: p.id,
       speciesId: p.species.speciesId, dexAttr: p.getDexAttr().toString(), level: p.level,
-      ivs: [...p.ivs], nature: p.nature }); return Promise.resolve(); },
+      ivs: [...p.ivs], nature: p.nature, pokemon: capturePokemonState(p) }); return Promise.resolve(); },
     saveSystem: () => { throw new Error('PERMANENT_SAVE_UNAVAILABLE'); },
     saveSession: () => { throw new Error('PERSONAL_SESSION_SAVE_UNAVAILABLE'); } });
   root.gameData = deferredData();
@@ -450,7 +452,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
           pokemon.id = nextId; used.add(nextId); nextId++;
           for (const intent of intents) {
             if ((intent.kind === 'capture-pending' && intent.pokemonId === captureTarget.id)
-              || (intent.kind === 'dex-ivs' && intent.speciesId === pokemon.species.speciesId && !('pokemonId' in intent))) {
+              || (intent.kind === 'dex-ivs' && intent.speciesId === pokemon.species.speciesId
+                && (intent.pokemonId === undefined || intent.pokemonId === captureTarget.id))) {
               intent.owner = captureSeat;
               intent.sourcePokemonId = captureTarget.id;
               intent.pokemonId = pokemon.id;
@@ -492,7 +495,7 @@ function actionDecision(c, root, id) {
         && e.index > 0 && e.pokemon.hp > 0 && !c.roster.field.includes(e.pokemon.id))
         .sort((a, b) => a.index - b.index).map(e => ({ kind: 'switch', pokemonId: e.pokemon.id }));
       const activeEnemies = root.getEnemyField().filter((enemy: any) => enemy.isActive(true));
-      const captureOptions = activeEnemies.length === 1 && c.battle.battleType !== BattleType.TRAINER
+      const captureOptions = !hasLegacyCaptures(c, seat) && activeEnemies.length === 1 && c.battle.battleType !== BattleType.TRAINER
         && c.arena.biomeType !== Biome.END && !(activeEnemies[0].isBoss() && activeEnemies[0].bossSegmentIndex >= 1)
         && !c.enemyModifiers.some(m => m instanceof PokemonHeldItemModifier && m.pokemonId === activeEnemies[0].id)
         ? Object.values(PokeballType).filter(value => Number.isInteger(value) && Number(value) < 5)
@@ -689,6 +692,7 @@ export async function openNativeSelectedBattleToInput(runtime, payload) {
 }
 
 function validateCaptureIntent(c, binding, seat, action) {
+  check(!hasLegacyCaptures(c, seat), 'LEGACY_RESERVE_REQUIRES_REVIEW');
   check(action && Object.keys(action).sort().join(',') === 'kind,pokeballType,targetId'
     && action.kind === 'ball', 'INVALID_CAPTURE_INTENT');
   check(Number.isInteger(action.pokeballType) && action.pokeballType < 5 && Object.values(PokeballType).includes(action.pokeballType),
@@ -897,12 +901,36 @@ export async function chooseNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
   check(payload.action?.operation !== 'reserve-swap', 'RESERVE_STORAGE_DISABLED');
+  if (payload.action?.operation === 'legacy-capture') {
+    validateLegacyCapture(c, payload.seat, payload.action, codec, originalSafeDecisionCodec);
+    const { seat, action } = payload, incoming = c.roster.entries.find(e => e.owner === seat && e.group === 'reserve'
+      && e.pokemon.id === action.pokemonId);
+    const binding = bindNativeScene(c, runtime.scene.gameData);
+    try {
+      const party = binding.views[seat].getParty();
+      if (action.choice === 'keep' && action.releaseId !== null) {
+        const index = party.findIndex(p => p.id === action.releaseId);
+        check(index > 0, 'INVALID_LEGACY_CAPTURE_CHOICE');
+        releaseNativePartyMember(c, binding, seat, index, () => {});
+      }
+      c.roster.entries = c.roster.entries.filter(e => e !== incoming);
+      if (action.choice === 'keep') party.push(incoming.pokemon);
+      else c.roster.retiredIds.push(incoming.pokemon.id);
+      await binding.drainTasks();
+      binding.sync();
+      c.decision.id = nextSafeDecisionId(c.decision.id);
+      return { checkpoint: codec.capture(c), events: [{ kind:'legacy-capture-choice', seat,
+        pokemonId:action.pokemonId, choice:action.choice }], intents:[] };
+    } finally { binding.dispose(); }
+  }
+  check(!hasLegacyCaptures(c, payload.seat) || payload.action?.operation === 'unready', 'LEGACY_CAPTURE_PENDING');
   const result = await advancePreparationEffect(c, payload.seat, payload.action, codec, originalSafeDecisionCodec, preparationEffectDriver(runtime));
   return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
 }
 
 export async function nextNativeBattle(runtime, checkpoint) {
   const c = codec.restore(checkpoint), intents = [];
+  check(![0,1].some(seat => hasLegacyCaptures(c,seat)), 'LEGACY_CAPTURE_PENDING');
   const result = await advanceNextBattle(c, codec, {
     phaseKind: p => p.constructor.name,
     validateBranch(candidate) {
@@ -921,6 +949,16 @@ export async function nextNativeBattle(runtime, checkpoint) {
   return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 
+function releaseNativePartyMember(c, binding, seat, index, callback) {
+  const party = binding.views[seat].getParty();
+  c.roster.retiredIds.push(party[index].id);
+  // Original release owns modifier removal, splice, destruction and callback.
+  PartyUiHandler.prototype.doRelease.call({ scene: binding.views[seat], cursor:index,
+    partyUiMode:PartyUiMode.RELEASE, clearPartySlots() {}, populatePartySlots() {}, setCursor() {},
+    getReleaseMessage: name => name, showText: (_text, _delay, done) => done?.(), selectCallback:callback,
+  } as any, index);
+}
+
 export async function chooseNativeSwitch(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'checkpoint,inputs', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
@@ -935,14 +973,7 @@ export async function chooseNativeSwitch(runtime, payload) {
         if (action.releaseId === null) { phase.finishCatch(false); return; }
         const party = binding.views[seat].getParty(), index = party.findIndex(p => p.id === action.releaseId);
         check(index > 0, 'INVALID_CAPTURE_CHOICE');
-        c.roster.retiredIds.push(action.releaseId);
-        // Original removal of personal modifiers, splice, destruction and callback.
-        PartyUiHandler.prototype.doRelease.call({ scene: binding.views[seat], cursor: index,
-          partyUiMode: PartyUiMode.RELEASE, clearPartySlots() {}, populatePartySlots() {}, setCursor() {},
-          getReleaseMessage: name => name,
-          showText: (_text, _delay, callback) => { callback?.(); },
-          selectCallback: () => phase.finishCatch(true),
-        } as any, index);
+        releaseNativePartyMember(c, binding, seat, index, () => phase.finishCatch(true));
       });
       c.continuation.currentPhase = null;
       c.decision = { id: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`,
@@ -988,6 +1019,10 @@ export function validateNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
   check(payload.action?.operation !== 'reserve-swap', 'RESERVE_STORAGE_DISABLED');
+  if (payload.action?.operation === 'legacy-capture') {
+    validateLegacyCapture(c, payload.seat, payload.action, codec, originalSafeDecisionCodec); return true;
+  }
+  check(!hasLegacyCaptures(c, payload.seat) || payload.action?.operation === 'unready', 'LEGACY_CAPTURE_PENDING');
   validatePreparationEffect(c, payload.seat, payload.action, originalSafeDecisionCodec,
     preparationEffectDriver(runtime));
   return true;
@@ -1093,6 +1128,7 @@ export function projectNativeSnapshot(runtime, payload) {
       players: c.decision.kind === 'preparation' ? c.decision.players[payload.seat] : null,
       switch: ['switch-confirm', 'switch-select'].includes(c.decision.kind)
         ? { outgoing: c.decision.switch?.outgoing?.[payload.seat] ?? null } : null,
+      ...(legacyCaptureOptions(c, payload.seat) ? { legacyCapture: legacyCaptureOptions(c, payload.seat) } : {}),
     },
   };
   return { shared, personal };

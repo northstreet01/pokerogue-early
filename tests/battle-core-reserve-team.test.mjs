@@ -62,6 +62,85 @@ test('capture choice rejects peer/front/extra fields, stale scope and ready bypa
  }finally{await h.close()}
 });
 
+test('two full parties capturing the same wild instance suspend once and a new Worker per phase preserves the choice',async()=>{
+ const {h,c,submitted}=await fullCaptureChoice({both:true});
+ try {
+  let restored=submitted;
+  for(let step=0;step<80&&restored.decision.kind==='continuing';step++) {
+   const fresh=await createOriginalRuleHost({seed:c.scene.seed,identity:{trainerId:1,secretId:2}});
+   try {restored=(await fresh.request('native-step',JSON.parse(JSON.stringify(restored)))).checkpoint}finally{await fresh.close()}
+  }
+  const semantic=input=>{const out=structuredClone(input);delete out.decision.id;
+   for(const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue'])for(const d of out.continuation[key])delete d.phaseId;
+   if(out.continuation.currentPhase)delete out.continuation.currentPhase.phaseId;return out};
+  assert.deepEqual(semantic(restored),semantic(c));
+  const owner=c.decision.requiredSeats[0],other=1-owner;
+  assert.equal(c.players[owner].pokeballCounts[4],0);assert.equal(c.players[other].pokeballCounts[4],1);
+  const action=c.decision.options[owner].find(o=>o.releaseId!==null);
+  const result=(await h.request('native-switch',{checkpoint:restored,inputs:{[owner]:action}})).checkpoint;
+  const done=await settleNative(h,result);
+  assert.equal(done.decision.kind,'preparation');assert.equal(done.players[other].pokeballCounts[4],1);
+  assert.equal(done.roster.entries.filter(e=>e.owner===owner&&e.group==='party').length,6);
+  assert.equal(done.roster.entries.filter(e=>e.owner===other&&e.group==='party').length,6);
+  assert.equal(done.roster.entries.filter(e=>e.group==='reserve').length,0);
+  assert.equal(done.roster.entries.filter(e=>e.owner!==null&&e.pokemon.fields.id===0).length,1);
+ }finally{await h.close()}
+});
+
+test('old reserve captures require explicit choices, never grow the party above six and preserve eggs/rewards/resources',async()=>{
+ const {h,c}=await capturedPreparation();
+ try {
+  // Explicit old-version checkpoint fixture using the genuinely caught Pokemon.
+  // Extra old inventory only exercises migration; it is never browser evidence.
+  const original=personal(c,'party').find(e=>e.pokemon.fields.id===0);
+  original.group='reserve';original.index=0;
+  for(let index=1;index<8;index++) {const entry=structuredClone(original);entry.index=index;entry.pokemon.fields.id=4000000100+index;c.roster.entries.push(entry)}
+  let state=c;
+  const before=structuredClone(c),retired=[];
+  for(let step=0;step<8;step++) {
+   const view=await h.request('native-project',{checkpoint:state,seat:1});
+   const legacy=view.personal.decision.legacyCapture;assert.ok(legacy);
+   assert.equal(legacy.pokemonId,personal(state,'reserve')[0].pokemon.fields.id);
+   await assert.rejects(h.request('native-prepare-action',{checkpoint:state,seat:1,action:{kind:'preparation',operation:'ready'}}),e=>e.code==='LEGACY_CAPTURE_PENDING');
+   const keep=legacy.options.find(o=>o.choice==='keep');
+   const action=step<4?keep:legacy.options.find(o=>o.choice==='discard');
+   const incoming=personal(state,'reserve')[0].pokemon;
+   await h.request('native-validate-preparation',{checkpoint:state,seat:1,action});
+   state=(await h.request('native-prepare-action',{checkpoint:JSON.parse(JSON.stringify(state)),seat:1,action})).checkpoint;
+   if(action.choice==='keep')assert.deepEqual(personal(state,'party').find(e=>e.pokemon.fields.id===legacy.pokemonId).pokemon,incoming);
+   if(action.releaseId!==null)retired.push(action.releaseId);
+   if(action.choice==='discard')retired.push(action.pokemonId);
+   assert.ok(personal(state,'party').length<=6);assert.equal(personal(state,'reserve').length,7-step);
+   assert.deepEqual(state.players,before.players);assert.deepEqual(state.eggState,before.eggState);
+   assert.deepEqual(state.pendingEffects,before.pendingEffects);assert.deepEqual(state.decision.players,before.decision.players);
+   assert.deepEqual(state.battle.random,before.battle.random);assert.deepEqual(state.sceneRandom,before.sceneRandom);
+   assert.deepEqual(personal(state,'party').filter(e=>e.pokemon.fields.id===state.roster.field[1]),personal(before,'party').filter(e=>e.pokemon.fields.id===before.roster.field[1]));
+  }
+  assert.equal(personal(state,'party').length,6);assert.ok(retired.every(id=>state.roster.retiredIds.includes(id)));
+  const final=await h.request('native-project',{checkpoint:state,seat:1});assert.equal(final.personal.decision.legacyCapture,undefined);
+  await enterNextNative(h,state);
+ }finally{await h.close()}
+});
+
+test('old capture migration rejects foreign or out-of-order members and unresolved choices without deleting inventory',async()=>{
+ const {h,c}=await capturedPreparation();
+ try {
+  const caught=personal(c,'party').find(e=>e.pokemon.fields.id===0);caught.group='reserve';caught.index=0;
+  const extra=structuredClone(caught);extra.index=1;extra.pokemon.fields.id=4000000001;c.roster.entries.push(extra);
+  const view=await h.request('native-project',{checkpoint:c,seat:1}),action=view.personal.decision.legacyCapture.options.find(o=>o.choice==='keep');
+  const before=JSON.stringify(c);
+  for(const invalid of [{...action,pokemonId:4000000001},{...action,pokemonId:c.roster.field[0]},
+    {...action,releaseId:c.roster.field[1]},{...action,extra:true}])
+   await assert.rejects(h.request('native-prepare-action',{checkpoint:c,seat:1,action:invalid}));
+  await assert.rejects(h.request('native-prepare-action',{checkpoint:c,seat:0,action}));
+  const ready=structuredClone(c);ready.decision.players[1].rewardResolved=true;ready.decision.players[1].ready=true;
+  await assert.rejects(h.request('native-prepare-action',{checkpoint:ready,seat:1,action}));
+  const pending=structuredClone(c);pending.decision.players[1].selection={optionId:pending.decision.players[1].rewards[0].id,pokemonId:pending.roster.field[1],moveIndex:null,fusionId:null};
+  await assert.rejects(h.request('native-prepare-action',{checkpoint:pending,seat:1,action}));
+  assert.equal(JSON.stringify(c),before);
+ }finally{await h.close()}
+});
+
 test('actual native faint requires an owned forced replacement and survives per-phase Worker recovery', async () => {
   const seed = 'team-forced-0', identity = { trainerId: 1, secretId: 2 };
   const h = await createOriginalRuleHost({ seed, identity });

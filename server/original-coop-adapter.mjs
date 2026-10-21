@@ -127,12 +127,18 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         payload: clone(raw),
         status: 'pending',
       };
-      if (!byId.has(intent.id)) byId.set(intent.id, intent);
+      const previous = byId.get(intent.id);
+      if (!previous) byId.set(intent.id, intent);
+      else if (['capture-pending','dex-ivs'].includes(raw.kind)) {
+        check(previous.status === 'pending' && previous.owner === intent.owner
+          && previous.payload.sourcePokemonId === raw.sourcePokemonId, 'CAPTURE_FACT_CONFLICT');
+        byId.set(intent.id, intent);
+      }
     }
     return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
   function scopeEvent(event, checkpoint) {
-    if (['preparation-open', 'preparation-reserve-swap'].includes(event.kind) && (event.seat === 0 || event.seat === 1))
+    if (['preparation-open', 'legacy-capture-choice'].includes(event.kind) && (event.seat === 0 || event.seat === 1))
       return { ...event, scope: event.seat };
     if (event.pokemonId !== undefined) {
       const entry = checkpoint.roster.entries.find(item => (item.pokemon?.fields?.id ?? item.pokemon?.id) === event.pokemonId);

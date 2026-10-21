@@ -20,6 +20,9 @@ for (const seat of [0, 1]) for (const slot of [1, null])
       await h.request('native-validate-progression', { checkpoint: c, seat, action });
       const projected = await h.request('native-project', { checkpoint: c, seat });
       assert.deepEqual(projected.personal.decision.learn, c.decision.learn);
+      const peerProjection = await h.request('native-project', { checkpoint: c, seat: 1 - seat });
+      assert.equal(peerProjection.personal.decision.learn, null, 'pending personal learning is owner-scoped');
+      assert.equal(peerProjection.personal.decision.options, null);
       await h.close(); h = await createOriginalRuleHost(config);
       const resumed = await h.request('native-progression', { checkpoint: JSON.parse(JSON.stringify(c)), seat, action });
       const result = await h.request('native-run-to-boundary', resumed.checkpoint);

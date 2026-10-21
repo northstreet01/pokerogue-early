@@ -1200,7 +1200,7 @@ export function projectNativeSnapshot(runtime, payload) {
       requiredSeats: [...c.decision.requiredSeats],
       options: c.decision.options?.[payload.seat] ?? null,
       players: c.decision.kind === 'preparation' ? c.decision.players[payload.seat] : null,
-      learn: c.decision.kind === 'learn-move' ? c.decision.learn : null,
+      learn: c.decision.kind === 'learn-move' && c.decision.requiredSeats.includes(payload.seat) ? c.decision.learn : null,
       switch: ['switch-confirm', 'switch-select'].includes(c.decision.kind)
         ? { outgoing: c.decision.switch?.outgoing?.[payload.seat] ?? null } : null,
       ...(legacyCaptureOptions(c, payload.seat) ? { legacyCapture: legacyCaptureOptions(c, payload.seat) } : {}),

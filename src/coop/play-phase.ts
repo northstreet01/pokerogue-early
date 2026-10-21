@@ -13,6 +13,9 @@ import { Command } from '../ui/command-ui-handler';
 import { ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
 import { AddPokeballModifier } from '../modifier/modifier';
 import { PartyUiMode, PartyOption } from '../ui/party-ui-handler';
+import { getPokeballName } from '../data/pokeball';
+import { SummaryUiMode } from '../ui/summary-ui-handler';
+import { allMoves } from '../data/move';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -232,8 +235,8 @@ export default class CoopPlayPhase extends Phase {
           return;
         }
         if (action?.kind === 'fight') this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'capture-choice', 'switch', 'ball'].includes(action?.kind)) this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball'].includes(action?.kind))
+        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'capture-choice', 'switch', 'ball', 'learn-move'].includes(action?.kind)) this.submitted = true;
+        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball', 'learn-move'].includes(action?.kind))
           await this.scene.ui.setMode(Mode.MESSAGE);
         if (action?.kind === 'profile-ready') this.profileDirty = false;
         if (this.latest?.personal.decision.kind === 'wait-actions') this.setStatus('行动已提交，等待队友／结算…');
@@ -323,6 +326,7 @@ export default class CoopPlayPhase extends Phase {
     if (this.releaseTeamParty) return;
     if (this.latest?.personal.decision.kind === 'capture-choice' || this.latest?.personal.decision.legacyCapture) await this.openCaptureChoice();
     else if (this.latest?.personal.decision.kind === 'preparation') await this.openPreparationMenu();
+    else if (this.latest?.personal.decision.kind === 'learn-move') await this.openLearnMoveMenu();
     else if (['switch-confirm', 'switch-select', 'wait-switch'].includes(this.latest?.personal.decision.kind)) await this.openSwitchPrompt();
     else this.openBattleCommand();
   }
@@ -597,6 +601,36 @@ export default class CoopPlayPhase extends Phase {
     if (operation === 'ready' && !player.rewardResolved || operation === 'skip-reward' && player.rewardResolved) return false;
     return this.sendAction({ kind: 'preparation', operation },
       operation === 'ready' ? '准备已提交，等待服务器确认…' : operation === 'unready' ? '取消准备已提交…' : '跳过奖励已提交…');
+  }
+
+  private async openLearnMoveMenu() {
+    const snapshot = this.latest, epoch = this.epoch, decision = snapshot?.personal.decision;
+    if (!decision || decision.kind !== 'learn-move' || this.seat === null
+      || !decision.requiredSeats.includes(this.seat) || !this.isPersonalInputCurrent(snapshot, epoch)) return;
+    const learn = decision.learn;
+    const entry = this.model.applied?.personal?.party?.find((item: any) => item.id === learn.pokemonId);
+    const move = allMoves[learn.moveId];
+    if (!entry || !move) { this.setStatus('待学招式数据缺失', true); return; }
+    const pokemon = restorePokemonState(capturePokemonState(entry.pokemon));
+    pokemon.scene = this.scene;
+    pokemon.generateName();
+    const submit = (slot: number | null) => {
+      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+      this.battleInputActive = false;
+      void this.scene.ui.setMode(Mode.MESSAGE).then(() =>
+        this.sendAction({ kind: 'learn-move', pokemonId: learn.pokemonId, slot },
+          slot === null ? '已放弃学习新招式…' : '已提交换招选择…'));
+    };
+    try {
+      await this.scene.ui.setMode(Mode.CONFIRM, () => {
+        void this.scene.ui.setMode(Mode.SUMMARY, pokemon, SummaryUiMode.LEARN_MOVE, move,
+          (slot: number) => submit(slot === 4 || slot < 0 ? null : slot)).catch(error =>
+          this.setStatus(`学招菜单失败：${error?.message ?? error}`, true));
+      }, () => submit(null));
+      this.setStatus(`是否让 ${pokemon.name} 学习 ${move.name}？`);
+    } catch (error) {
+      this.setStatus(`学招菜单失败：${error?.message ?? error}`, true);
+    }
   }
 
   private async openSwitchPrompt() {

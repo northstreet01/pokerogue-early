@@ -1,5 +1,7 @@
 # 分模块开发计划与进度
 
+2026-10-21 VS-02B-11 升级学招：A 代码接入原 LearnMovePhase 的 known／empty／满四招暂停、native progression 与 adapter 路由；B 接原 Confirm／SummaryUiMode.LEARN_MOVE 显示副本和 outbox 提交。既有 level-up／learn driver 18/18、typecheck／Worker／生产build通过，但**没有**真实自然升级生产 Worker、正式双 WS／重启／去重、原学招 UI 自动交互或双浏览器证据，完整回归未跑；A/B 均只能算可审查代码子集。详见[本批记录](mvp-vs-02b11-learn-move.md)。
+
 2026-10-21 VS-02B-10续接：A六只上限／原满员捕获取舍及旧库存显式迁移有限切片通过，B原Confirm／Party RELEASE／只读Summary和出场选择已接，自动通过／浏览器待用户，整体部分通过；包含原捕获专用放生前场及下一战原召唤，删除无限备用分页与仓库交换。最终代码7e1ad8c3完整串行1046/1046、退出0（1028503.5465ms），typecheck／Worker／生产build均0，见[验收记录](mvp-vs-02b10-resume-review.md)。不能写成完整M3／M4／M5或MVP通过。下一片限定原升级LearnMove满四招选择、恢复及新招FIGHT，复用learn-command／progression-choice-runner／原Summary；进化／其它整备分支另批，M6保持pending成果、不丢个人蛋。本次本地提交未合并／未推送。
 
 2026-10-21 VS-02B-10规则纠正／断电备份：每人最多6只，满员捕获按原版取舍；无限备用及分页交换方案撤回。新版native部分通过（真实Worker4/4、typecheck／Worker构建退出0），原取舍UI／旧库存迁移／新版WS事务验收／最终全套未完成，整体部分完成。下一批先完成“满员捕获→原Confirm／Party放生或放弃→恢复→继续战斗”的同一纵向链路，移除旧备用入口并更新旧断言，不开始成长或购物。仅推送独立评审备份，不能合main；见[记录](mvp-vs-02b10-reserve-team.md)。

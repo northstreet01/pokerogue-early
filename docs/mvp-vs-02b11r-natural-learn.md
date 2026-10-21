@@ -25,8 +25,9 @@
 ### 自动验证
 
 - 受影响 native 定向：`battle-core-faint`、`battle-core-replacement`、`battle-core-native-runtime`、`battle-core-native-interactions-qa` **75/75 通过**，约 100s。
-- `typecheck`、`build:coop-runtime`、生产 build 退出 0（build 约 1m26s，既有警告）。
-- 完整串行回归结果待本轮运行结束；不得沿用 1059/1046。
+- `typecheck`、`build:coop-runtime`、生产 build 退出 0（最终 build 约 1m4s，既有警告）。
+- 完整串行回归：`1..1059`，pass **1059**，fail／cancelled／skipped／todo 均 0，`1115796.162ms`（约 18m36s）；运行时 HEAD `420d9d63`。detached 进程未捕获 shell 退出码，TAP 无失败，不伪造 exit 0；全套没有自然学招用例。
+
 
 ## B
 

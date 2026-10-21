@@ -1,18 +1,19 @@
 import BattleScene from '../battle-scene';
 import { Phase } from '../phase';
 import Pokemon, { FieldPosition, HitResult } from '../field/pokemon';
-import { NewBattlePhase, EncounterPhase, SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase,
+import { NewBattlePhase, EncounterPhase, ShowTrainerPhase, SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase,
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
 import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase } from '../phases';
 import { SelectModifierPhase } from '../phases';
-import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase } from '../phases';
+import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase } from '../phases';
 import { Mode } from '../ui/ui';
 import { GameData } from '../system/game-data';
 import { GameStats } from '../system/game-stats';
 import { BattleAnim } from '../data/battle-anims';
 import { createOriginalRuntime, constructOriginalPokemon, constructSelectedStarterInstance, capturePokemonState } from './original-runtime';
+import Trainer from '../field/trainer';
 import { restoreStarterSelection } from '../coop/original-starter-selection';
 import { originalDecisionStateCodec as codec, originalPhaseStateCodec as phases } from '../original-phase-checkpoints';
 import { originalOwnedEggStateCodec } from '../original-phase-checkpoints';
@@ -55,6 +56,16 @@ import { advanceProgressionChoice } from '../battle-core/progression-choice-runn
 import { createLearnDecision, inspectLearnMove } from '../battle-core/learn-command.mjs';
 import { recoverVictoryParties } from '../battle-core/victory-aftermath-runner.mjs';
 
+// Trainer visuals are display-only. Native battle tests have no Phaser
+// Container list; the original encounter/rules still construct the real
+// Trainer and party, while the client projects its own trainer presentation.
+(Trainer.prototype as any).initSprite = function () {};
+(Trainer.prototype as any).playAnim = function () {};
+(Trainer.prototype as any).getSprites = function () { return [new DisplayTarget()]; };
+(Trainer.prototype as any).getTintSprites = function () { return [new DisplayTarget()]; };
+(Trainer.prototype as any).tint = function () { return this; };
+(Trainer.prototype as any).clearTint = function () { return this; };
+
 // Explicit display targets; unknown rendering methods remain unavailable.
 class DisplayTarget {
   x = 0; y = 0; visible = false;
@@ -65,6 +76,7 @@ class DisplayTarget {
   setOrigin(..._args) { return this; }
   setTexture(..._args) { return this; }
   setFrame(..._args) { return this; }
+  setPipeline(..._args: any[]) { return this; }
   setScale(..._args) { return this; }
   setAlpha(..._args: any[]) { return this; }
   clearTint() { return this; }
@@ -72,9 +84,9 @@ class DisplayTarget {
   destroy() {}
 }
 
-const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase,
+const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, AttemptCapturePhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, AttemptCapturePhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
@@ -167,6 +179,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.updateFieldScale = root.setFieldScale = () => Promise.resolve();
   root.updateUIPositions = root.updateWaveCountText = root.updateMoneyText = root.updateScoreText = () => {};
   root.trainer = root.arenaPlayer = root.arenaEnemy = root.arenaNextEnemy = new DisplayTarget();
+  root.charSprite = { showCharacter: () => Promise.resolve(), hide: () => Promise.resolve() };
+  root.showFieldOverlay = root.hideFieldOverlay = () => Promise.resolve();
   root.pbTray = root.pbTrayEnemy = { hide() {} };
   root.modifierBar = root.enemyModifierBar = { updateModifiers() {} };
   root.partyExpBar = {
@@ -187,6 +201,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   };
   root.abilityBar = { shown: false, showAbility(p) { this.shown = true; events.push({ kind: 'ability-display', pokemonId: p.id }); }, hide() { this.shown = false; } };
   root.add = { existing() {}, sprite: (..._args: any[]) => new DisplayTarget() };
+  root.load = { atlas() {}, image() {}, spritesheet() {}, audio() {},
+    isLoading() { return false; }, start() {},
+    once(event, fn) { if (event === 'complete') void Promise.resolve().then(() => {
+      try { fn(); } catch (error) { console.error('TRAINER_LOAD_CALLBACK', error); }
+    }); } };
+  root.anims = { generateFrameNames() { return []; }, create() {} };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
   root.validateAchv = (achv) => { intents.push({ kind: 'achievement-check', id: achv.id }); return false; };
   root.validateVoucher = () => { throw new Error('VOUCHER_POLICY_UNCONFIRMED'); };
@@ -251,6 +271,10 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     else check(mode === Mode.MESSAGE, 'NATIVE_UI_DECISION_REQUIRED');
     return Promise.resolve();
   },
+    showDialogue: (...args: any[]) => {
+      const callback = [...args].reverse().find(arg => typeof arg === 'function');
+      schedule(callback);
+    },
     showText: (text, _delay, callback) => { events.push({ kind: 'message', text }); schedule(callback); } };
   root.damageNumberHandler = { add: (p, amount, result = HitResult.EFFECTIVE, critical = false) =>
     events.push({ kind: 'damage-display', pokemonId: p.id, amount, result, critical }) };
@@ -272,7 +296,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     // TurnStart creates root-scene switches with a composite party cursor.
     // Normalize while the phase is queued, before its first checkpoint: later
     // execution and restart must not depend on the already consumed inputs.
-    if (p instanceof SwitchSummonPhase && (p as any).player && (p as any).scene === root) {
+    if (p instanceof SwitchSummonPhase && (p as any).player && (p as any).scene === root
+      && Number.isInteger((p as any).slotIndex) && (p as any).slotIndex >= 0) {
       const seat = (p as any).fieldIndex;
       const target = root.getParty()[(p as any).slotIndex];
       const index = parties[seat]?.indexOf(target);
@@ -1023,22 +1048,31 @@ export async function chooseNativePreparation(runtime, payload) {
 export async function nextNativeBattle(runtime, checkpoint) {
   const c = codec.restore(checkpoint), intents = [];
   check(![0,1].some(seat => hasLegacyCaptures(c,seat)), 'LEGACY_CAPTURE_PENDING');
-  const result = await advanceNextBattle(c, codec, {
-    phaseKind: p => p.constructor.name,
-    validateBranch(candidate) {
-      check(candidate.battle.battleType === 0 && candidate.battle.battleSpec === 0 && candidate.battle.waveIndex % 10 !== 0
-        && !Object.prototype.hasOwnProperty.call(fixedBattles, candidate.battle.waveIndex + 1), 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
-      check(candidate.players.every(player => player.modifiers.length === 0), 'UNSUPPORTED_NATIVE_ENCOUNTER_PLAYER_MODIFIERS');
-    },
-    async execute(candidate, p) {
-      const binding = bindNativeScene(candidate, runtime.scene.gameData);
-      try { const result = await binding.execute(p); intents.push(...binding.intents); return result; }
-      finally { binding.dispose(); }
-    },
-    validateEnemyModifiers: candidate => candidate.enemyModifiers.every(m => m instanceof PokemonHeldItemModifier
-      && candidate.battle.enemyParty.some(p => p.id === m.pokemonId) && m.stackCount > 0 && m.virtualStackCount === 0)
-  }, { decisionId: `native-${c.battle.waveIndex + 1}-0` });
-  return { checkpoint: codec.capture(result.context), events: result.events, intents };
+  const fixed = fixedBattles[c.battle.waveIndex + 1];
+  check(!fixed || (c.battle.waveIndex + 1 === 5 && fixed.battleType === BattleType.TRAINER), 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
+  const oldDouble = fixed?.double;
+  if (fixed) fixed.double = true;
+  try {
+    const result = await advanceNextBattle(c, codec, {
+      phaseKind: p => p.constructor.name,
+      validateBranch(candidate) {
+        check(candidate.battle.battleType === 0 || candidate.battle.waveIndex === 5
+          && candidate.battle.battleType === BattleType.TRAINER, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
+        check(candidate.battle.battleSpec === 0 && candidate.battle.waveIndex % 10 !== 0, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
+        check(candidate.players.every(player => player.modifiers.length === 0), 'UNSUPPORTED_NATIVE_ENCOUNTER_PLAYER_MODIFIERS');
+      },
+      async execute(candidate, p) {
+        const binding = bindNativeScene(candidate, runtime.scene.gameData);
+        try { const result = await binding.execute(p); intents.push(...binding.intents); return result; }
+        finally { binding.dispose(); }
+      },
+      validateEnemyModifiers: candidate => candidate.enemyModifiers.every(m => m instanceof PokemonHeldItemModifier
+        && candidate.battle.enemyParty.some(p => p.id === m.pokemonId) && m.stackCount > 0 && m.virtualStackCount === 0)
+    }, { decisionId: `native-${c.battle.waveIndex + 1}-0` });
+    return { checkpoint: codec.capture(result.context), events: result.events, intents };
+  } finally {
+    if (fixed) fixed.double = oldDouble;
+  }
 }
 
 function releaseNativePartyMember(c, binding, seat, index, callback) {

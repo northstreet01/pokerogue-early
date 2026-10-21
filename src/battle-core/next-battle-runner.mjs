@@ -25,7 +25,24 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
   const events=[];
   for(const kind of ['NewBattlePhase','NextEncounterPhase']){
     const d=selectNextPhase(state,()=>check(false,'NEXT_BATTLE_QUEUE_EMPTY')).phase;
-    check(d?.kind==='original-phase'&&d.remaining==='start'&&driver.phaseKind(d.phase)===kind,'UNSUPPORTED_NEXT_BATTLE_PHASE');
+    if(kind==='NextEncounterPhase'&&d?.kind==='original-phase'&&['ReturnPhase','ShowTrainerPhase'].includes(driver.phaseKind(d.phase))){
+      let pre=d;
+      while(pre?.kind==='original-phase'&&['ReturnPhase','ShowTrainerPhase'].includes(driver.phaseKind(pre.phase))){
+        const returned=await driver.execute(c,pre.phase);
+        check(returned?.completed===true&&returned.pendingTasks===0&&Array.isArray(returned.events)&&Array.isArray(returned.grants),
+          'INCOMPLETE_NEXT_BATTLE_PHASE');
+        state.currentPhase=null;events.push(...returned.events);
+        pre=selectNextPhase(state,()=>check(false,'NEXT_BATTLE_QUEUE_EMPTY')).phase;
+      }
+      check(pre?.kind==='original-phase'&&pre.remaining==='start'&&driver.phaseKind(pre.phase)===kind,
+        'UNSUPPORTED_NEXT_BATTLE_PHASE');
+      const r=await driver.execute(c,pre.phase);
+      check(r?.completed===true&&r.pendingTasks===0&&Array.isArray(r.events)&&Array.isArray(r.grants)
+        &&r.grants.length===0,'INCOMPLETE_NEXT_BATTLE_PHASE');
+      state.currentPhase=null;events.push(...r.events);continue;
+    }
+    check(d?.kind==='original-phase'&&d.remaining==='start'&&driver.phaseKind(d.phase)===kind,
+      'UNSUPPORTED_NEXT_BATTLE_PHASE');
     const r=await driver.execute(c,d.phase);
     check(r?.completed===true&&r.pendingTasks===0&&Array.isArray(r.events)&&Array.isArray(r.grants)
       &&r.grants.length===0,'INCOMPLETE_NEXT_BATTLE_PHASE');
@@ -34,7 +51,11 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
   }
   c.decision={id:decisionId,kind:'continuing',requiredSeats:[],reason:'effects'};
   const after=codec.capture(c);
-  check(c.battle.waveIndex===context.battle.waveIndex+1&&c.battle.double===true
+  if(c.battle.battleType===1){
+    check(c.battle.battleSpec===0&&c.battle.waveIndex===context.battle.waveIndex+1
+      &&c.battle.double===true&&c.battle.turn===1&&c.battle.trainer&&c.battle.enemyParty.length>0
+      &&c.battle.enemyParty.every(p=>!p.isFainted(true)), 'INVALID_NEXT_BATTLE_RESULT');
+  } else check(c.battle.waveIndex===context.battle.waveIndex+1&&c.battle.double===true
     &&c.battle.battleType===0&&c.battle.battleSpec===0&&c.battle.turn===1
     &&c.battle.enemyParty.length===2&&c.battle.enemyParty.every(p=>!p.isFainted(true)), 'INVALID_NEXT_BATTLE_RESULT');
   check(canonical(personalBefore)===canonical(personalResources(c))&&canonical(before.eggState??null)===canonical(after.eggState??null)

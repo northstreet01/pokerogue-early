@@ -13,7 +13,7 @@ export function legacyCaptureOptions(c, seat) {
   check(party.length >= 1 && party.length <= 6, 'PERSONAL_PARTY_LIMIT');
   const action = (choice, releaseId) => ({ kind:'preparation', operation:'legacy-capture', pokemonId:reserve.pokemon.id, choice, releaseId });
   return { pokemonId: reserve.pokemon.id, options: [action('discard',null),
-    ...(party.length < 6 ? [action('keep',null)] : party.filter(e => !c.roster.field.includes(e.pokemon.id)).map(e => action('keep',e.pokemon.id)))] };
+    ...(party.length < 6 ? [action('keep',null)] : party.map(e => action('keep',e.pokemon.id)))] };
 }
 
 export function validateLegacyCapture(c, seat, action, codec, safe) {

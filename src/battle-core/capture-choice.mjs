@@ -10,7 +10,7 @@ export function createCaptureChoice(id, context, seat) {
   check(party.length === 6 && target?.pokemon.hp > 0, 'INVALID_CAPTURE_CHOICE');
   return { id, kind: 'capture-choice', requiredSeats: [seat], targetId: target.pokemon.id,
     options: { [seat]: [{ kind: 'capture-choice', releaseId: null },
-      ...party.filter(e => e.pokemon.id !== context.roster.field[seat]).map(e => ({ kind: 'capture-choice', releaseId: e.pokemon.id }))] } };
+      ...party.map(e => ({ kind: 'capture-choice', releaseId: e.pokemon.id }))] } };
 }
 
 export function validateCaptureChoice(context, seat, action) {

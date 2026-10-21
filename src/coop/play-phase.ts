@@ -538,7 +538,7 @@ export default class CoopPlayPhase extends Phase {
         await this.scene.ui.setMode(Mode.CONFIRM,
           () => { if (!chosen && current()) { chosen = true; return send(action); } },
           () => { if (!chosen && current()) { chosen = true; return releaseParty(); } });
-      }, (p:any) => allowed.has(p.id) ? null : '不能放生当前出场者或伙伴的成员', [PartyOption.RELEASE,PartyOption.SUMMARY]);
+      }, (p:any) => allowed.has(p.id) ? null : '请选择允许放生的本人队员', [PartyOption.RELEASE,PartyOption.SUMMARY]);
     };
     const menuEpoch = this.teamMenuEpoch; let chosen = false;
     this.setStatus(legacy ? (direct ? `旧版捕获 ${incomingName}：是否保留并加入本人队伍？取消则放弃。`

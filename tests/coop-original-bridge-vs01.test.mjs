@@ -1011,6 +1011,7 @@ for (const decline of [false,true]) test(`VS-02B-10 full capture ${decline?'decl
    if(decline){assert.deepEqual(state.sb.personal.party.map(e=>e.id),initial.personal.party.map(e=>e.id));assert.equal(state.sb.personal.party.some(e=>e.id===0),false)}
    else {
     assert.equal(state.sb.personal.party.some(e=>e.id===action.releaseId),false);assert.ok(saved.nativeCheckpoint.roster.retiredIds.includes(action.releaseId));
+    if(action.releaseId===initial.shared.field[1])assert.equal(state.sb.shared.field[1],null);
     const caught=state.sb.personal.party.find(e=>e.id===0);assert.ok(caught);assert.equal(pending[0].payload.pokemonId,caught.id);
     assert.deepEqual(pending[0].payload.pokemon,caught.pokemon);
     assert.equal(saved.intents.find(i=>i.type==='dex-ivs'&&i.payload.sourcePokemonId===pending[0].payload.sourcePokemonId).payload.pokemonId,caught.id);
@@ -1063,6 +1064,7 @@ test('VS-02B-10 old capture migration persists explicit release across failure/r
    assert.equal(state.sb.personal.party.length,6);assert.equal(state.sb.personal.reserve.length,0);assert.equal(state.sb.personal.decision.legacyCapture,undefined);
    assert.deepEqual(state.sb.personal.party.find(e=>e.id===0).pokemon,captured.pokemon);
    assert.equal(state.sb.personal.party.some(e=>e.id===action.releaseId),false);
+   if(action.releaseId===initial.shared.field[1])assert.equal(state.sb.shared.field[1],null);
    assert.deepEqual(state.sb.personal.resources,initial.personal.resources);assert.deepEqual(state.sb.personal.eggs,initial.personal.eggs);
    const committed=canonical(env.service.rooms.get(room.roomId).checkpoint);assert.deepEqual(JSON.parse(committed).intents,pending);
    await env.close();env=await start();[a,b]=await resume();state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());

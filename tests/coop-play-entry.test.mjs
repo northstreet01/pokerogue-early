@@ -631,8 +631,8 @@ function captureChoicePhase(legacy=false,underfull=false) {
   const pokemon=api.restorePokemonState(api.capturePokemonState(entry.pokemon));pokemon.id=8;
   p.model.applied.personal.reserve=[{id:8,owner:0,group:'reserve',index:0,pokemon}];
   const action=(choice,releaseId)=>({kind:'preparation',operation:'legacy-capture',pokemonId:8,choice,releaseId});
-  p.latest.personal.decision.legacyCapture={pokemonId:8,options:[action('discard',null),...(underfull?[action('keep',null)]:p.model.applied.personal.party.slice(1).map(e=>action('keep',e.id)))]};
- }else p.latest.personal.decision={id:'capture-4',kind:'capture-choice',requiredSeats:[0],options:[{kind:'capture-choice',releaseId:null},...p.model.applied.personal.party.slice(1).map(e=>({kind:'capture-choice',releaseId:e.id}))]};
+  p.latest.personal.decision.legacyCapture={pokemonId:8,options:[action('discard',null),...(underfull?[action('keep',null)]:p.model.applied.personal.party.map(e=>action('keep',e.id)))]};
+ }else p.latest.personal.decision={id:'capture-4',kind:'capture-choice',requiredSeats:[0],options:[{kind:'capture-choice',releaseId:null},...p.model.applied.personal.party.map(e=>({kind:'capture-choice',releaseId:e.id}))]};
  p.latest.decisionId=p.latest.personal.decision.id;
  return state;
 }
@@ -781,4 +781,11 @@ test('original Summary retains read-only across adjacent creatures and can retur
   assert.equal(shown[0][0], party[1]); assert.deepEqual(shown[0][4], { readOnly: true });
   handler.processInput(api.Button.CANCEL);
   assert.deepEqual(modes, [api.Mode.PARTY]);
+});
+
+test('capture RELEASE permits the original current-front choice without locally deleting or promoting a replacement',async()=>{
+ const state=captureChoicePhase(),{p,modes,sent}=state,before=ruleState(p),front=p.model.applied.personal.party[0].id;
+ await p.openDecisionInput();await modes.at(-1)[1]();await modes.at(-1)[3](0,api.PartyOption.RELEASE);
+ assert.equal(modes.at(-1)[0],api.Mode.CONFIRM);await modes.at(-1)[1]();
+ assert.equal(sent.length,1);assert.deepEqual(sent[0].action,{kind:'capture-choice',releaseId:front});assert.deepEqual(ruleState(p),before);
 });

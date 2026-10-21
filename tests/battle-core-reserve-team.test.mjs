@@ -20,9 +20,12 @@ test('ordinary capture joins an under-full personal party and can fight the next
  }finally{await h.close()}
 });
 
-test('full-party capture must release an owned bench or decline the new individual, never accumulate seven',async()=>{
+test('full-party capture releases an owned member including the front or declines, never accumulating seven',async()=>{
  const {h,c,before}=await fullCaptureChoice();
  try {
+  // Explicit near-faint roster boundary: releasing the front leaves a fainted
+  // first bench. Original SummonPhase.preSummon must select a living survivor.
+  personal(c,'party')[1].pokemon.fields.hp=0;
   assert.equal(personal(c,'party').length,6);assert.equal(personal(c,'reserve').length,0);
   assert.equal(c.players[1].pokeballCounts[4],0);
   for(const action of c.decision.options[1].slice(0,2)) {
@@ -33,6 +36,8 @@ test('full-party capture must release an owned bench or decline the new individu
    assert.equal(after.roster.field[0],c.roster.field[0]);
    if(action.releaseId===null){assert.deepEqual(personal(after,'party').map(e=>e.pokemon.fields.id),personal(c,'party').map(e=>e.pokemon.fields.id));}
    else {
+    assert.equal(action.releaseId,c.roster.field[1]);
+    assert.equal(done.checkpoint.roster.field[1],null);
     assert.ok(!personal(after,'party').some(e=>e.pokemon.fields.id===action.releaseId));
     assert.ok(after.roster.retiredIds.includes(action.releaseId));
     const caught=personal(after,'party').find(e=>e.pokemon.fields.id===0);assert.ok(caught);
@@ -44,11 +49,11 @@ test('full-party capture must release an owned bench or decline the new individu
  }finally{await h.close()}
 });
 
-test('capture choice rejects peer/front/extra fields, stale scope and ready bypass without mutation',async()=>{
+test('capture choice rejects foreign/unknown IDs, extra fields, stale scope and ready bypass without mutation',async()=>{
  const {h,c}=await fullCaptureChoice();
  try {
   const snapshot=JSON.stringify(c);
-  for(const releaseId of [c.roster.field[0],c.roster.field[1],4294967295])
+  for(const releaseId of [c.roster.field[0],4294967295])
    await assert.rejects(h.request('native-switch',{checkpoint:c,inputs:{1:{kind:'capture-choice',releaseId}}}));
   await assert.rejects(h.request('native-switch',{checkpoint:c,inputs:{0:c.decision.options[1][0]}}));
   await assert.rejects(h.request('native-switch',{checkpoint:c,inputs:{1:{...c.decision.options[1][1],extra:true}}}));
@@ -102,7 +107,7 @@ test('old reserve captures require explicit choices, never grow the party above 
    const legacy=view.personal.decision.legacyCapture;assert.ok(legacy);
    assert.equal(legacy.pokemonId,personal(state,'reserve')[0].pokemon.fields.id);
    await assert.rejects(h.request('native-prepare-action',{checkpoint:state,seat:1,action:{kind:'preparation',operation:'ready'}}),e=>e.code==='LEGACY_CAPTURE_PENDING');
-   const keep=legacy.options.find(o=>o.choice==='keep');
+   const keep=legacy.options.find(o=>o.choice==='keep'&&o.releaseId!==state.roster.field[1]);
    const action=step<4?keep:legacy.options.find(o=>o.choice==='discard');
    const incoming=personal(state,'reserve')[0].pokemon;
    await h.request('native-validate-preparation',{checkpoint:state,seat:1,action});

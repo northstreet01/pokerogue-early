@@ -910,7 +910,7 @@ export async function chooseNativePreparation(runtime, payload) {
       const party = binding.views[seat].getParty();
       if (action.choice === 'keep' && action.releaseId !== null) {
         const index = party.findIndex(p => p.id === action.releaseId);
-        check(index > 0, 'INVALID_LEGACY_CAPTURE_CHOICE');
+        check(index >= 0, 'INVALID_LEGACY_CAPTURE_CHOICE');
         releaseNativePartyMember(c, binding, seat, index, () => {});
       }
       c.roster.entries = c.roster.entries.filter(e => e !== incoming);
@@ -951,6 +951,14 @@ export async function nextNativeBattle(runtime, checkpoint) {
 
 function releaseNativePartyMember(c, binding, seat, index, callback) {
   const party = binding.views[seat].getParty();
+  if (c.roster.field[seat] === party[index].id) {
+    binding.root.field.remove(party[index]);
+    c.roster.field[seat] = null;
+    // That member's command has already produced this catch. The next original
+    // Encounter/Summon must deploy a survivor, rather than pretending a bench
+    // member has already been summoned (preSummon also handles a fainted first).
+    c.battle.turnCommands[seat] = null;
+  }
   c.roster.retiredIds.push(party[index].id);
   // Original release owns modifier removal, splice, destruction and callback.
   PartyUiHandler.prototype.doRelease.call({ scene: binding.views[seat], cursor:index,
@@ -972,7 +980,7 @@ export async function chooseNativeSwitch(runtime, payload) {
       await binding.execute(phase, () => {
         if (action.releaseId === null) { phase.finishCatch(false); return; }
         const party = binding.views[seat].getParty(), index = party.findIndex(p => p.id === action.releaseId);
-        check(index > 0, 'INVALID_CAPTURE_CHOICE');
+        check(index >= 0, 'INVALID_CAPTURE_CHOICE');
         releaseNativePartyMember(c, binding, seat, index, () => phase.finishCatch(true));
       });
       c.continuation.currentPhase = null;

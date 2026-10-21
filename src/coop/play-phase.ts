@@ -509,6 +509,13 @@ export default class CoopPlayPhase extends Phase {
     const direct = legacy && options.find((o:any) => o.choice === 'keep' && o.releaseId === null);
     const releaseOptions = options.filter((o:any) => o.releaseId !== null);
     if (!decline || !direct && !releaseOptions.length) throw new Error('CAPTURE_OPTIONS_MISSING');
+    const displayName = (entry:any) => {
+      const pokemon = restorePokemonState(capturePokemonState(entry.pokemon)); pokemon.generateName();
+      return `${pokemon.name} Lv.${pokemon.level}`;
+    };
+    const incoming = legacy && this.model.applied.personal.reserve.find((e:any) => e.id === legacy.pokemonId);
+    if (legacy && !incoming) throw new Error('PERSONAL_CAPTURE_MISSING');
+    const incomingName = incoming ? displayName(incoming) : '新捕获的宝可梦';
     const send = async (action:any) => {
       const menuEpoch = this.teamMenuEpoch;
       await this.scene.ui.setMode(Mode.MESSAGE);
@@ -526,7 +533,7 @@ export default class CoopPlayPhase extends Phase {
         await this.scene.ui.setMode(Mode.MESSAGE);
         const current = () => this.isPersonalInputCurrent(snapshot,epoch) && menuEpoch === this.teamMenuEpoch;
         if (!current()) return;
-        this.setStatus('确定放生选中的本人队员，并接纳捕获的宝可梦？');
+        this.setStatus(`确定放生 ${displayName(entry)}，并接纳 ${incomingName}？`);
         let chosen = false;
         await this.scene.ui.setMode(Mode.CONFIRM,
           () => { if (!chosen && current()) { chosen = true; return send(action); } },
@@ -534,8 +541,8 @@ export default class CoopPlayPhase extends Phase {
       }, (p:any) => allowed.has(p.id) ? null : '不能放生当前出场者或伙伴的成员', [PartyOption.RELEASE,PartyOption.SUMMARY]);
     };
     const menuEpoch = this.teamMenuEpoch; let chosen = false;
-    this.setStatus(legacy ? (direct ? '旧版捕获待处理：是否保留并加入本人队伍？取消则放弃。'
-      : '旧版捕获待处理：队伍已满6只，是否放生现有队员后接纳？取消则放弃。')
+    this.setStatus(legacy ? (direct ? `旧版捕获 ${incomingName}：是否保留并加入本人队伍？取消则放弃。`
+      : `旧版捕获 ${incomingName}：队伍已满6只，是否放生现有队员后接纳？取消则放弃。`)
       : '队伍已满6只。是否放生一名现有队员后接纳新捕获？取消则放弃本次捕获。');
     const choose = (callback:()=>any) => {
       if (!chosen && this.isPersonalInputCurrent(snapshot,epoch) && menuEpoch === this.teamMenuEpoch) {

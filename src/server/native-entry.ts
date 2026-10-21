@@ -529,7 +529,7 @@ function actionDecision(c, root, id) {
       const hasUsableMove = pokemon.getMoveset().some(move => move.isUsable(pokemon));
       return [seat, [
         ...pokemon.getMoveset().flatMap((move, cursor) => {
-          if (hasUsableMove ? !move.isUsable(pokemon) : cursor !== 0) return [];
+          if (hasUsableMove && !move.isUsable(pokemon)) return [];
           // Original CommandPhase selects Struggle when no move is usable.
           // Keep a legal original cursor; never synthesize a rule command here.
           const targets = getMoveTargets(pokemon, hasUsableMove ? move.moveId : Moves.STRUGGLE);

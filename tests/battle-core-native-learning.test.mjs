@@ -47,7 +47,10 @@ test('native exhausted moves offer original Struggle rather than an empty action
     for(const m of own(c,1).pokemon.fields.moveset) m.fields.ppUsed=999;
     c.continuation.phaseQueue.shift();
     const ready=(await h.request('native-run-to-boundary',c)).checkpoint;
-    const attack=ready.decision.options[1].find(o=>o.kind==='fight');assert.ok(attack);
+    const fights=ready.decision.options[1].filter(o=>o.kind==='fight');
+    assert.deepEqual([...new Set(fights.map(o=>o.cursor))],own(c,1).pokemon.fields.moveset.map((_,i)=>i),
+      'every original move row remains a legal Struggle selection');
+    const attack=fights.find(o=>o.cursor===1);assert.ok(attack);
     const peer=ready.decision.options[0].find(o=>o.kind==='fight'&&(o.target===null||o.target>=2));
     await h.request('native-validate',{checkpoint:ready,seat:1,action:attack});
     const sub=(await h.request('native-submit',{checkpoint:ready,inputs:{0:peer,1:attack}})).checkpoint;

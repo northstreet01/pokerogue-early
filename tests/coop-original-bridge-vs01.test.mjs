@@ -12,6 +12,7 @@ import { createSnapshotConsumer } from '../src/battle-core/coop-client.mjs';
 import { canonical } from '../src/battle-core/coop-contract.mjs';
 import { createOriginalClientModel } from '../src/coop/original-client-model.mjs';
 import { fullCaptureChoice, capturedPreparation } from './helpers/native-reserve-fixture.mjs';
+import { learningFixture } from './helpers/native-learning-fixture.mjs';
 
 // VS-01 internal seam proof: two real WebSocket clients, the formal coordinator,
 // the eight-method original adapter, a room-scoped original Worker, real
@@ -164,7 +165,7 @@ async function applyAndAck(env, client, snapshot) {
 
 function requiresInput(snapshot) {
   const decision = snapshot.personal.decision;
-  return ['lobby', 'wait-actions', 'preparation', 'switch-confirm', 'switch-select', 'wait-switch', 'capture-choice'].includes(decision.kind)
+  return ['lobby', 'wait-actions', 'preparation', 'switch-confirm', 'switch-select', 'wait-switch', 'capture-choice', 'learn-move'].includes(decision.kind)
     && decision.requiredSeats.length > 0;
 }
 
@@ -1122,3 +1123,74 @@ test('VS-02B-10 natural combat faint resumes an owned forced switch after formal
       assert.ok(state.sa.revision > revision);
     } finally { if (env) await env.close(); await disk.cleanup(); }
   });
+
+for (const slot of [1, null]) test(`VS-02B-11 native learning slot=${slot}: formal storage rollback/restart/dedupe/isolation and next FIGHT`,
+ { timeout: 120000 }, async () => {
+  // Explicit synthetic learning queue; all projection/validation/advance and
+  // subsequent combat use the production adapter and real room Worker.
+  const native = await learningFixture({ seat: 1, moveId: 52 });
+  const paused = (await native.h.request('native-run-to-boundary', native.c)).checkpoint;
+  await native.h.close();
+  const disk = await temporaryStore(); let env, rejectRevision = null;
+  const fixture = { seed: paused.scene.seed, identities: [{trainerId:1,secretId:2},{trainerId:3,secretId:4}],
+    parties:[[1,4,7],[906,909,912]], eggState:{players:[[],[]]} };
+  const start = () => { const actual = new FormalRoomStore(disk.directory);
+    return startEnv({ fixture, initialCheckpoint: paused, store: { load: () => actual.load(), save: room => {
+      if (room.revision === rejectRevision) throw Error('synthetic learning candidate disk failure');
+      return actual.save(room);
+    } } });
+  };
+  try {
+    env = await start(); const room = await createRoom(env);
+    let state = await syncBoth(env, room.a, room.b, room.sa, room.sb);
+    const isolated = await createRoom(env), isolatedBefore = canonical(env.service.rooms.get(isolated.roomId).checkpoint);
+    const initial = state.sb, peer = state.sa, before = canonical(env.service.rooms.get(room.roomId).checkpoint);
+    assert.equal(initial.personal.decision.kind, 'learn-move');
+    assert.deepEqual(initial.personal.decision.learn, paused.decision.learn);
+    const tokens = [room.a,room.b].map(c => c.messages.find(m => m.type === 'welcome' && m.roomId).resumeToken);
+    const resume = async () => { const clients = [await connect(env,'learn-A'),await connect(env,'learn-B')];
+      for (const [seat,client] of clients.entries()) {
+        client.send({type:'resumeSeat',roomId:room.roomId,resumeToken:tokens[seat]}); await client.wait(m=>m.type==='snapshot');
+      }
+      return clients;
+    };
+    await env.close(); env = await start(); let [a,b] = await resume();
+    state = await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),before);
+    const action = initial.personal.decision.options.find(o => o.slot === slot);
+    const envelope = {type:'submitAction',roomId:room.roomId,runId:room.runId,decisionId:initial.decisionId,
+      expectedRevision:initial.revision,actionId:'learn-durable',action};
+    rejectRevision = initial.revision + 1;
+    const failure = b.next(m => m.type==='error' && m.code==='STORAGE_FAILED'); b.send(envelope);
+    const receipt = await b.wait(m => m.type==='actionReceipt' && m.actionId===envelope.actionId);
+    assert.equal(receipt.accepted,true,receipt.code); await failure;
+    const failed = (await disk.store.load()).find(r=>r.roomId===room.roomId);
+    assert.equal(failed.revision,initial.revision); assert.equal(canonical(failed.checkpoint),before);
+    assert.deepEqual(failed.inputs,{1:action});
+    await env.close(); rejectRevision=null; env=await start(); [a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    if(state.sb.revision===initial.revision) state=await syncBoth(env,a,b,await a.waitRevisionAfter(initial.revision),await b.waitRevisionAfter(initial.revision));
+    assert.equal(state.sb.revision,initial.revision+1);
+    assert.equal(state.sb.personal.decision.kind,'wait-actions');
+    assert.deepEqual(state.sa.personal.party,peer.personal.party);
+    assert.deepEqual(state.sb.personal.eggs,initial.personal.eggs);
+    assert.deepEqual(state.sb.personal.resources,initial.personal.resources);
+    const expected=structuredClone(initial.personal.party[0].pokemon.fields.moveset);
+    if(slot!==null) expected[slot]={type:'PokemonMove',fields:{moveId:52,ppUsed:0,ppUp:0,virtual:false},undefinedFields:[]};
+    assert.deepEqual(state.sb.personal.party[0].pokemon.fields.moveset,expected);
+    const committed=canonical(env.service.rooms.get(room.roomId).checkpoint);
+    await env.close(); env=await start(); [a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),committed);
+    b.send(envelope); assert.deepEqual(await b.wait(m=>m.type==='actionReceipt'&&m.actionId===envelope.actionId),receipt);
+    const conflict=b.next(m=>m.type==='error'&&m.code==='ACTION_ID_CONFLICT');
+    b.send({...envelope,action:{...action,slot:slot===null?0:null}}); await conflict;
+    assert.equal(canonical((await disk.store.load()).find(r=>r.roomId===isolated.roomId).checkpoint),isolatedBefore);
+    const attack=slot===null?fightAction(state.sb):state.sb.personal.decision.options.find(o=>o.kind==='fight'&&o.cursor===slot&&o.target>=2);
+    assert.ok(attack);
+    const pp=state.sb.personal.party[0].pokemon.fields.moveset[attack.cursor].fields.ppUsed;
+    state=await submitBoth(env,{...room,a,b},state.sa,state.sb,[fightAction(state.sa),attack]);
+    assert.ok(state.sb.revision>initial.revision+1);
+    assert.equal(state.sb.personal.party[0].pokemon.fields.moveset[attack.cursor].fields.ppUsed,pp+1);
+  } finally { if(env) await env.close(); await disk.cleanup(); }
+ });

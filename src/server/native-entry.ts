@@ -641,10 +641,11 @@ function progressionContext(c, seat) {
   check(d.kind === 'learn-move' && d.requiredSeats.length === 1 && d.requiredSeats[0] === seat
     && current?.kind === 'original-phase' && current.remaining === 'learn-apply'
     && c.continuation.standbyPhase === null && phase instanceof LearnMovePhase
-    && phases.capture(phase, c) === seat, 'INVALID_PROGRESSION_PHASE');
+    && phases.capture(phase, c).scope === seat, 'INVALID_PROGRESSION_PHASE');
   const party = c.roster.entries.filter(entry => entry.owner === seat && entry.group === 'party')
     .sort((a, b) => a.index - b.index);
-  check(party[(phase as any).partyMemberIndex], 'INVALID_PROGRESSION_PHASE');
+  check(party[(phase as any).partyMemberIndex]?.pokemon.id === d.learn.pokemonId
+    && (phase as any).moveId === d.learn.moveId, 'INVALID_PROGRESSION_PHASE');
   return { d, current, phase, party };
 }
 
@@ -661,6 +662,7 @@ export async function chooseNativeProgression(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
   const seat = payload.seat;
+  progressionContext(c, seat);
   const result = await advanceProgressionChoice(c, { [seat]: payload.action }, codec, originalSafeDecisionCodec, {
     async resumeLearning(candidate, phase, { action }) {
       const binding = bindNativeScene(candidate, runtime.scene.gameData);
@@ -685,14 +687,17 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
       const p = selectNextPhase(binding.root, () => populatePhaseQueue(binding.root, () => new TurnInitPhase(binding.root))).phase;
       if (p instanceof LearnMovePhase) {
         const partyIndex = (p as any).partyMemberIndex, moveId = (p as any).moveId;
-        const seat = [0, 1].find(owner => c.roster.entries.some(entry => entry.owner === owner
-          && entry.group === 'party' && entry.index === partyIndex));
-        check(seat !== undefined, 'INVALID_LEARN_OWNER');
+        const seat = binding.bindPhase(p);
+        check(seat === 0 || seat === 1, 'INVALID_LEARN_OWNER');
         const entry = c.roster.entries.find(item => item.owner === seat && item.group === 'party'
           && item.index === partyIndex);
         check(entry, 'INVALID_LEARN_OWNER');
         const selection = inspectLearnMove(entry.pokemon, moveId);
         if (selection.kind === 'choose') {
+          // selectNextPhase removed this phase from the bound queues. Persist
+          // that removal before saving it as current, otherwise decline would
+          // reopen the very same learning choice after recovery.
+          binding.sync();
           const id = `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`;
           phases.capture(p, c, seat);
           c.continuation.currentPhase = { kind: 'original-phase', phaseId: Math.max(-1,

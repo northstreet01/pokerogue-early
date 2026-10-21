@@ -3120,14 +3120,15 @@ export class LearnMovePhase extends PlayerPartyMemberPokemonPhase {
       return this.end();
     const emptyMoveIndex = selection.kind === 'automatic' ? selection.slot : -1;
 
-    const messageMode = this.scene.ui.getHandler() instanceof EvolutionSceneHandler
+    const messageMode = this.scene.ui.getHandler?.() instanceof EvolutionSceneHandler
       ? Mode.EVOLUTION_SCENE
       : Mode.MESSAGE;
+    const hosted = presentOnHost(this.scene, 'learn-move', { pokemonId: pokemon.id, moveId: this.moveId });
 
     if (emptyMoveIndex > -1) {
       pokemon.setMove(emptyMoveIndex, this.moveId);
-      initMoveAnim(this.moveId).then(() => {
-        loadMoveAnimAssets(this.scene, [ this.moveId ], true)
+      (hosted ? Promise.resolve() : initMoveAnim(this.moveId)).then(() => {
+        (hosted ? Promise.resolve() : loadMoveAnimAssets(this.scene, [ this.moveId ], true))
           .then(() => {
             this.scene.ui.setMode(messageMode).then(() => {
               this.scene.playSoundWithoutBgm('level_up_fanfare', 1500);

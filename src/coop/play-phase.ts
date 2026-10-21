@@ -608,28 +608,87 @@ export default class CoopPlayPhase extends Phase {
     if (!decision || decision.kind !== 'learn-move' || this.seat === null
       || !decision.requiredSeats.includes(this.seat) || !this.isPersonalInputCurrent(snapshot, epoch)) return;
     const learn = decision.learn;
-    const entry = this.model.applied?.personal?.party?.find((item: any) => item.id === learn.pokemonId);
-    const move = allMoves[learn.moveId];
+    const entry = this.model.applied?.personal?.party?.find((item: any) => item.id === learn?.pokemonId);
+    const move = allMoves[learn?.moveId];
     if (!entry || !move) { this.setStatus('待学招式数据缺失', true); return; }
-    const pokemon = restorePokemonState(capturePokemonState(entry.pokemon));
-    pokemon.scene = this.scene;
-    pokemon.generateName();
-    const submit = (slot: number | null) => {
-      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+    this.clearTeamParty();
+    const menuEpoch = this.teamMenuEpoch, pokemon = this.makeTeamPokemon(entry);
+    let active = true, settled = false, destroyed = false;
+    let step: 'prompt' | 'summary' | 'stop' | 'transition' = 'prompt';
+    const current = () => active && menuEpoch === this.teamMenuEpoch && this.isPersonalInputCurrent(snapshot, epoch);
+    const dispose = () => {
+      if (destroyed) return;
+      destroyed = true;
+      this.scene.tweens?.killTweensOf(pokemon);
+      if ((pokemon as any).battleInfo) this.scene.tweens?.killTweensOf((pokemon as any).battleInfo);
+      pokemon.destroy();
+    };
+    const release = () => {
+      active = false;
+      this.scene.ui.getHandler?.(Mode.SUMMARY)?.clear();
+      this.scene.ui.getHandler?.(Mode.CONFIRM)?.clear();
+      if (settled) dispose();
+    };
+    this.releaseTeamParty = release;
+    const recover = async (error: any) => {
+      const wasCurrent = current();
+      if (this.releaseTeamParty === release) this.clearTeamParty(); else if (settled) dispose();
+      if (!wasCurrent) return;
+      this.setStatus(`学招菜单失败：${error?.message ?? error}`, true);
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (!this.isPersonalInputCurrent(snapshot, epoch) || this.teamMenuEpoch !== menuEpoch + 1) return;
+      this.controls.replaceChildren(this.button('重试学招菜单', () => {
+        if (this.isPersonalInputCurrent(snapshot, epoch)) return this.openDecisionInput();
+      }));
+    };
+    const guarded = (callback: (...args: any[]) => any) => (...args: any[]) => Promise.resolve().then(() => callback(...args)).catch(recover);
+    const submit = async (slot: number | null) => {
+      if (!current() || step !== (slot === null ? 'stop' : 'summary')
+        || !decision.options.some((option: any) => option.kind === 'learn-move'
+        && option.pokemonId === learn.pokemonId && option.slot === slot)) return;
+      this.clearTeamParty();
       this.battleInputActive = false;
-      void this.scene.ui.setMode(Mode.MESSAGE).then(() =>
-        this.sendAction({ kind: 'learn-move', pokemonId: learn.pokemonId, slot },
-          slot === null ? '已放弃学习新招式…' : '已提交换招选择…'));
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (!this.isPersonalInputCurrent(snapshot, epoch) || this.teamMenuEpoch !== menuEpoch + 1) return;
+      await this.sendAction({ kind: 'learn-move', pokemonId: learn.pokemonId, slot }, '学招选择已提交，等待服务器确认…');
+    };
+    const retry = async () => {
+      if (!current() || step !== 'stop') return;
+      this.clearTeamParty();
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (this.isPersonalInputCurrent(snapshot, epoch) && this.teamMenuEpoch === menuEpoch + 1) await this.openDecisionInput();
+    };
+    const stop = async () => {
+      if (!current() || !['prompt', 'summary'].includes(step)) return;
+      step = 'transition';
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (!current()) return;
+      step = 'stop';
+      this.setStatus(`放弃让 ${pokemon.name} 学习 ${move.name}？`);
+      await this.scene.ui.setMode(Mode.CONFIRM, guarded(() => submit(null)), guarded(retry));
     };
     try {
-      await this.scene.ui.setMode(Mode.CONFIRM, () => {
-        void this.scene.ui.setMode(Mode.SUMMARY, pokemon, SummaryUiMode.LEARN_MOVE, move,
-          (slot: number) => submit(slot === 4 || slot < 0 ? null : slot)).catch(error =>
-          this.setStatus(`学招菜单失败：${error?.message ?? error}`, true));
-      }, () => submit(null));
+      pokemon.init();
+      (pokemon as any).battleInfo?.setVisible(false);
+      await pokemon.loadAssets();
+      settled = true;
+      if (!current()) { dispose(); return; }
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (!current()) return;
+      await this.scene.ui.setMode(Mode.CONFIRM, guarded(async () => {
+        if (!current() || step !== 'prompt') return;
+        step = 'transition';
+        await this.scene.ui.setMode(Mode.MESSAGE);
+        if (!current()) return;
+        step = 'summary';
+        await this.scene.ui.setMode(Mode.SUMMARY, pokemon, SummaryUiMode.LEARN_MOVE, move,
+          guarded((slot: number) => step === 'summary' ? slot === 4 ? stop() : submit(slot) : undefined));
+      }), guarded(() => step === 'prompt' ? stop() : undefined));
+      if (!current()) return;
       this.setStatus(`是否让 ${pokemon.name} 学习 ${move.name}？`);
     } catch (error) {
-      this.setStatus(`学招菜单失败：${error?.message ?? error}`, true);
+      settled = true;
+      await recover(error);
     }
   }
 

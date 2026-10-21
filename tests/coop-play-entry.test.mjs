@@ -638,6 +638,71 @@ function captureChoicePhase(legacy=false,underfull=false) {
 }
 const ruleState=p=>[...p.model.applied.personal.party,...p.model.applied.personal.reserve].map(e=>api.capturePokemonState(e.pokemon));
 
+function learningMenuPhase() {
+  const state = personalPotionPhase(), { p, entry } = state;
+  const pokemonId = entry.id;
+  p.latest.decisionId = 'learn-4';
+  p.latest.personal.decision = { id: 'learn-4', kind: 'learn-move', requiredSeats: [0], learn: { pokemonId, moveId: 73 },
+    options: [0, 1, 2, 3, null].map(slot => ({ kind: 'learn-move', pokemonId, slot })) };
+  return state;
+}
+
+test('original learning Confirm/Summary uses loaded copies, cancels/reselects and submits server slot only', async () => {
+  const { p, entry, modes, sent } = learningMenuPhase(), before = api.capturePokemonState(entry.pokemon);
+  const modesBefore = () => modes.length;
+  await p.openDecisionInput();
+  const count = modesBefore(), oldAccept = modes.at(-1)[1];
+  await p.openDecisionInput(); assert.equal(modes.length, count, 'duplicate snapshot does not replace active menu');
+  await oldAccept();
+  const summary = modes.at(-1);
+  assert.equal(summary[0], api.Mode.SUMMARY);
+  assert.equal(summary[2], api.SummaryUiMode.LEARN_MOVE);
+  assert.notEqual(summary[1], entry.pokemon);
+  await summary[4](4); assert.equal(modes.at(-1)[0], api.Mode.CONFIRM);
+  assert.equal(sent.length, 0, 'cancel asks whether to stop teaching');
+  await modes.at(-1)[2]();
+  await modes.at(-1)[1]();
+  const select = modes.at(-1)[4];
+  await select(9); assert.equal(sent.length, 0);
+  await select(1); assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].action, { kind: 'learn-move', pokemonId: entry.id, slot: 1 });
+  await oldAccept(); await select(0); assert.equal(sent.length, 1, 'consumed callbacks cannot submit again');
+  assert.deepEqual(api.capturePokemonState(entry.pokemon), before, 'verified model is never edited');
+});
+
+test('learning decline requires second confirmation and IndexedDB failure reopens the decision', async () => {
+  const { p, modes, sent } = learningMenuPhase();
+  const store = p.storage; p.storage = { ...store };
+  p.storage.saveAction = async () => { throw Error('synthetic-disk-failure'); };
+  await p.openDecisionInput(); await modes.at(-1)[2]();
+  assert.equal(sent.length, 0);
+  await modes.at(-1)[1]();
+  assert.equal(p.actionId, null); assert.equal(sent.length, 0);
+  assert.equal(modes.at(-1)[0], api.Mode.CONFIRM);
+  p.storage = store;
+  await modes.at(-1)[2](); await modes.at(-1)[1]();
+  assert.equal(sent[0].action.slot, null);
+});
+
+test('learning callbacks reject changed epoch across mode awaits and dispose after pending asset load', async () => {
+  const { p, modes, sent } = learningMenuPhase();
+  await p.openDecisionInput();
+  const accept = modes.at(-1)[1], setMode = p.scene.ui.setMode;
+  p.scene.ui.setMode = async (...args) => { await setMode(...args); p.epoch = 'other-epoch'; };
+  await accept();
+  assert.notEqual(modes.at(-1)[0], api.Mode.SUMMARY);
+  assert.equal(sent.length, 0);
+  p.clearTeamParty(); p.epoch = 'epoch-1'; p.scene.ui.setMode = setMode;
+  let loaded, destroyed = 0;
+  const make = p.makeTeamPokemon;
+  p.makeTeamPokemon = entry => { const copy = make(entry); copy.loadAssets = () => new Promise(r => { loaded = r; });
+    copy.destroy = () => { destroyed++; }; return copy; };
+  const loading = p.openDecisionInput();
+  p.clearTeamParty(); assert.equal(destroyed, 0);
+  loaded(); await loading; assert.equal(destroyed, 1);
+  assert.equal(sent.length, 0);
+});
+
 async function captureConfirmation(state) {
  const {p,modes}=state;await p.openDecisionInput();assert.equal(modes.at(-1)[0],api.Mode.CONFIRM);
  await modes.at(-1)[1]();assert.equal(modes.at(-1)[0],api.Mode.PARTY);

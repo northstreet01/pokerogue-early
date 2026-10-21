@@ -167,7 +167,11 @@ export function createPhaseStateCodec({constructors, evolution, formChange, modi
       if(values.pokemon!==undefined)check(values.pokemon!==null&&values.egg.hatchWaves<=0
         &&Number.isInteger(values.eggMoveIndex)&&values.eggMoveIndex>=0&&values.eggMoveIndex<=3,'INVALID_HATCH_RESULT');
     }
-    if(Object.hasOwn(values,'fieldIndex'))check(Number.isInteger(values.fieldIndex)&&values.fieldIndex>=0&&values.fieldIndex<=1,'INVALID_PHASE_FIELD');
+    // Original PartyMemberPokemonPhase uses -1 for an off-field party member.
+    // Command/field phases still require an actual battler slot.
+    if(Object.hasOwn(values,'fieldIndex'))check(Number.isInteger(values.fieldIndex)
+      &&(values.fieldIndex>=0&&values.fieldIndex<=1||values.fieldIndex===-1&&Number.isInteger(values.partyMemberIndex)
+        &&values.partyMemberIndex>=0),'INVALID_PHASE_FIELD');
     if(Object.hasOwn(values,'moveId'))check(Number.isSafeInteger(values.moveId)&&hasMove?.(values.moveId),'UNKNOWN_MOVE');
     if(values.partyMemberIndex!==undefined) {
       const group=context.roster.entries.filter(e=>values.player?e.owner===scope&&e.group==='party':e.owner===null).sort((a,b)=>a.index-b.index);

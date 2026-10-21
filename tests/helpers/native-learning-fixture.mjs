@@ -3,8 +3,8 @@ const config = { seed: 'learn-review', identity: { trainerId: 1, secretId: 2 } }
 const fields = values => Object.fromEntries(Object.entries(values).map(([k, value]) => [k, { presence: 'value', value }]));
 // Explicit synthetic queue fixture: real native Pokemon/phase codecs and Worker,
 // but not evidence of natural battle level-up or browser interaction.
-export async function learningFixture({ seat = 1, full = true, moveId = 73, index = 0 } = {}) {
-  const h = await createOriginalRuleHost(config);
+export async function learningFixture({ seat = 1, full = true, moveId = 73, index = 0, seed = config.seed } = {}) {
+  const h = await createOriginalRuleHost({...config, seed});
   try {
     const c = (await h.request('native-open-to-input', {
       parties: [[1, 4, 7], [906, 909, 912]], eggState: { players: [[], []] },

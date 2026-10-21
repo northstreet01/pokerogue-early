@@ -13,6 +13,7 @@ import { canonical } from '../src/battle-core/coop-contract.mjs';
 import { createOriginalClientModel } from '../src/coop/original-client-model.mjs';
 import { fullCaptureChoice, capturedPreparation } from './helpers/native-reserve-fixture.mjs';
 import { learningFixture } from './helpers/native-learning-fixture.mjs';
+import { naturalLearning } from './helpers/native-natural-learning.mjs';
 
 // VS-01 internal seam proof: two real WebSocket clients, the formal coordinator,
 // the eight-method original adapter, a room-scoped original Worker, real
@@ -1193,4 +1194,61 @@ for (const slot of [1, null]) test(`VS-02B-11 native learning slot=${slot}: form
     assert.ok(state.sb.revision>initial.revision+1);
     assert.equal(state.sb.personal.party[0].pokemon.fields.moveset[attack.cursor].fields.ppUsed,pp+1);
   } finally { if(env) await env.close(); await disk.cleanup(); }
+ });
+
+for (const slot of [0,null]) test(`VS-02B-11R natural level-6 learning slot=${slot}: real WS durable retry/restart and move FIGHT`,
+ {timeout:120000}, async()=>{
+  const natural=await naturalLearning(); const checkpoint=natural.c; await natural.h.close();
+  const disk=await temporaryStore();let env,rejectRevision=null;
+  const fixture={seed:checkpoint.scene.seed,identities:[{trainerId:1,secretId:2},{trainerId:3,secretId:4}],
+    parties:[[1,4,7],[906,909,912]],eggState:{players:[[],[]]}};
+  // Only initial context injection: checkpoint came from untouched normal
+  // selected entry and actual battles. All formal actions use the production adapter.
+  const start=()=>{const real=new FormalRoomStore(disk.directory);return startEnv({fixture,initialCheckpoint:checkpoint,
+    store:{load:()=>real.load(),save:room=>{if(room.revision===rejectRevision)throw Error('natural learning candidate failure');return real.save(room);}}});};
+  try{
+    env=await start();const room=await createRoom(env);
+    let state=await syncBoth(env,room.a,room.b,room.sa,room.sb);
+    assert.equal(state.sa.shared.waveIndex,4);assert.equal(state.sa.personal.decision.learn.moveId,61);
+    assert.equal(state.sb.personal.decision.learn,null);
+    const isolated=await createRoom(env),isolatedBefore=canonical(env.service.rooms.get(isolated.roomId).checkpoint);
+    const initial=state.sa,peer=state.sb,before=canonical(env.service.rooms.get(room.roomId).checkpoint);
+    const tokens=[room.a,room.b].map(c=>c.messages.find(m=>m.type==='welcome'&&m.roomId).resumeToken);
+    const resume=async()=>{const clients=[await connect(env,'natural-learn-A'),await connect(env,'natural-learn-B')];
+      for(const [seat,client]of clients.entries()){client.send({type:'resumeSeat',roomId:room.roomId,resumeToken:tokens[seat]});await client.wait(m=>m.type==='snapshot');}
+      return clients;};
+    await env.close();env=await start();let [a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),before);
+    const action=initial.personal.decision.options.find(o=>o.slot===slot);
+    const envelope={type:'submitAction',roomId:room.roomId,runId:room.runId,decisionId:initial.decisionId,
+      expectedRevision:initial.revision,actionId:'natural-learn',action};
+    rejectRevision=initial.revision+1;const failure=a.next(m=>m.type==='error'&&m.code==='STORAGE_FAILED');a.send(envelope);
+    const receipt=await a.wait(m=>m.type==='actionReceipt'&&m.actionId===envelope.actionId);assert.equal(receipt.accepted,true);await failure;
+    const failed=(await disk.store.load()).find(r=>r.roomId===room.roomId);
+    assert.equal(canonical(failed.checkpoint),before);assert.deepEqual(failed.inputs,{0:action});
+    await env.close();rejectRevision=null;env=await start();[a,b]=await resume();
+    state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    if(state.sa.revision===initial.revision)state=await syncBoth(env,a,b,await a.waitRevisionAfter(initial.revision),await b.waitRevisionAfter(initial.revision));
+    assert.equal(state.sa.revision,initial.revision+1);assert.equal(state.sa.personal.decision.kind,'wait-actions');
+    const expected=structuredClone(initial.personal.party[0].pokemon.fields.moveset);
+    if(slot!==null)expected[slot]={type:'PokemonMove',fields:{moveId:61,ppUsed:0,ppUp:0,virtual:false},undefinedFields:[]};
+    assert.deepEqual(state.sa.personal.party[0].pokemon.fields.moveset,expected);
+    assert.deepEqual(state.sb.personal.party[0].pokemon.fields.moveset,peer.personal.party[0].pokemon.fields.moveset,'queued peer EXP cannot change its moves');
+    assert.deepEqual(state.sa.personal.resources,initial.personal.resources);
+    const committed=canonical(env.service.rooms.get(room.roomId).checkpoint);
+    await env.close();env=await start();[a,b]=await resume();state=await syncBoth(env,a,b,a.latestSnapshot(),b.latestSnapshot());
+    assert.equal(canonical(env.service.rooms.get(room.roomId).checkpoint),committed);
+    a.send(envelope);assert.deepEqual(await a.wait(m=>m.type==='actionReceipt'&&m.actionId===envelope.actionId),receipt);
+    const conflict=a.next(m=>m.type==='error'&&m.code==='ACTION_ID_CONFLICT');a.send({...envelope,action:{...action,slot:slot===null?0:null}});await conflict;
+    assert.equal(canonical((await disk.store.load()).find(r=>r.roomId===isolated.roomId).checkpoint),isolatedBefore);
+    const attack=state.sa.personal.decision.options.find(o=>o.kind==='fight'&&o.cursor===0&&(o.target===null||o.target>=2));
+    const defense=state.sb.personal.decision.options.find(o=>o.kind==='fight'&&state.sb.personal.party[0].pokemon.fields.moveset[o.cursor].fields.moveId===111);
+    assert.ok(attack&&defense);
+    const pp=state.sa.personal.party[0].pokemon.fields.moveset[0].fields.ppUsed;
+    state=await submitBoth(env,{...room,a,b},state.sa,state.sb,[attack,defense]);
+    assert.equal(state.sa.personal.party[0].pokemon.fields.moveset[0].fields.moveId,slot===null?55:61);
+    assert.equal(state.sa.personal.party[0].pokemon.fields.moveset[0].fields.ppUsed,pp+1);
+    assert.ok(state.sa.events.some(e=>e.kind==='phase-start'&&e.phase==='MoveEffectPhase'));
+  }finally{if(env)await env.close();await disk.cleanup();}
  });

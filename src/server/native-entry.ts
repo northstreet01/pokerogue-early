@@ -1,9 +1,10 @@
 import BattleScene from '../battle-scene';
-import Pokemon, { FieldPosition } from '../field/pokemon';
+import { Phase } from '../phase';
+import Pokemon, { FieldPosition, HitResult } from '../field/pokemon';
 import { NewBattlePhase, EncounterPhase, SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase,
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
-  MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
+  MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
 import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase } from '../phases';
 import { SelectModifierPhase } from '../phases';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase } from '../phases';
@@ -52,6 +53,7 @@ import { Moves } from '../data/enums/moves';
 import { requireContract as check } from '../battle-core/coop-contract.mjs';
 import { advanceProgressionChoice } from '../battle-core/progression-choice-runner.mjs';
 import { createLearnDecision, inspectLearnMove } from '../battle-core/learn-command.mjs';
+import { recoverVictoryParties } from '../battle-core/victory-aftermath-runner.mjs';
 
 // Explicit display targets; unknown rendering methods remain unavailable.
 class DisplayTarget {
@@ -71,7 +73,7 @@ class DisplayTarget {
 }
 
 const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase,
-  EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
+  EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
   FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, AttemptCapturePhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
@@ -86,7 +88,10 @@ function installPokemonDisplayPort() {
   const proto: any = Pokemon.prototype;
   proto.init = function () { this.fieldPosition = FieldPosition.CENTER; };
   for (const name of ['tint', 'untint', 'cry', 'showInfo', 'hideInfo', 'playAnim', 'sparkle', 'updateScale', 'initBattleInfo'])
-    proto[name] = function () { this.scene.nativeEvents.push({ kind: name, pokemonId: this.id }); };
+    proto[name] = function () {
+      this.scene.nativeEvents.push({ kind: name, pokemonId: this.id });
+      if (name === 'hideInfo') return Promise.resolve();
+    };
   proto.loadAssets = function () { return Promise.resolve(); };
   proto.updateInfo = function () { return Promise.resolve(); };
   proto.faintCry = function (callback) { this.scene.time.delayedCall(0, callback); };
@@ -247,7 +252,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     return Promise.resolve();
   },
     showText: (text, _delay, callback) => { events.push({ kind: 'message', text }); schedule(callback); } };
-  root.damageNumberHandler = { add: (p, amount, result, critical) => events.push({ kind: 'damage-display', pokemonId: p.id, amount, result, critical }) };
+  root.damageNumberHandler = { add: (p, amount, result = HitResult.EFFECTIVE, critical = false) =>
+    events.push({ kind: 'damage-display', pokemonId: p.id, amount, result, critical }) };
   BattleAnim.prototype.play = function (scene: any, callback) {
     scene.nativeEvents.push({ kind: 'battle-animation', animation: this.constructor.name });
     scene.time.delayedCall(0, callback);
@@ -279,8 +285,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       : p.player === true || p instanceof CommandPhase || p instanceof CheckSwitchPhase || p instanceof SwitchPhase ? p.fieldIndex
         : p.pokemon?.isPlayer() ? c.roster.entries.find(e => e.pokemon === p.pokemon)?.owner : null;
     phaseScopes.set(p, scope);
-    if (p instanceof SummonPhase && (p as any).player && !(p instanceof SummonMissingPhase))
-      (p as any).partyMemberIndex = 0;
+    if (p instanceof SummonPhase && (p as any).player) (p as any).partyMemberIndex = 0;
     p.scene = scope === null ? root : views[scope];
     return scope;
   }
@@ -392,6 +397,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
             events.push({ kind: 'capture-cancelled', reason: 'target-left', pokemonId: (p as any).coopTargetId });
             p.end();
           } else if (resume) resume();
+          else if (p instanceof SummonMissingPhase && (p as any).player) {
+            const party = parties[scope];
+            if (!party.some(pokemon => !pokemon.isFainted())) Phase.prototype.end.call(p);
+            else if (party[0].isFainted()) SummonPhase.prototype.preSummon.call(p);
+            else p.start();
+          }
           else if (p instanceof SwitchPhase) {
             const seat = (p as any).fieldIndex; (p as any).fieldIndex = 0;
             try { p.start(); } finally { (p as any).fieldIndex = seat; }
@@ -421,6 +432,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         const failed = settled.find(r => r.status === 'rejected');
         if (failure) throw failure;
         if (failed?.status === 'rejected') throw failed.reason;
+        if (p instanceof BattleEndPhase && c.battle.enemyParty.length > 0
+          && c.battle.enemyParty.every(pokemon => pokemon.isFainted(true))) events.push(...recoverVictoryParties(c, pokemon => {
+          const revive = modifierTypes.REVIVE().newModifier(pokemon);
+          check(revive.shouldApply([pokemon]), 'REVIVE_NOT_APPLICABLE');
+          return revive.apply([pokemon]);
+        }));
       }); } finally {
         if (p instanceof VictoryPhase) {
           if (Object.prototype.hasOwnProperty.call(p, 'queueExperience')) delete p.queueExperience;
@@ -509,10 +526,13 @@ function actionDecision(c, root, id) {
           .filter(ball => (c.players[seat].pokeballCounts[ball] ?? 0) > 0)
           .map(ball => ({ kind: 'ball', pokeballType: ball, targetId: activeEnemies[0].id }))
         : [];
+      const hasUsableMove = pokemon.getMoveset().some(move => move.isUsable(pokemon));
       return [seat, [
         ...pokemon.getMoveset().flatMap((move, cursor) => {
-          if (!move.isUsable(pokemon)) return [];
-          const targets = getMoveTargets(pokemon, move.moveId);
+          if (hasUsableMove ? !move.isUsable(pokemon) : cursor !== 0) return [];
+          // Original CommandPhase selects Struggle when no move is usable.
+          // Keep a legal original cursor; never synthesize a rule command here.
+          const targets = getMoveTargets(pokemon, hasUsableMove ? move.moveId : Moves.STRUGGLE);
           return (targets.targets.length > 1 && !targets.multiple ? targets.targets : [null]).map(target => {
             const intent = { kind: 'fight', pokemonId: pokemon.id, cursor, target };
             resolveFightIntent(pokemon, seat, intent, { fightCommand: Command.FIGHT, noneMove: Moves.NONE,
@@ -690,21 +710,6 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
       const next = binding.root.phaseQueuePrepend.at(-1) ?? binding.root.phaseQueue[0];
       if (next instanceof SelectModifierPhase) return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
       const p = selectNextPhase(binding.root, () => populatePhaseQueue(binding.root, () => new TurnInitPhase(binding.root))).phase;
-      if (p instanceof SummonMissingPhase) {
-        const seat = binding.bindPhase(p);
-        const party = c.roster.entries.filter(entry => entry.owner === seat && entry.group === 'party')
-          .sort((a, b) => a.index - b.index);
-        const current = party[(p as any).partyMemberIndex];
-        if (!current || current.pokemon.isFainted()) {
-          const replacement = party.find(entry => entry.pokemon.hp > 0);
-          if (!replacement) {
-            await binding.execute(p, () => p.end());
-            c.decision = { id: `native-${c.battle.waveIndex}-${index + 1}`, kind: 'continuing', requiredSeats: [], reason: 'effects' };
-            continue;
-          }
-          (p as any).partyMemberIndex = replacement.index;
-        }
-      }
       if (p instanceof LearnMovePhase) {
         const partyIndex = (p as any).partyMemberIndex, moveId = (p as any).moveId;
         const seat = binding.bindPhase(p);

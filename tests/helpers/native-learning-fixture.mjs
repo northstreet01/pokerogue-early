@@ -1,6 +1,5 @@
 import { createOriginalRuleHost } from '../../server/original-rule-host.mjs';
 const config = { seed: 'learn-review', identity: { trainerId: 1, secretId: 2 } };
-const own = (c, seat) => c.roster.entries.find(e => e.owner === seat && e.group === 'party' && e.index === 0);
 const fields = values => Object.fromEntries(Object.entries(values).map(([k, value]) => [k, { presence: 'value', value }]));
 // Explicit synthetic queue fixture: real native Pokemon/phase codecs and Worker,
 // but not evidence of natural battle level-up or browser interaction.
@@ -23,5 +22,3 @@ export async function learningFixture({ seat = 1, full = true, moveId = 73, inde
     return { h, c };
   } catch (error) { await h.close(); throw error; }
 }
-
-

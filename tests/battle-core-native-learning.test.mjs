@@ -87,5 +87,3 @@ test('native learning validation/execution reject foreign owner, extra fields an
     assert.equal(JSON.stringify(c), before);
   } finally { await h.close(); }
 });
-
-

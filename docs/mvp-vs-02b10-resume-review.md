@@ -2,6 +2,8 @@
 
 **最新规则核对：原满员捕获专用PartyUiMode.RELEASE允许选择本人当前出场者，后续收尾已去除早期“只准非前场”限制。下文旧阶段的非前场说明保留为实现历史，不能当成最终玩法。原战斗中主动换人的目标限制仍保持。**
 
+**最终结论：A有限规则／正式事务切片通过；B原菜单接线与自动交互验证通过，浏览器验收待用户，B整体仍属部分通过。最终代码版本7e1ad8c3完整串行1046/1046、退出0；没有把旧结果或中止运行拼成最终通过。不宣称完整M3／M5／M6或MVP上线。**
+
 ## 起点与范围
 
 2026-10-21继续用户明确授权的本批开发。实际起点3f294a7232340576eb24a808e4cc8adc2a05d3d4，feature/vs02b10-reserve-team，工作区干净、唯一worktree；本地main／origin/main及实时远端main均86798227ca995c4ff40043b99a0c6846ed177154；远端断电备份188ae6da5a9d26248306a3256020509b4e425a2c。未联系其它agent，未操作参考目录。本次不把上次推送授权扩大为自动再次推送，不合main。
@@ -55,3 +57,17 @@
 前场修订Worker＋UI定向53/53、退出0，16373.4434ms；正式WS及最终全套收尾另记。
 
 前场修订完整正式WS模块20/20、退出0，59272.1369ms，正常1..20，无失败／取消／跳过／todo；接纳与迁移均验证原前场删除后的空场位、服务恢复及下一战原召唤。此后冻结源码／测试，最终完整回归与构建在以下结果段记录。
+
+## 最终验证与交接
+
+最终运行HEAD为7e1ad8c3e6b09dae5bf5ee4272e16665657dd5f7。单次完整串行执行battle-core／coop／local-save／localization／outsourcing-locale-placeholders：**1..1046，pass1046、退出0**，fail／cancelled／skipped／todo均0，1028503.5465ms，约17分9秒。真实日志为ignored build/vs02b10-resume/full.tap、full-exit.txt，execution-head／execution-source-blobs记录运行时源码／测试；未混用前场修正前的1045项结果。
+
+同版typecheck、build:coop-runtime和生产build均退出0，静态构建49.33s，既有动态import／chunk大小警告未阻断。最终src／server／tests树分别为53f85e93bdf8dc77905fb9148ce225c7d261f6c2、211a16e64a3a1e3541cfa41d5dc3919c4f55a28a、7063dbbb8194d53a82f8197c09a07e51b352e63a。最后交接提交仅修改文档，按路径复核测试源码blob一致。
+
+已完成本批代码：普通捕获入本人队伍、六只上限、满员原取舍（含当前前场）、原下一战召唤／战前选择／FIGHT、旧库存显式处理、原Party／只读Summary和选择取消／重选、拒绝／outbox失败／旧回调保护、正式持久化／失败重试／重启／去重／房间隔离；保留个人蛋与永久捕获pending事实。浏览器原画面／真实点击、跨物理设备、移动端和容量未执行。用户按[手测清单](vs02b10-manual-acceptance.md)复核，不得把自动夹具当作真实浏览器。
+
+本次A提交5d372e1b，B提交17a10199；后续scope兼容75ca4d80、负例断言686df549、可辨识取舍文案7edc6119、前场原行为7e1ad8c3。分支feature/vs02b10-reserve-team；最终实时main与本地main／origin/main仍86798227ca995c4ff40043b99a0c6846ed177154，远端断电备份仍188ae6da5a9d26248306a3256020509b4e425a2c。本次未合并、未推送，旧备份不包含本次完整修订。
+
+下一批限定普通升级学招：原LevelUp排入LearnMove，满四招用原Summary选择替换或放弃，正式恢复后新招FIGHT。已有learn-command／progression-choice-runner／preparation-growth-runner优先复用；不顺带扩进化／商店／永久收藏。完整可交开发agent的任务书保存在本地忽略docs/AGENT-VS-02B-11-PROMPT.md，本批完成后停止，不主动实施下一批。
+
+最终暂存前相对续接起点扫描20个变更文件，常见凭据模式未命中，tracked无SPEC／任务书／build／dist等禁止路径；diff --check及逐路径源码／测试blob核对通过。此为本批扫描，不是绝对隐私保证。完整审计元数据保存在ignored final-evidence.json。

@@ -25,13 +25,13 @@
 ## 实际验证与失败边界
 
 - `tests/battle-core-level-up.test.mjs`＋`battle-core-learn-state.test.mjs` **18/18 通过**（约 15.4s）；这些是既有测试 driver，不是生产 native 证据。
-- `npm run typecheck` 退出 0；`npm run build:coop-runtime` 退出 0；`npm run build` 退出 0（最终修复前约 52s，既有警告）。
+- `npm run typecheck` 退出 0；`npm run build:coop-runtime` 退出 0；`npm run build` 退出 0（最终约 48.55s，既有警告）。
+- 完整串行回归：`1..1046`，pass **1046**，fail／cancelled／skipped／todo 均 0，`1071437.5483ms`（约 17m51s）；运行时 HEAD `51ee4ea1`。detached 进程未捕获 shell 退出码，TAP 无失败，不伪造 exit 0。该全套只覆盖既有测试，**没有新增生产 LearnMove 用例**，不能当作本批 A 通过。
 - **没有完成**：
   - 从真实普通战斗经验自然触发 LevelUp→LearnMove 的生产 Worker 用例；
   - 满四招替换/放弃的正式双 WS／FormalRoomStore、落盘失败重试、同目录重启、去重、房间隔离；
   - 新招实际 FIGHT；
-  - 原 Confirm/Summary UI 的自动交互测试和双浏览器验收；
-  - 完整串行回归。
+  - 原 Confirm/Summary UI 的自动交互测试和双浏览器验收。
 - 因此 A 只能算“代码接入与类型/构建通过的可审查子集”，**不能算生产链路通过**；B 也不能算 UI 完成。
 
 ## 已知风险

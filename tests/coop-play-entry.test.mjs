@@ -611,125 +611,106 @@ test('original BallUiHandler keeps its navigation/cancel and filters unlisted co
   assert.deepEqual(counts, { 0: 5, 1: 9, 2: 0, 3: 0, 4: 0 });
 });
 
-test('restored reserve labels rebuild original names without changing captured rule state', () => {
-  const { p, entry } = personalPotionPhase();
-  const pokemon = api.restorePokemonState(api.capturePokemonState(entry.pokemon));
-  assert.equal(pokemon.name, undefined, 'display names are intentionally absent from the codec');
-  const before = api.capturePokemonState(pokemon);
-  p.model.applied.personal.reserve = [{ id: pokemon.id, pokemon }];
-  p.reserveLine = { hidden: true, textContent: '' };
-  p.renderReserve();
-  assert.equal(p.reserveLine.hidden, false);
-  assert.equal(p.reserveLine.textContent, `本局备用：${entry.pokemon.name} Lv.${pokemon.level}`);
-  assert.deepEqual(api.capturePokemonState(pokemon), before);
-  p.model.applied.personal.reserve = [];
-  p.renderReserve();
-  assert.equal(p.reserveLine.hidden, true);
-  assert.equal(p.reserveLine.textContent, '');
+test('old inventory notice does not modify the restored captured models',()=>{
+ const {p,entry}=personalPotionPhase(),pokemon=api.restorePokemonState(api.capturePokemonState(entry.pokemon));
+ const before=api.capturePokemonState(pokemon);p.model.applied.personal.reserve=[{id:pokemon.id,pokemon}];
+ p.reserveLine={hidden:true,textContent:''};p.renderReserve();
+ assert.equal(p.reserveLine.hidden,false);assert.match(p.reserveLine.textContent,/旧版捕获待处理/);
+ assert.deepEqual(api.capturePokemonState(pokemon),before);
+ p.model.applied.personal.reserve=[];p.renderReserve();assert.equal(p.reserveLine.hidden,true);assert.equal(p.reserveLine.textContent,'');
 });
 
-function reservePhase(count = 7) {
-  const state = personalPotionPhase(), { p, entry } = state;
-  p.model.applied.personal.reserve = Array.from({ length: count }, (_, index) => {
-    const pokemon = api.restorePokemonState(api.capturePokemonState(entry.pokemon)); pokemon.id = index;
-    return { id: index, owner: 0, group: 'reserve', index, pokemon };
-  });
-  const pages = [];
-  p.renderReservePager = (...args) => pages.push(args);
-  return { ...state, pages };
+function captureChoicePhase(legacy=false,underfull=false) {
+ const state=personalPotionPhase(),{p,entry}=state,first=p.model.applied.personal.party[0];
+ p.model.applied.personal.party=Array.from({length:underfull?3:6},(_,index)=>{
+  const pokemon=api.restorePokemonState(api.capturePokemonState(entry.pokemon));pokemon.id=index===0?first.id:index-1;
+  return {id:pokemon.id,owner:0,group:'party',index,pokemon};
+ });
+ p.model.applied.personal.reserve=[];
+ if(legacy){
+  const pokemon=api.restorePokemonState(api.capturePokemonState(entry.pokemon));pokemon.id=8;
+  p.model.applied.personal.reserve=[{id:8,owner:0,group:'reserve',index:0,pokemon}];
+  const action=(choice,releaseId)=>({kind:'preparation',operation:'legacy-capture',pokemonId:8,choice,releaseId});
+  p.latest.personal.decision.legacyCapture={pokemonId:8,options:[action('discard',null),...(underfull?[action('keep',null)]:p.model.applied.personal.party.slice(1).map(e=>action('keep',e.id)))]};
+ }else p.latest.personal.decision={id:'capture-4',kind:'capture-choice',requiredSeats:[0],options:[{kind:'capture-choice',releaseId:null},...p.model.applied.personal.party.slice(1).map(e=>({kind:'capture-choice',releaseId:e.id}))]};
+ p.latest.decisionId=p.latest.personal.decision.id;
+ return state;
 }
-const ruleState = p => [...p.model.applied.personal.party, ...p.model.applied.personal.reserve].map(e => api.capturePokemonState(e.pokemon));
+const ruleState=p=>[...p.model.applied.personal.party,...p.model.applied.personal.reserve].map(e=>api.capturePokemonState(e.pokemon));
 
-test('reserve pages retain the seventh individual, use read-only original Summary and restore the public field', async () => {
-  const { p, pages, modes, sent } = reservePhase();
-  const party = p.scene.party, battle = p.scene.currentBattle, before = ruleState(p);
-  await p.openReserveRoster();
-  assert.equal(p.scene.party.length, 6); assert.equal(p.scene.party[0].id, 0);
-  assert.deepEqual(modes.at(-1)[7], { allowedOptions: [api.PartyOption.SUMMARY], readOnlySummary: true });
-  const obsolete = modes.at(-1)[3], count = modes.length;
-  await p.openDecisionInput(); assert.equal(modes.length, count, 'duplicate readiness keeps the open personal menu');
-  await p.openReserveRoster(false, 1);
-  assert.equal(p.scene.party.length, 1); assert.equal(p.scene.party[0].id, 6);
-  assert.deepEqual(pages.at(-1).slice(0, 3), [1, 2, false]);
-  p.clearPreparationParty();
-  await obsolete(0, api.PartyOption.APPLY);
-  assert.equal(p.scene.party, party); assert.equal(p.scene.currentBattle, battle);
-  assert.deepEqual(ruleState(p), before); assert.equal(sent.length, 0);
-});
-
-async function swapConfirmation(state) {
-  const { p, modes } = state;
-  await p.openReserveRoster(true);
-  await modes.at(-1)[3](0, api.PartyOption.APPLY);
-  assert.equal(modes.at(-1)[0], api.Mode.PARTY);
-  await modes.at(-1)[3](0, api.PartyOption.APPLY);
-  assert.equal(modes.at(-1)[0], api.Mode.CONFIRM);
-  return modes.at(-1);
+async function captureConfirmation(state) {
+ const {p,modes}=state;await p.openDecisionInput();assert.equal(modes.at(-1)[0],api.Mode.CONFIRM);
+ await modes.at(-1)[1]();assert.equal(modes.at(-1)[0],api.Mode.PARTY);
+ await modes.at(-1)[3](1,api.PartyOption.RELEASE);assert.equal(modes.at(-1)[0],api.Mode.CONFIRM);
+ return modes.at(-1);
 }
 
-test('original reserve/party selection confirms stable zero ID once, without editing the verified team', async () => {
-  const state = reservePhase(), { p, modes, sent } = state, before = ruleState(p);
-  let confirm = await swapConfirmation(state);
-  confirm[2](); await tick();
-  assert.equal(sent.length, 0); assert.equal(modes.at(-1)[0], api.Mode.PARTY, 'No reopens the original target list');
-  await modes.at(-1)[3](6, api.PartyOption.CANCEL);
-  assert.equal(p.scene.party[0].id, 0, 'target cancellation returns to the reserve page');
-  await modes.at(-1)[3](0, api.PartyOption.APPLY);
-  await modes.at(-1)[3](0, api.PartyOption.APPLY);
-  confirm = modes.at(-1);
-  await confirm[1](); await confirm[1]();
-  assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0].action, { kind: 'preparation', operation: 'reserve-swap', partyId: p.model.applied.personal.party[0].id, reserveId: 0 });
-  assert.deepEqual(ruleState(p), before, 'only the server may change group/index/field');
+test('capture choice reuses original Party/Summary, cancels/reselects and submits stable zero release ID once',async()=>{
+ const state=captureChoicePhase(),{p,modes,sent}=state,before=ruleState(p),party=p.scene.party,battle=p.scene.currentBattle;
+ await p.openDecisionInput();const ask=modes.at(-1);await ask[1]();
+ assert.deepEqual(modes.at(-1)[7],{allowedOptions:[api.PartyOption.RELEASE,api.PartyOption.SUMMARY],readOnlySummary:true,submitReleaseOnly:true});
+ const obsolete=modes.at(-1)[3],count=modes.length;await p.openDecisionInput();assert.equal(modes.length,count);
+ await modes.at(-1)[3](6,api.PartyOption.CANCEL);assert.equal(modes.at(-1)[0],api.Mode.CONFIRM);assert.equal(sent.length,0);
+ await modes.at(-1)[1]();await modes.at(-1)[3](1,api.PartyOption.RELEASE);
+ await modes.at(-1)[2]();assert.equal(modes.at(-1)[0],api.Mode.PARTY,'No keeps the original selection available');
+ await modes.at(-1)[3](1,api.PartyOption.RELEASE);const confirm=modes.at(-1);
+ await confirm[1]();await confirm[1]();await obsolete(2,api.PartyOption.RELEASE);
+ assert.equal(sent.length,1);assert.deepEqual(sent[0].action,{kind:'capture-choice',releaseId:0});
+ assert.deepEqual(ruleState(p),before);assert.equal(p.scene.party,party);assert.equal(p.scene.currentBattle,battle);
 });
 
-test('reserve confirmation cannot cross an awaited revision, epoch or newer menu on the same snapshot', async () => {
-  for (const stale of ['revision', 'epoch', 'menu']) {
-    const state = reservePhase(), { p, sent } = state;
-    const confirm = await swapConfirmation(state);
-    let finish;
-    const setMode = p.scene.ui.setMode;
-    p.scene.ui.setMode = () => new Promise(resolve => { finish = resolve; });
-    const choosing = confirm[1]();
-    if (stale === 'revision') p.latest = { ...p.latest, revision: 5 };
-    else if (stale === 'epoch') p.epoch = 'epoch-2';
-    else p.clearTeamParty();
-    p.scene.ui.setMode = setMode; finish(); await choosing;
-    assert.equal(sent.length, 0);
-  }
+test('declining a full capture and explicitly keeping/declining an old under-full capture send only server options',async()=>{
+ for(const [legacy,keep] of [[false,false],[true,true],[true,false]]){
+  const {p,modes,sent}=captureChoicePhase(legacy,legacy),before=ruleState(p);
+  await p.openDecisionInput();await modes.at(-1)[keep?1:2]();
+  assert.equal(sent.length,1);assert.equal(sent[0].action.kind,legacy?'preparation':'capture-choice');
+  if(legacy){assert.equal(sent[0].action.choice,keep?'keep':'discard');assert.equal(sent[0].action.pokemonId,8)}
+  assert.equal(sent[0].action.releaseId,null);assert.deepEqual(ruleState(p),before);
+ }
 });
 
-test('reserve disk failure and rejected receipt permit reselection; used confirmations stay inert', async () => {
-  for (const failure of ['outbox', 'rejected']) {
-    const state = reservePhase(), { p, modes, sent } = state;
-    if (failure === 'outbox') p.storage = { ...p.storage, saveAction: async () => { throw Error('TEST_DISK_FAILURE'); } };
-    const confirm = await swapConfirmation(state);
-    await confirm[1]();
-    if (failure === 'rejected') await p.onMessage({ type: 'actionReceipt', roomId: p.roomId, actionId: p.actionId,
-      revision: 4, decisionId: 'prep-4', accepted: false, code: 'INVALID_PREPARATION_OWNER' });
-    const count = sent.length;
-    await confirm[1](); assert.equal(sent.length, count);
-    assert.equal(p.actionId, null); assert.equal(modes.at(-1)[0], api.Mode.MODIFIER_SELECT);
-    await p.openReserveRoster(true); assert.equal(modes.at(-1)[0], api.Mode.PARTY);
-  }
+test('capture confirmation cannot cross awaited revision, epoch or a newer menu on the same snapshot',async()=>{
+ for(const stale of ['revision','epoch','menu']){
+  const state=captureChoicePhase(),{p,sent}=state,confirm=await captureConfirmation(state);
+  let finish;const setMode=p.scene.ui.setMode;p.scene.ui.setMode=()=>new Promise(resolve=>{finish=resolve});
+  const choosing=confirm[1]();if(stale==='revision')p.latest={...p.latest,revision:5};else if(stale==='epoch')p.epoch='epoch-2';else p.clearTeamParty();
+  p.scene.ui.setMode=setMode;finish();await choosing;assert.equal(sent.length,0);
+ }
 });
 
-test('blocked, replaced or cleared asset-loading Party restores the field and disposes only after loading settles', async () => {
-  const { p, modes, sent } = reservePhase(1);
-  const party = p.scene.party, battle = p.scene.currentBattle;
-  let loaded, initialized = 0, destroyed = 0;
-  const make = p.makeTeamPokemon;
-  p.makeTeamPokemon = entry => Object.assign(make(entry), { init() { initialized++; },
-    loadAssets: () => new Promise(resolve => { loaded = resolve; }), destroy() { destroyed++; } });
-  const opening = p.openReserveRoster();
-  await tick(); assert.equal(initialized, 1);
-  await p.onMessage({ type: 'syncStatus', roomId: p.roomId, runId: p.runId, revision: 4,
-    blocked: true, submitted: [false, false], reason: 'DISCONNECTED' });
-  assert.equal(p.scene.party, party); assert.equal(p.scene.currentBattle, battle);
-  assert.equal(destroyed, 0, 'original asset callbacks still need their Container');
-  loaded(); await opening;
-  assert.equal(destroyed, 1); assert.equal(sent.length, 0);
-  assert.notEqual(modes.at(-1)[0], api.Mode.PARTY);
+test('capture outbox failure and rejected receipt permit reselection and keep used confirmations inert',async()=>{
+ for(const failure of ['outbox','rejected']){
+  const state=captureChoicePhase(),{p,modes,sent}=state;
+  if(failure==='outbox')p.storage={...p.storage,saveAction:async()=>{throw Error('TEST_DISK_FAILURE')}};
+  const confirm=await captureConfirmation(state);await confirm[1]();
+  if(failure==='rejected')await p.onMessage({type:'actionReceipt',roomId:p.roomId,actionId:p.actionId,revision:4,decisionId:p.latest.decisionId,accepted:false,code:'INVALID_CAPTURE_CHOICE'});
+  const count=sent.length;await confirm[1]();assert.equal(sent.length,count);assert.equal(p.actionId,null);assert.equal(modes.at(-1)[0],api.Mode.CONFIRM);
+  await modes.at(-1)[1]();assert.equal(modes.at(-1)[0],api.Mode.PARTY);
+ }
+});
+
+test('cooperative original RELEASE submits its selection without running local release; solo still releases',()=>{
+ const selected=[],released=[],party=[{id:12},{id:0}];
+ const handler=Object.assign(Object.create(api.PartyUiHandler.prototype),{
+  optionsMode:true,options:[api.PartyOption.RELEASE],optionsCursor:0,optionsScroll:false,cursor:1,
+  partyUiMode:api.PartyUiMode.RELEASE,submitReleaseOnly:true,selectFilter:()=>null,
+  scene:{getParty:()=>party},getUi:()=>({playSelect(){},playError(){}}),clearOptions(){this.optionsMode=false},
+  doRelease:index=>released.push(index),selectCallback:(...args)=>selected.push(args),
+ });
+ handler.processInput(api.Button.ACTION);assert.deepEqual(selected,[[1,api.PartyOption.RELEASE]]);
+ assert.deepEqual(released,[]);assert.equal(party.length,2);
+ handler.submitReleaseOnly=false;handler.optionsMode=true;handler.selectCallback=(...args)=>selected.push(args);
+ handler.processInput(api.Button.ACTION);assert.deepEqual(released,[1]);assert.equal(selected.length,1);
+});
+
+test('disconnect during capture Party asset loading restores the field before disposal and cannot open a stale menu',async()=>{
+ const {p,modes,sent}=captureChoicePhase(),party=p.scene.party,battle=p.scene.currentBattle;
+ let loaded,initialized=0,destroyed=0;const make=p.makeTeamPokemon;
+ p.makeTeamPokemon=e=>Object.assign(make(e),{init(){initialized++},loadAssets:()=>new Promise(resolve=>{const old=loaded;loaded=()=>{old?.();resolve()}}),destroy(){destroyed++}});
+ await p.openDecisionInput();const opening=modes.at(-1)[1]();await tick();assert.equal(initialized,6);
+ await p.onMessage({type:'syncStatus',roomId:p.roomId,runId:p.runId,revision:4,blocked:true,submitted:[false,false],reason:'DISCONNECTED'});
+ assert.equal(p.scene.party,party);assert.equal(p.scene.currentBattle,battle);assert.equal(destroyed,0);
+ loaded();await opening;assert.equal(destroyed,6);assert.equal(sent.length,0);assert.notEqual(modes.at(-1)[0],api.Mode.PARTY);
 });
 
 test('pre-battle confirmation and required original Party submit only the server choice', async () => {
@@ -764,18 +745,14 @@ test('cooperative original Summary reads moves without reordering; solo move sel
   handler.processInput(api.Button.ACTION); assert.equal(handler.selectedMoveIndex, 1);
 });
 
-test('competing reserve opens restore the original field; an older awaited opening cannot own the Party', async () => {
-  const { p } = reservePhase(), party = p.scene.party, battle = p.scene.currentBattle;
-  const setMode = p.scene.ui.setMode, finishes = [];
-  p.scene.ui.setMode = (...args) => args[0] === api.Mode.MESSAGE
-    ? new Promise(resolve => finishes.push(resolve)) : setMode(...args);
-  const first = p.openReserveRoster(false, 0), second = p.openReserveRoster(false, 1);
-  finishes[0](); await first;
-  assert.equal(p.scene.party, party);
-  finishes[1](); await second;
-  assert.equal(p.scene.party[0].id, 6);
-  p.clearTeamParty();
-  assert.equal(p.scene.party, party); assert.equal(p.scene.currentBattle, battle);
+test('competing capture Party opens cannot replace the original field with an obsolete temporary party',async()=>{
+ const state=captureChoicePhase(),{p,modes}=state,party=p.scene.party,battle=p.scene.currentBattle;
+ await p.openDecisionInput();const ask=modes.at(-1),setMode=p.scene.ui.setMode,finishes=[];
+ p.scene.ui.setMode=(...args)=>args[0]===api.Mode.MESSAGE?new Promise(resolve=>finishes.push(resolve)):setMode(...args);
+ const first=ask[1]();p.switchSignature='';await p.openDecisionInput();const second=modes.at(-1)[1]();
+ finishes[0]();await first;assert.equal(p.scene.party,party);
+ finishes[1]();await second;assert.equal(p.scene.party.length,6);
+ p.clearTeamParty();assert.equal(p.scene.party,party);assert.equal(p.scene.currentBattle,battle);
 });
 
 test('original faint Party refuses Esc and its cancel slot, while voluntary selection can cancel', () => {

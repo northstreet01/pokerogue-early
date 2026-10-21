@@ -62,6 +62,7 @@ export type PokemonMoveSelectFilter = (pokemonMove: PokemonMove) => string;
 
 export default class PartyUiHandler extends MessageUiHandler {
   private readOnlySummary = false;
+  private submitReleaseOnly = false;
   private partyUiMode: PartyUiMode;
   private fieldIndex: integer;
 
@@ -194,6 +195,7 @@ export default class PartyUiHandler extends MessageUiHandler {
     this.allowedOptions = args[6]?.allowedOptions
       ? new Set<PartyOption>([...args[6].allowedOptions, PartyOption.CANCEL]) : undefined;
     this.readOnlySummary = args[6]?.readOnlySummary === true;
+    this.submitReleaseOnly = args[6]?.submitReleaseOnly === true;
 
     this.partyContainer.setVisible(true);
     this.partyBg.setTexture(`party_bg${this.scene.currentBattle.double ? '_double' : ''}`);
@@ -275,7 +277,7 @@ export default class PartyUiHandler extends MessageUiHandler {
                 } else
                   this.startTransfer();
                 this.clearOptions();
-              } else if (option === PartyOption.RELEASE)
+              } else if (option === PartyOption.RELEASE && !this.submitReleaseOnly)
                 this.doRelease(this.cursor);
               else {
                 const selectCallback = this.selectCallback;
@@ -782,6 +784,7 @@ export default class PartyUiHandler extends MessageUiHandler {
     super.clear();
     this.allowedOptions = undefined;
     this.readOnlySummary = false;
+    this.submitReleaseOnly = false;
     this.partyContainer.setVisible(false);
     this.clearPartySlots();
   }

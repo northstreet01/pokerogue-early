@@ -23,3 +23,11 @@
 ## B与最终验证
 
 原Confirm／Party RELEASE／只读Summary已接入，旧分页与战后换队按钮已撤掉；代码和最终验证将在下一段提交后补记。当前不以历史44项UI作为新版通过证据。浏览器由用户测试，未执行项目不标通过。
+
+### B实现与定向
+
+满员捕获在原Confirm询问，确认后用本人原Party RELEASE选择成员，可查看原只读Summary；取消选择回询问，最终放生前再用原Confirm确认。原Party新增可选submitReleaseOnly参数：合作页只返回选择，不调用本地doRelease；单人无参数仍走原放生。浏览器只提交服务器option中的releaseId（含0）或放弃，既有IndexedDB先落盘／actionId／receipt／ACK不变。旧库存的不足6只保留／放弃及满员放生复用同一原菜单链，不再有仓库分页或新战后交换功能。
+
+菜单依旧使用原Pokemon显示容器、codec副本及原资源加载，不运行Pokemon构造／规则RNG，不在客户端更改party归属／数量／HP／PP／资源。原摘要仍只读，取消／重复快照／新revision／epoch／加载期间断线／同快照重开菜单会清理副本并失效旧回调。新捕获拒绝或outbox写入失败可重新选择；已用确认不会重复提交。原Party RELEASE实际方法定向证实合作不执行本地删除，而单人仍执行原放生。
+
+新版UI＋输入定向50/50、退出0，13694.434ms，正常1..50，无失败／取消／跳过／todo。该测试使用真实控制器及原Party／Summary输入方法，资源端口无画布；不能当作双浏览器画面验收。最终typecheck／Worker／生产build及完整串行结果另记，尚未执行的浏览器项目继续待用户。

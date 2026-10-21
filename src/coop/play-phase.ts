@@ -25,7 +25,6 @@ export default class CoopPlayPhase extends Phase {
   private roomLine!: HTMLDivElement;
   private controls!: HTMLDivElement;
   private reserveLine!: HTMLDivElement;
-  private reserveInspectButton!: HTMLButtonElement;
   private releaseTeamParty: (() => void) | null = null;
   private teamMenuEpoch = 0;
   private socket: WebSocket | null = null;
@@ -95,9 +94,7 @@ export default class CoopPlayPhase extends Phase {
     this.roomLine = document.createElement('div'); this.roomLine.className = 'status';
     this.controls = document.createElement('div');
     this.reserveLine = document.createElement('div'); this.reserveLine.className = 'status'; this.reserveLine.hidden = true;
-    this.reserveInspectButton = this.button('查看本局备用', () => this.openReserveRoster());
-    this.reserveInspectButton.hidden = true;
-    this.panel.append(title, this.status, this.roomLine, this.budget, this.reserveLine, this.reserveInspectButton, this.controls);
+    this.panel.append(title, this.status, this.roomLine, this.budget, this.reserveLine, this.controls);
     this.overlay.append(this.panel);
     document.body.append(this.overlay);
     this.renderLobbyControls();
@@ -198,7 +195,6 @@ export default class CoopPlayPhase extends Phase {
           && message.revision === this.latest.revision) {
           this.inputReady = !message.blocked;
           this.submitted = !!message.submitted?.[this.seat!];
-          this.updateReserveAccess();
           if (this.submitted || !this.inputReady) {
             this.clearPreparationParty();
             this.clearActiveSwitchParty();
@@ -236,7 +232,7 @@ export default class CoopPlayPhase extends Phase {
           return;
         }
         if (action?.kind === 'fight') this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball'].includes(action?.kind)) this.submitted = true;
+        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'capture-choice', 'switch', 'ball'].includes(action?.kind)) this.submitted = true;
         if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball'].includes(action?.kind))
           await this.scene.ui.setMode(Mode.MESSAGE);
         if (action?.kind === 'profile-ready') this.profileDirty = false;
@@ -325,7 +321,8 @@ export default class CoopPlayPhase extends Phase {
 
   private async openDecisionInput() {
     if (this.releaseTeamParty) return;
-    if (this.latest?.personal.decision.kind === 'preparation') await this.openPreparationMenu();
+    if (this.latest?.personal.decision.kind === 'capture-choice' || this.latest?.personal.decision.legacyCapture) await this.openCaptureChoice();
+    else if (this.latest?.personal.decision.kind === 'preparation') await this.openPreparationMenu();
     else if (['switch-confirm', 'switch-select', 'wait-switch'].includes(this.latest?.personal.decision.kind)) await this.openSwitchPrompt();
     else this.openBattleCommand();
   }
@@ -405,10 +402,6 @@ export default class CoopPlayPhase extends Phase {
     this.clearTeamParty();
   }
 
-  private updateReserveAccess() {
-    if (this.reserveInspectButton) this.reserveInspectButton.disabled = !this.inputReady || !!this.actionId || this.submitted;
-  }
-
   private clearTeamParty() {
     this.teamMenuEpoch++;
     const release = this.releaseTeamParty;
@@ -477,7 +470,7 @@ export default class CoopPlayPhase extends Phase {
         if (current) return Promise.resolve(select(slot, option)).catch(error => {
           if (this.isPersonalInputCurrent(snapshot, epoch)) this.setStatus(`队伍选择失败：${error?.message ?? error}`, true);
         });
-      }, filter, undefined, undefined, { allowedOptions, readOnlySummary: true });
+      }, filter, undefined, undefined, { allowedOptions, readOnlySummary: true, ...(mode === PartyUiMode.RELEASE ? { submitReleaseOnly:true } : {}) });
       if (!active || !this.isPersonalInputCurrent(snapshot, epoch)) {
         release();
         if (!this.releaseTeamParty && this.scene.ui.getMode?.() === Mode.PARTY) await this.scene.ui.setMode(Mode.MESSAGE);
@@ -496,11 +489,6 @@ export default class CoopPlayPhase extends Phase {
     } finally { settled = true; if (!active) dispose(); }
   }
 
-  private canEditTeam(snapshot = this.latest) {
-    const decision = snapshot?.personal.decision, p = decision?.players;
-    return decision?.kind === 'preparation' && p && !p.ready && p.selection === null && p.subdecision === null;
-  }
-
   private async returnToDecision(snapshot: any, epoch: string | null) {
     const menuEpoch = this.teamMenuEpoch;
     await this.scene.ui.setMode(Mode.MESSAGE);
@@ -509,70 +497,52 @@ export default class CoopPlayPhase extends Phase {
     await this.openDecisionInput();
   }
 
-  private renderReservePager(page: number, pages: number, forSwap: boolean, snapshot: any, epoch: string | null) {
-    const row = document.createElement('div'); row.className = 'row';
-    const open = (select: boolean, next: number) => {
-      if (this.isPersonalInputCurrent(snapshot, epoch)) return this.openReserveRoster(select, next);
-    };
-    if (page > 0) row.append(this.button('上一页', () => open(forSwap, page - 1)));
-    if (page + 1 < pages) row.append(this.button('下一页', () => open(forSwap, page + 1)));
-    if (!forSwap && this.canEditTeam(snapshot)) row.append(this.button('选择备用换队', () => open(true, page)));
-    row.append(this.button('返回', async () => {
-      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-      this.clearTeamParty(); await this.returnToDecision(snapshot, epoch);
-    }));
-    this.controls.replaceChildren(row);
-  }
-
-  private async openReserveRoster(forSwap = false, page = 0) {
-    const snapshot = this.latest, epoch = this.epoch;
-    if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-    if (forSwap && !this.canEditTeam(snapshot)) { this.setStatus('请先取消准备并完成待处理选择', true); return; }
-    const reserve = this.model.applied.personal.reserve ?? [];
-    if (!reserve.length) { this.setStatus('当前没有本局备用'); return; }
-    const pages = Math.ceil(reserve.length / 6);
-    page = Math.max(0, Math.min(page, pages - 1));
-    const entries = reserve.slice(page * 6, page * 6 + 6);
-    if (await this.showTeamParty(entries, PartyUiMode.MODIFIER, async (slot, option) => {
-      const entry = entries[slot];
-      if (forSwap && entry && option === PartyOption.APPLY) await this.openSwapTarget(entry, page, snapshot, epoch);
-      else await this.returnToDecision(snapshot, epoch);
-    }, () => null, forSwap ? [PartyOption.APPLY, PartyOption.SUMMARY] : [PartyOption.SUMMARY])) {
-      this.renderReservePager(page, pages, forSwap, snapshot, epoch);
-      this.setStatus(`本局备用 ${page + 1}/${pages}：${forSwap ? '选择要加入队伍的成员' : '可查看原摘要；战后可换队'}`);
-    }
-  }
-
-  private async openSwapTarget(reserve: any, page: number, snapshot: any, epoch: string | null) {
-    if (!this.isPersonalInputCurrent(snapshot, epoch) || !this.canEditTeam(snapshot)) return;
-    const party = this.model.applied.personal.party;
-    const filter = (p: any) => reserve.pokemon.hp > 0 || party.some((e: any) => e.id !== p.id && e.pokemon.hp > 0)
-      ? null : '队伍至少需要一位可出场成员';
-    if (await this.showTeamParty(party, PartyUiMode.MODIFIER, async (slot, option) => {
-      if (!this.isPersonalInputCurrent(snapshot, epoch) || !this.canEditTeam(snapshot)) return;
-      const target = party[slot];
-      if (!target || option !== PartyOption.APPLY || filter(target.pokemon)) { await this.openReserveRoster(true, page); return; }
-      const name = (e: any) => { const p = restorePokemonState(capturePokemonState(e.pokemon)); p.generateName(); return p.name; };
-      this.setStatus(`将备用 ${name(reserve)} 与队员 ${name(target)} 交换？`);
+  private async openCaptureChoice() {
+    const snapshot = this.latest, epoch = this.epoch, decision = snapshot?.personal.decision;
+    const legacy = decision?.legacyCapture;
+    if (!decision || !(decision.kind === 'capture-choice' || legacy) || !this.isPersonalInputCurrent(snapshot,epoch)) return;
+    const signature = `capture:${epoch}:${decision.id}:${snapshot.revision}`;
+    if (this.switchSignature === signature) return;
+    this.switchSignature = signature; this.controls.replaceChildren();
+    const options = legacy?.options ?? decision.options ?? [];
+    const decline = options.find((o:any) => legacy ? o.choice === 'discard' : o.releaseId === null);
+    const direct = legacy && options.find((o:any) => o.choice === 'keep' && o.releaseId === null);
+    const releaseOptions = options.filter((o:any) => o.releaseId !== null);
+    if (!decline || !direct && !releaseOptions.length) throw new Error('CAPTURE_OPTIONS_MISSING');
+    const send = async (action:any) => {
       const menuEpoch = this.teamMenuEpoch;
       await this.scene.ui.setMode(Mode.MESSAGE);
-      const current = () => this.isPersonalInputCurrent(snapshot, epoch) && menuEpoch === this.teamMenuEpoch && this.canEditTeam(snapshot);
-      if (!current()) return;
-      let chosen = false;
-      await this.scene.ui.setMode(Mode.CONFIRM, async () => {
-        if (chosen || !current()) return;
-        chosen = true;
+      if (this.isPersonalInputCurrent(snapshot,epoch) && menuEpoch === this.teamMenuEpoch)
+        await this.sendAction(action, '取舍已提交，等待服务器确认…');
+    };
+    const releaseParty = async () => {
+      if (!this.isPersonalInputCurrent(snapshot,epoch)) return;
+      const party = this.model.applied.personal.party, allowed = new Set(releaseOptions.map((o:any) => o.releaseId));
+      await this.showTeamParty(party, PartyUiMode.RELEASE, async (slot,option) => {
+        const entry = party[slot], action = option === PartyOption.RELEASE && entry
+          ? releaseOptions.find((o:any) => o.releaseId === entry.id) : null;
+        if (!action) { await this.returnToDecision(snapshot,epoch); return; }
+        const menuEpoch = this.teamMenuEpoch;
         await this.scene.ui.setMode(Mode.MESSAGE);
+        const current = () => this.isPersonalInputCurrent(snapshot,epoch) && menuEpoch === this.teamMenuEpoch;
         if (!current()) return;
-        await this.sendAction({ kind: 'preparation', operation: 'reserve-swap', partyId: target.id, reserveId: reserve.id },
-          '换队已提交，等待服务器确认…');
-      }, () => {
-        if (chosen || !current()) return;
-        chosen = true; void this.openSwapTarget(reserve, page, snapshot, epoch);
-      });
-    }, filter, [PartyOption.APPLY, PartyOption.SUMMARY])) {
-      this.controls.replaceChildren(); this.setStatus('请选择本人队伍中要交换的成员，包括当前前场');
-    }
+        this.setStatus('确定放生选中的本人队员，并接纳捕获的宝可梦？');
+        let chosen = false;
+        await this.scene.ui.setMode(Mode.CONFIRM,
+          () => { if (!chosen && current()) { chosen = true; return send(action); } },
+          () => { if (!chosen && current()) { chosen = true; return releaseParty(); } });
+      }, (p:any) => allowed.has(p.id) ? null : '不能放生当前出场者或伙伴的成员', [PartyOption.RELEASE,PartyOption.SUMMARY]);
+    };
+    const menuEpoch = this.teamMenuEpoch; let chosen = false;
+    this.setStatus(legacy ? (direct ? '旧版捕获待处理：是否保留并加入本人队伍？取消则放弃。'
+      : '旧版捕获待处理：队伍已满6只，是否放生现有队员后接纳？取消则放弃。')
+      : '队伍已满6只。是否放生一名现有队员后接纳新捕获？取消则放弃本次捕获。');
+    const choose = (callback:()=>any) => {
+      if (!chosen && this.isPersonalInputCurrent(snapshot,epoch) && menuEpoch === this.teamMenuEpoch) {
+        chosen = true; return callback();
+      }
+    };
+    await this.scene.ui.setMode(Mode.CONFIRM, () => choose(() => direct ? send(direct) : releaseParty()), () => choose(() => send(decline)));
   }
 
   private async openActiveSwitchParty() {
@@ -611,13 +581,6 @@ export default class CoopPlayPhase extends Phase {
       if (!player.rewardResolved) { this.setStatus('请先处理奖励或跳过奖励', true); return; }
       return send('ready');
     }, true));
-    if (this.model?.applied?.personal?.reserve?.length) {
-      const edit = this.button('战后换队', () => {
-        if (this.isPersonalInputCurrent(snapshot, epoch)) return this.openReserveRoster(true);
-      });
-      edit.disabled = player.ready || player.subdecision !== null || player.selection !== null;
-      row.append(edit);
-    }
     this.controls.append(row);
   }
 
@@ -725,16 +688,9 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private renderReserve() {
-    const reserve = this.model?.applied?.personal?.reserve ?? [];
-    this.reserveLine.hidden = reserve.length === 0;
-    if (this.reserveInspectButton) { this.reserveInspectButton.hidden = !reserve.length; this.updateReserveAccess(); }
-    if (!reserve.length) { this.reserveLine.textContent = ''; return; }
-    this.reserveLine.textContent = `本局备用：${reserve.map((entry: any) => {
-      // The codec intentionally excludes the display name. Rebuild it through
-      // the original method, without constructors or rule-state changes.
-      if (!entry.pokemon.name) entry.pokemon.generateName();
-      return `${entry.pokemon.name ?? `#${entry.id}`} Lv.${entry.pokemon.level}`;
-    }).join('、')}`;
+    const count = this.model?.applied?.personal?.reserve?.length ?? 0;
+    this.reserveLine.hidden = count === 0;
+    this.reserveLine.textContent = count ? `有 ${count} 只旧版捕获待处理，请在整备时逐只取舍。队伍最多6只。` : '';
   }
 
   private openBattleCommand() {

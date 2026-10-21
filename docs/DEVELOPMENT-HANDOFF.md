@@ -1,5 +1,7 @@
 # 新窗口开发交接
 
+2026-10-21 VS-02B-11 维护者复验：独立修复 phase scope 比较／席位1错绑、暂停队列重复、Worker 自动学招显示端口、原后备 fieldIndex=-1、学招私有投影隔离、Confirm/Summary 显示生命周期与二次放弃／重选。真实 Worker＋既有学招26/26、原UI控制器49/49、正式双WS／FormalRoomStore学招故障恢复2/2通过；后者从明确合成学招起点开始，新招实际FIGHT通过。普通战斗自然触发链仍未关闭，浏览器待用户，A/B整体部分通过，不扩进化。最终完整串行1059/1059、退出0（1043319.5987ms，无失败／取消／跳过），typecheck／Worker／生产build均0（build51.18s）。源码／测试基点f429331d，独立评审分支未合并／未推送；详见[维护者复验](mvp-vs-02b11-review.md)。
+
 2026-10-21 VS-02B-11 升级学招：A 代码接入原 LearnMovePhase 的 known／empty／满四招暂停、native progression 与 adapter 路由；B 接原 Confirm／SummaryUiMode.LEARN_MOVE 显示副本和 outbox 提交。既有 level-up／learn driver 18/18、typecheck／Worker／生产build通过，完整串行1046/1046无失败（但无新增生产学招用例）；仍**没有**真实自然升级生产 Worker、正式双 WS／重启／去重、原学招 UI 自动交互或双浏览器证据。A/B 均只能算可审查代码子集。详见[本批记录](mvp-vs-02b11-learn-move.md)。
 
 2026-10-21 VS-02B-10续接完成代码与自动验收：每人最多6只，未满捕获直接入本人party，满员原Confirm／Party RELEASE取舍，包含本人当前前场；释放前场后由原SummonPhase.preSummon在下一战选择存活成员并初始化。旧reserve整备逐只显式处理，禁止新增无限仓库和未处理即ready，原战前选择保留。修复pending捕获事实ID／owner和旧强制Switch null scope规范化，保留严格owner／modal／返回检查。最终代码7e1ad8c3完整串行1046/1046、退出0（1028503.5465ms，无失败／取消／跳过），typecheck／Worker／生产build均0。A有限切片通过；B代码／自动通过、双浏览器待用户，整体部分通过。见[续接验收](mvp-vs-02b10-resume-review.md)及[手测清单](vs02b10-manual-acceptance.md)。下一批仅普通升级学招生产链，不扩进化／商店／M6；完整任务书仅本地。分支feature/vs02b10-reserve-team，未合main／未推送，断电备份不是本次完成版。

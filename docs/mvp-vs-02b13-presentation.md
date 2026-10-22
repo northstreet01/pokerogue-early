@@ -1,6 +1,6 @@
 # VS-02B-13：权威战斗过程展示与转场（代码／自动验收）
 
-日期：2026-10-21。起点 `9a419345`（源码／测试基点 `f0bbc07d`），分支 `feature/vs02b13-battle-presentation`，实现提交 `804634ef`，后续卡死／404 修复 `2311fdccbbb58c469a057d3f49b24b1c44d3c808`。未合并、未推送。本文只记录本批新增内容，旧记录和用户反馈保留。
+日期：2026-10-21。起点 `9a419345`（源码／测试基点 `f0bbc07d`），分支 `feature/vs02b13-battle-presentation`，实现提交 `804634ef`，后续修复 `2311fdcc`（404／超时）与 `866a9496`（恢复显示名）。未合并、未推送。本文只记录本批新增内容，旧记录和用户反馈保留。
 
 ## 1. 完成事项
 
@@ -38,7 +38,7 @@
 - **stateAck 在播放完成后才发送**，因此双方不会在动画结束前提交下一回合；
 - 任何展示异常都不会把已通过校验的快照变成失败 ACK；规则、RNG、PP、EXP、伤害仍只在服务器执行。
 
-## 2. 卡死与 404 修复（`2311fdcc`）
+## 2. 卡死、404 与 undefined 消息修复（`2311fdcc`、`866a9496`）
 
 用户实测反馈的 404 和卡死已定位到两个独立接缝：
 
@@ -51,19 +51,21 @@
 
 `AnimationManager key already exists: pkmn__*` 是 Phaser 在重复创建显示动画时的警告，不是规则错误；它们仍可能出现，但现在不会无限阻塞输入。若卡死仍在，状态栏会显示“战斗展示回放失败”，且不应再让双方永久等 ACK。
 
+3. **`undefined's Speed harshly fell!!` 名称缺失**：`Pokemon.name` 是展示字段，不在规则 codec 中；原生恢复后阶段用 `getPokemonMessage` 读名称，得到 undefined。现每次 native restore 后按 species/form 重新 `generateName()`，不运行构造函数、不消费规则 RNG。新增训练家回合断言：消息中不得出现字面 `undefined`。
+
 ## 3. 自动验证结果
 
 | 检查 | 结果 |
 |---|---|
-| 完整串行 `node --test --test-concurrency=1 --test-reporter=tap tests/*.test.mjs` | **1084/1084，退出 0**；`1..1084`；fail／cancelled／skipped／todo 均 0；`2717675.3611ms`（约45分17秒） |
-| 运行源码／测试树 | `2311fdcc`（全量运行后源码／测试无差异） |
+| 完整串行 `node --test --test-concurrency=1 --test-reporter=tap tests/*.test.mjs` | **1084/1084，退出 0**；`1..1084`；fail／cancelled／skipped／todo 均 0；`1750551.4918ms`（约29分11秒） |
+| 运行源码／测试树 | `866a9496`（全量运行后源码／测试无差异） |
 | 新增 replay／trainer entrance 测试 | 通过 |
 | 训练家事件／公开投影断言 | 通过；dialogue 事件、trainer descriptor、动画 source／target／moveId 或 commonAnim 均校验 |
 | `npm run typecheck` | 退出 0 |
 | `npm run build:coop-runtime` | 退出 0 |
-| `npm run build` | 退出 0；最终构建约9m11s（本机并发浏览器导致偏慢，此前同源码53.62s），既有警告 |
+| `npm run build` | 退出 0；最终构建约1m58s，既有警告 |
 
-证据：ignored `build/vs02b13-final2/full.tap`、`full-exit.txt`；不提交日志。
+证据：ignored `build/vs02b13-final4/full.tap`、`full-exit.txt`；不提交日志。
 
 ## 4. 实际尚未验证／边界
 
@@ -140,6 +142,6 @@ node server/start.mjs
 
 ## 6. 提交与工作区
 
-- 本批实现：`804634ef`；卡死／404 修复：`2311fdcc`
+- 本批实现：`804634ef`；404／超时修复：`2311fdcc`；undefined 名称修复：`866a9496`
 - 既有用户反馈文档和交接／计划修改仍未提交（用户/前序工作保留，未被本批覆盖）。
 - main／实时远端仍 `86798227…`；未合并、未推送。

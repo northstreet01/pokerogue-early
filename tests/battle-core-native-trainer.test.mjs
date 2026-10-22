@@ -160,6 +160,8 @@ test('fresh default collection reaches original wave five, restores Trainer call
     assert.ok(animation,'the round must expose a replayable animation event');
     assert.ok(animation.sourceId&&animation.targetId);
     assert.ok(animation.moveId!==undefined||animation.commonAnim!==undefined);
+    const messages=round.events.filter(e=>e.kind==='message').map(e=>String(e.text));
+    assert.ok(messages.every(text=>!text.includes('undefined')),'restored Pokemon display names must be rebuilt for original messages');
   }finally{await h.close();}
 });
 

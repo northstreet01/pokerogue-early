@@ -166,6 +166,10 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     // without replaying a Pokemon constructor or consuming rule randomness.
     pokemon.setPosition(owner === null ? 236 : 106, owner === null ? 84 : 148);
   }
+  // Pokemon.name is presentation state and intentionally absent from the rule
+  // codec. Original phase messages still read it, so rebuild the deterministic
+  // display name after restore without replaying a constructor.
+  for (const entry of c.roster.entries) entry.pokemon.generateName?.();
   for (const id of c.roster.field) if (id !== null) {
     const p = c.roster.entries.find(e => e.pokemon.id === id).pokemon;
     if (!p.isFainted(true)) root.field.add(p);

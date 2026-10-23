@@ -1120,15 +1120,18 @@ test(`original Party receives owned modifier inventory for ${id}, submits once a
   const modifier=type.newModifier(entry.pokemon);modifier.stackCount=1;
   p.model.applied.personal.resources={modifiers:[modifier]};
   const oldScene=entry.pokemon.scene,before=api.capturePokemonState(entry.pokemon),beforeModifier=api.captureModifierState(modifier);
+  const oldModifiers=p.scene.modifiers;
   await p.choosePreparationReward({id:`persistent-${id}`,type:api.captureModifierTypeState(type)},p.latest,p.epoch);
   const mode=modes.at(-1),display=p.scene.party[0];
   assert.equal(mode[0],api.Mode.PARTY);assert.equal(mode[4](display),null);
   assert.equal(display.scene.modifiers.length,1);assert.notEqual(display.scene.modifiers[0],modifier);
+  assert.equal(p.scene.modifiers,display.scene.modifiers,'original Party/Summary handler sees the same private inventory');
   assert.equal(display.scene.findModifier(m=>m.pokemonId===entry.id).stackCount,1);
   const callback=mode[3];await callback(0,api.PartyOption.APPLY);await callback(0,api.PartyOption.APPLY);await tick();
   assert.equal(sent.length,1);assert.equal(sent[0].action.pokemonId,entry.id);
   assert.equal(entry.pokemon.scene,oldScene);assert.deepEqual(api.capturePokemonState(entry.pokemon),before);
   assert.deepEqual(api.captureModifierState(modifier),beforeModifier);
+  assert.equal(p.scene.modifiers,oldModifiers,'leaving Party restores its previous display inventory');
 });
 
 test('original held filter rejects a full stack on the display copy; cancellation never grants a reward',async()=>{

@@ -597,6 +597,7 @@ export default class CoopPlayPhase extends Phase {
     await this.scene.ui.setMode(Mode.MESSAGE);
     if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return false;
     const savedParty = (this.scene as any).party, savedBattle = this.scene.currentBattle;
+      const savedModifiers = Object.getOwnPropertyDescriptor(this.scene, 'modifiers');
     const party = entries.map(entry => this.makeTeamPokemon(entry));
       // Original held-item filters consult Pokemon.scene and the current cap.
       // Give display copies their own read-only personal inventory/party view.
@@ -608,6 +609,9 @@ export default class CoopPlayPhase extends Phase {
         findModifier: BattleScene.prototype.findModifier, findModifiers: BattleScene.prototype.findModifiers,
         getModifiers: BattleScene.prototype.getModifiers });
       for (const pokemon of party) pokemon.scene = personalScene;
+      // Party and Summary also query their handler's scene for held icons.
+      // Use the same detached personal inventory for that temporary view.
+      this.scene.modifiers = personalScene.modifiers;
     const battle = Object.create(savedBattle);
     battle.double = false; battle.getBattlerCount = () => 1;
     (this.scene as any).party = party; this.scene.currentBattle = battle;
@@ -632,6 +636,9 @@ export default class CoopPlayPhase extends Phase {
         this.controls.replaceChildren();
       }
       if (this.scene.currentBattle === battle) this.scene.currentBattle = savedBattle;
+        if (this.scene.modifiers === personalScene.modifiers) {
+          if (savedModifiers) Object.defineProperty(this.scene, 'modifiers', savedModifiers); else delete (this.scene as any).modifiers;
+        }
       if (settled) dispose();
     };
     this.releaseTeamParty = release;

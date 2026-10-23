@@ -2,7 +2,7 @@ import type BattleScene from '../battle-scene';
 import { Phase } from '../phase';
 import { Mode } from '../ui/ui';
 import { capturePokemonState, restorePokemonState } from '../field/pokemon';
-import { CoopBattlePresentation, createCoopPokemonDisplay } from './battle-presentation';
+import { CoopBattlePresentation, createCoopPokemonDisplay, captureResultText } from './battle-presentation';
 import { captureProfile } from './original-profile-entry';
 import { createOriginalClientModel } from './original-client-model.mjs';
 import { createSnapshotConsumer } from '../battle-core/coop-client.mjs';
@@ -849,27 +849,43 @@ export default class CoopPlayPhase extends Phase {
       this.setStatus('当前没有合法捕获目标或可用精灵球', true);
       return;
     }
-    const cancel = async () => {
-      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+    this.clearTeamParty();
+    const menuEpoch = this.teamMenuEpoch;
+    let consumed = false;
+    const current = () => menuEpoch === this.teamMenuEpoch && this.isPersonalInputCurrent(snapshot, epoch);
+    const recover = async (error: any) => {
+      if (!current()) return;
       this.battleInputActive = false;
-      await this.scene.ui.setMode(Mode.MESSAGE);
-      if (this.isPersonalInputCurrent(snapshot, epoch)) this.openBattleCommand();
+      try { await this.scene.ui.setMode(Mode.MESSAGE); } catch { /* Still attempt the original Command port. */ }
+      if (!current()) return;
+      this.openBattleCommand();
+      this.setStatus(`投球菜单失败，未提交行动：${error?.message ?? error}，可重新选择`, true);
     };
-    await this.scene.ui.setMode(Mode.BALL, {
-      counts: { ...snapshot.personal.resources.pokeballs },
-      allowed: options.map((o: any) => o.pokeballType), cancel,
-      select: async (ball: number) => {
-        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-        const option = options.find((o: any) => o.pokeballType === ball);
-        if (!option) return;
-        this.battleInputActive = false;
+    const choose = async (option: any | null) => {
+      if (consumed || !current()) return;
+      consumed = true;
+      try {
+        // Keep the Command gate occupied while leaving BALL. A repeated ready
+        // packet must not open Command in the middle of this async transition.
         await this.scene.ui.setMode(Mode.MESSAGE);
-        if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+        if (!current()) return;
+        this.battleInputActive = false;
+        if (!option) { this.openBattleCommand(); return; }
         await this.sendAction({ kind: 'ball', pokeballType: option.pokeballType, targetId: option.targetId },
           '已提交投球，等待服务器裁定…');
-      },
-    });
-    this.setStatus('选择精灵球；取消可返回 Command');
+      } catch (error) { await recover(error); }
+    };
+    try {
+      await this.scene.ui.setMode(Mode.BALL, {
+        counts: { ...snapshot.personal.resources.pokeballs },
+        allowed: options.map((o: any) => o.pokeballType), cancel: () => choose(null),
+        select: (ball: number) => {
+          const option = options.find((o: any) => o.pokeballType === ball);
+          if (option) return choose(option);
+        },
+      });
+      if (current()) this.setStatus('选择精灵球；取消可返回 Command');
+    } catch (error) { await recover(error); }
   }
 
   private renderReserve() {
@@ -886,8 +902,14 @@ export default class CoopPlayPhase extends Phase {
     if (!this.getPokemon()) return;
     this.battleInputActive = true;
     (this.scene as any).standbyPhase = this;
-    this.setStatus('请选择战斗行动');
-    void this.scene.ui.setMode(Mode.COMMAND, this.seat);
+    const result = this.latest.events?.findLast((event: any) => event.kind === 'capture-result' && event.seat === this.seat);
+    this.setStatus(result ? `${captureResultText(result)} 请选择战斗行动` : '请选择战斗行动');
+    const snapshot = this.latest, epoch = this.epoch;
+    void Promise.resolve(this.scene.ui.setMode(Mode.COMMAND, this.seat)).catch(error => {
+      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+      this.battleInputActive = false;
+      this.setStatus(`行动菜单打开失败：${error?.message ?? error}，可重新同步或退出`, true);
+    });
   }
 
   handleCommand(command: Command, cursor: number): boolean {

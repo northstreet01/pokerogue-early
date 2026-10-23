@@ -6,6 +6,15 @@ import { Type } from '../data/type';
 import { getBiomeKey } from '../field/arena';
 import { CommonBattleAnim, MoveAnim, initMoveAnim, loadMoveAnimAssets } from '../data/battle-anims';
 import { trainerConfigs } from '../data/trainer-config';
+import { getPokeballName } from '../data/pokeball';
+
+export function captureResultText(event: any): string {
+  const ball = getPokeballName(event.pokeballType);
+  if (event.outcome === 'caught') return `${ball}：捕获成功。`;
+  if (event.outcome === 'failed') return `${ball}：捕获失败，可继续选择行动。`;
+  if (event.outcome === 'cancelled') return '捕获取消：目标已离场，未消耗精灵球。';
+  return '捕获结果暂时无法显示，请查看同步状态。';
+}
 
 const within = async (task: Promise<unknown>, ms: number, signal: AbortSignal) => {
   if (signal.aborted) throw new Error('PRESENTATION_CANCELLED');
@@ -90,6 +99,7 @@ export class CoopBattlePresentation {
           else if (event.kind === 'dialogue') await this.playDialogue(event, signal);
           else if (event.kind === 'message') await this.playMessage(event, signal);
           else if (event.kind === 'experience-bar') await this.playExperience(event, signal);
+          else if (event.kind === 'capture-result') await this.playMessage({ text: captureResultText(event) }, signal);
         } catch (error) { if (signal.aborted) return; throw error; }
         if (signal.aborted) return;
         this.playedEvents.add(key);

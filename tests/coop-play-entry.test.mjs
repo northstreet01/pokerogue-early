@@ -1007,6 +1007,97 @@ test('original BALL callback cannot cross awaited revision or epoch, and cannot 
   }
 });
 
+test('a cancelled or replaced BALL menu cannot submit through its old same-snapshot callback', async () => {
+  for (const change of ['cancel', 'replace']) {
+    const { p, modes, sent } = capturePhase();
+    await p.openCaptureMenu(); const old = modes.at(-1)[1];
+    if (change === 'cancel') await old.cancel();
+    else await p.openCaptureMenu();
+    await old.select(0);
+    assert.deepEqual(sent, []);
+    assert.equal(p.latest.personal.resources.pokeballs[0], 5);
+  }
+});
+
+test('BALL transition failure is reported and restores Command without an unhandled selection promise', async () => {
+  const { p, modes, sent, errors } = capturePhase();
+  await p.openCaptureMenu(); const config = modes.at(-1)[1];
+  const setMode = p.scene.ui.setMode;
+  let fail = true;
+  p.scene.ui.setMode = async (...args) => {
+    if (fail) { fail = false; throw Error('TEST_BALL_TRANSITION_FAILED'); }
+    return setMode(...args);
+  };
+  await assert.doesNotReject(config.select(0));
+  assert.deepEqual(sent, []);
+  assert.ok(errors.some(message => message.includes('TEST_BALL_TRANSITION_FAILED')));
+  assert.equal(modes.at(-1)[0], api.Mode.COMMAND);
+  assert.equal(p.battleInputActive, true);
+});
+
+test('a repeated ready status cannot reopen Command while the chosen BALL is leaving its original menu', async () => {
+  const { p, modes, sent } = capturePhase();
+  await p.openCaptureMenu(); const config = modes.at(-1)[1];
+  const transition = deferred(), started = deferred(), setMode = p.scene.ui.setMode;
+  p.scene.ui.setMode = async (...args) => {
+    if (args[0] === api.Mode.MESSAGE) { started.resolve(); await transition.promise; }
+    return setMode(...args);
+  };
+  const selected = config.select(0); await started.promise;
+  const commandCount = modes.filter(([mode]) => mode === api.Mode.COMMAND).length;
+  await p.onMessage({ type: 'syncStatus', roomId: p.roomId, runId: p.runId, revision: p.latest.revision,
+    blocked: false, submitted: [false, false] });
+  assert.equal(modes.filter(([mode]) => mode === api.Mode.COMMAND).length, commandCount);
+  transition.resolve(); await selected;
+  assert.equal(sent.length, 1);
+});
+
+test('BALL show failure recovers to Command and an exiting pending selection cannot write or send', async () => {
+  for (const failure of ['show', 'exit']) {
+    const { p, modes, sent, errors } = capturePhase();
+    const setMode = p.scene.ui.setMode;
+    if (failure === 'show') {
+      p.scene.ui.setMode = async (...args) => {
+        if (args[0] === api.Mode.BALL) throw Error('TEST_BALL_SHOW_FAILED');
+        return setMode(...args);
+      };
+      await assert.doesNotReject(p.openCaptureMenu());
+      assert.equal(modes.at(-1)[0], api.Mode.COMMAND);
+      assert.ok(errors.some(error => error.includes('TEST_BALL_SHOW_FAILED')));
+    } else {
+      await p.openCaptureMenu(); const config = modes.at(-1)[1], transition = deferred();
+      p.scene.ui.setMode = () => transition.promise;
+      const selected = config.select(0);
+      p.stopSession(); transition.resolve(); await selected;
+      assert.deepEqual(await p.storage.pendingActions(origin, p.roomId, p.seat), []);
+    }
+    assert.deepEqual(sent, []);
+  }
+});
+
+test('an old rejected Command transition cannot disable input for a newer verified snapshot', async () => {
+  const { p } = capturePhase();
+  let reject;
+  const pending = new Promise((_resolve, fail) => { reject = fail; });
+  p.battleInputActive = false; p.scene.ui.setMode = () => pending;
+  p.openBattleCommand(); p.latest = { ...p.latest, revision: p.latest.revision + 1 };
+  reject(Error('TEST_OLD_COMMAND_FAILED'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(p.battleInputActive, true);
+});
+
+test('authoritative capture outcomes use the original message port and do not request local input', async () => {
+  const messages = [];
+  const presentation = new api.CoopBattlePresentation({ ui: { showText: (text, delay, callback) => {
+    assert.equal(delay, 0); assert.equal(callback, undefined); messages.push(text);
+  } } });
+  await presentation.playEvents(['failed', 'caught', 'cancelled'].map((outcome, index) => ({
+    kind: 'capture-result', outcome, pokeballType: 0, eventIndex: index, eventId: `synthetic-capture-${index}`,
+  })));
+  assert.match(messages[0], /捕获失败/); assert.match(messages[1], /捕获成功/);
+  assert.match(messages[2], /未消耗精灵球/);
+});
+
 test('original BallUiHandler keeps its navigation/cancel and filters unlisted cooperative balls', () => {
   const selected = [], counts = { 0: 5, 1: 9, 2: 0, 3: 0, 4: 0 }; let cancelled = 0, errors = 0;
   const handler = Object.assign(Object.create(api.BallUiHandler.prototype), {

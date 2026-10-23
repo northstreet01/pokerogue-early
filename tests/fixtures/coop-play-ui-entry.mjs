@@ -27,3 +27,6 @@ export { CommonBattleAnim } from '../../src/data/battle-anims';
 export { trainerConfigs } from '../../src/data/trainer-config';
 export { default as SummaryUiHandler, SummaryUiMode } from '../../src/ui/summary-ui-handler';
 export { createOriginalRuntime, constructOriginalPokemon, capturePokemonState, restorePokemonState } from '../../src/server/original-runtime';
+
+export { withStarterRandomContext } from '../../src/server/original-runtime';
+export { updateUserInfo } from '../../src/account';

@@ -20,6 +20,7 @@ export default class EggListUiHandler extends MessageUiHandler {
   private cursorObj: Phaser.GameObjects.Image;
 
   private iconAnimHandler: PokemonIconAnimHandler;
+  private onCancel?: () => void;
 
   constructor(scene: BattleScene) {
     super(scene, Mode.EGG_LIST);
@@ -90,6 +91,7 @@ export default class EggListUiHandler extends MessageUiHandler {
 
   show(args: any[]): boolean {
     super.show(args);
+    this.onCancel = args[0]?.onCancel;
 
     this.getUi().bringToTop(this.eggListContainer);
 
@@ -111,24 +113,35 @@ export default class EggListUiHandler extends MessageUiHandler {
       icon.setScale(0.5);
       icon.setOrigin(0, 0);
       icon.setFrame(egg.getKey());
+      const eggIndex = e;
+      this.bindPointer(icon, () => { this.setCursor(eggIndex); }, null);
       this.eggListIconContainer.add(icon);
       this.iconAnimHandler.addOrUpdate(icon, PokemonIconAnimMode.NONE);
       e++;
     }
 
-    this.setCursor(0);
+    this.eggSprite.setVisible(!!this.scene.gameData.eggs.length);
+    this.cursorObj.setVisible(!!this.scene.gameData.eggs.length);
+    if (this.scene.gameData.eggs.length) this.setCursor(0);
+    else {
+      this.eggNameText.setText('暂无未孵化蛋');
+      this.eggDateText.setText(''); this.eggHatchWavesText.setText('');
+      this.eggGachaInfoText.setText('取消返回');
+    }
 
     return true;
   }
 
   processInput(button: Button): boolean {
+    if (this.active === false) return false;
     const ui = this.getUi();
 
     let success = false;
     let error = false;
 
     if (button === Button.CANCEL) {
-      ui.revertMode();
+      if (this.onCancel) this.onCancel();
+      else ui.revertMode();
       success = true;
     } else {
       const eggCount = this.eggListIconContainer.getAll().length;
@@ -178,6 +191,7 @@ export default class EggListUiHandler extends MessageUiHandler {
   }
 
   setCursor(cursor: integer): boolean {
+    if (cursor < 0 || cursor >= this.scene.gameData.eggs.length) return false;
     let changed = false;
 
     let lastCursor = this.cursor;

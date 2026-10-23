@@ -44,7 +44,7 @@ const until = async (predicate, description) => {
 
 // Original phase + original Command/Ball handlers + real IDB/WS/service/Worker.
 // Rendering/asset ports are headless: this is not a browser visual acceptance.
-async function openUiRoom(seat, t, lobbyOnly = false, prepared = null) {
+async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry = false) {
   const directory = await mkdtemp(join(tmpdir(), 'vs02b15-ui-'));
   const original = createOriginalCoopAdapter({ fixture: { profileLobby: true,
     seed: 'learning-natural-2', identities: profiles.map(profile => profile.trainer) } });
@@ -82,6 +82,7 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null) {
     } };
   const scene = { ui, getCurrentPhase: () => phase, getStandbyPhase: () => phase,
     getPlayerField: () => [0, 1].map(index => index === phase.seat ? phase.model.applied?.personal.party[0]?.pokemon : null) };
+
   const phase = new api.CoopPlayPhase(scene);
   phase.model = api.createOriginalClientModel(api);
   phase.lastProfile = profiles[seat]; phase.profileDirty = true;
@@ -110,6 +111,28 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null) {
     await rm(directory, { recursive: true, force: true });
   };
   t.after(close);
+  if (homeEntry) {
+    const runtime = api.createOriginalRuntime('home-entry', profiles[seat].trainer);
+    scene.executeWithSeedOffset = (fn, offset, seed) => api.withStarterRandomContext(runtime.context,
+      () => runtime.scene.executeWithSeedOffset(fn, offset, seed));
+    const own = new api.GameData(scene, { readOnly: true });
+    const bytes = JSON.stringify({ ...profiles[seat].trainer, gender: 1, dexData: own.dexData,
+      voucherCounts: {0: 4, 1: 0, 2: 0, 3: 0}, eggs: [], timestamp: 1700000000000 },
+    (_key, value) => typeof value === 'bigint' ? value.toString() : value);
+    await api.writeLocalSave('data', bytes); scene.gameData = own;
+    const assigned = []; location.assign = url => assigned.push(url);
+    const home = new api.HomePhase(scene);
+    // Original Home callbacks and original GameData read, with display ports only.
+    ui.clearText = () => {};
+    await home.showHome(); modes.at(-1)[1].options[3].handler(); await home.transitions;
+    modes.at(-1)[1].options[2].handler();
+    await until(() => ui.mode === api.Mode.EGG_GACHA, 'home personal vouchers');
+    assert.equal(scene.gameData.voucherCounts[0], 4);
+    modes.at(-1)[1].onCancel(); await home.transitions;
+    assert.equal(await api.readLocalSave('data'), bytes); assert.equal(scene.gameData, own);
+    modes.at(-1)[1].options[1].handler();
+    assert.deepEqual(assigned, ['/coop-play.html?fresh=1']); location.search = '?fresh=1';
+  }
   phase.connect(); await until(() => phase.versions, 'primary hello');
   if (seat === 0) {
     await phase.createRoom(); await until(() => phase.roomId, 'primary room');
@@ -132,6 +155,20 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null) {
     && peerLatest.personal.decision.kind === 'wait-actions', 'selected Worker battle');
   return environment;
 }
+
+for (const seat of [0, 1]) test(`VS19 Home personal return -> fresh cooperative UI seat ${seat} -> real profile/IDB/WS/Worker/FIGHT`, { timeout: 90000 }, async t => {
+  const env = await openUiRoom(seat, t, false, null, true);
+  try {
+    const {phase,modes}=env;
+    assert.equal(phase.latest.personal.decision.kind,'wait-actions');
+    const option=phase.latest.personal.decision.options.find(o=>o.kind==='fight' && (o.target===null || o.target>=2));
+    assert.ok(option);phase.battleInputActive=true;env.command.cursor=0;env.command.cursor2=0;
+    env.command.processInput(api.Button.ACTION);assert.equal(modes.at(-1)[0],api.Mode.FIGHT);
+    assert.deepEqual(env.errors,[]);
+    assert.equal((await api.readLocalSaveSnapshot(['data'])).data.includes('"voucherCounts":{"0":4'),true);
+    assert.deepEqual(await phase.storage.pendingActions(location.origin,phase.roomId,seat),[]);
+  } finally { await env.close(); }
+});
 
 for (const seat of [0, 1]) test(`VS16 original Starter callbacks seat ${seat}: draft IDB/WS/model ACK, readiness, selected Worker and FIGHT`, { timeout: 90000 }, async t => {
   const env = await openUiRoom(seat, t, true);

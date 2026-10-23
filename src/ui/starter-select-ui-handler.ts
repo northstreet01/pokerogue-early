@@ -113,7 +113,8 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
 
   private starterSelectCallback: StarterSelectCallback;
   private starterSelectOptions: { gameMode?: GameModes; onCancel?: () => void;
-    onChange?: StarterSelectCallback; starters?: Starter[] } = {};
+    onChange?: StarterSelectCallback; starters?: Starter[]; readOnly?: boolean } = {};
+  private startLabel: Phaser.GameObjects.Text;
   private starterChangeSignature = '';
   private restoringStarters = false;
 
@@ -264,6 +265,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     this.starterSelectContainer.add(this.valueLimitLabel);
 
     const startLabel = addTextObject(this.scene, 124, 162, i18next.t("common:start"), TextStyle.TOOLTIP_CONTENT);
+    this.startLabel = startLabel;
     startLabel.setOrigin(0.5, 0);
     this.starterSelectContainer.add(startLabel);
     this.bindPointer(startLabel, () => {}, Button.SUBMIT);
@@ -480,6 +482,8 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
 
       this.starterSelectCallback = args[0] as StarterSelectCallback;
       this.starterSelectOptions = args[1] ?? {};
+      this.startLabel.setVisible(!this.starterSelectOptions.readOnly);
+      this.valueLimitLabel.setVisible(!this.starterSelectOptions.readOnly);
 
       this.starterSelectContainer.setVisible(true);
 
@@ -494,7 +498,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       this.starterChangeSignature = '';
       this.notifyStarterChange();
 
-      handleTutorial(this.scene, Tutorial.Starter_Select);
+      if (!this.starterSelectOptions.readOnly) handleTutorial(this.scene, Tutorial.Starter_Select);
 
       return true;
     }
@@ -517,7 +521,17 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
   }
 
   processInput(button: Button): boolean {
+    if (this.active === false) return false;
     const ui = this.getUi();
+    if (this.starterSelectOptions.readOnly) {
+      if (button === Button.SUBMIT) return false;
+      if (button === Button.ACTION) {
+        if (!this.genMode && this.speciesStarterDexEntry?.caughtAttr) {
+          this.toggleStatsMode(!this.statsMode); ui.playSelect(); return true;
+        }
+        return false;
+      }
+    }
 
     let success = false;
     let error = false;
@@ -573,7 +587,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
         case Button.DOWN:
           if (this.genCursor < 2)
             success = this.setCursor(this.genCursor + 1);
-          else {
+          else if (!this.starterSelectOptions.readOnly) {
             this.startCursorObj.setVisible(true);
             this.setGenMode(true);
             success = true;
@@ -788,7 +802,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
             if (this.cursor % 9)
               success = this.setCursor(this.cursor - 1);
             else {
-              if (row >= Math.min(5, rows - 1))
+              if (row >= Math.min(5, rows - 1) && !this.starterSelectOptions.readOnly)
                 this.startCursorObj.setVisible(true);
               success = this.setGenMode(true);
             }
@@ -834,6 +848,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     for (let cil of cycleInstructionLines)
       instructionLines.push(cil);
 
+    if (this.starterSelectOptions.readOnly) instructionLines.unshift('个人收藏 · 确认查看IV · 取消返回');
     this.instructionsText.setText(instructionLines.join('\n'));
   }
 
@@ -1117,6 +1132,11 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
           this.speciesLoaded.set(species.speciesId, true);
           this.pokemonSprite.play(species.getSpriteKey(female, formIndex, shiny));
           this.pokemonSprite.setVisible(!this.statsMode);
+        }).catch(() => {
+          if (!assetLoadCancelled.value && this.active) {
+            this.assetLoadCancelled = null;
+            this.showText('宝可梦资源读取失败，请重新选择或返回重试。', 0);
+          }
         });
 
         (this.starterSelectGenIconContainers[this.getGenCursorWithScroll()].getAt(this.cursor) as Phaser.GameObjects.Sprite).setFrame(species.getIconId(female, formIndex, shiny));
@@ -1242,6 +1262,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
   }
 
   private notifyStarterChange(): void {
+    if (this.starterSelectOptions.readOnly) return;
     if (!this.starterSelectOptions.onChange || this.restoringStarters) return;
     const starters = this.selectedStarters();
     const signature = JSON.stringify(starters.map(starter => ({ ...starter,
@@ -1294,6 +1315,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
   }
 
   tryStart(manualTrigger: boolean = false): boolean {
+    if (this.active === false || this.starterSelectOptions.readOnly) return false;
     if (!this.starterGens.length)
       return false;
 
@@ -1381,6 +1403,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
 
   clear(): void {
     super.clear();
+    if (this.assetLoadCancelled) this.assetLoadCancelled.value = true;
     this.cursor = -1;
     this.starterSelectContainer.setVisible(false);
 

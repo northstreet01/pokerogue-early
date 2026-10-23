@@ -1282,6 +1282,10 @@ export default class BattleScene extends Phaser.Scene {
 		else if (this.isButtonPressed(Button.CANCEL)) {
 			inputSuccess = this.ui.processInput(Button.CANCEL);
 		} else if (this.isButtonPressed(Button.MENU)) {
+			if (this.getCurrentPhase() instanceof HomePhase) {
+				void (this.getCurrentPhase() as HomePhase).showHome();
+				return;
+			}
 			// Until cooperative menu ports exist, do not enter solo save/gacha flows.
 			if (this.getCurrentPhase() instanceof CoopPlayPhase)
 				return;

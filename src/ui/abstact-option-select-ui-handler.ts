@@ -5,6 +5,7 @@ import UiHandler from "./ui-handler";
 import { addWindow } from "./window";
 
 export interface OptionSelectConfig {
+  contextLabel?: string;
   xOffset?: number;
   yOffset?: number;
   options: OptionSelectItem[];

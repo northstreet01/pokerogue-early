@@ -33,6 +33,7 @@ export default class EggGachaUiHandler extends MessageUiHandler {
   private cursorObj: Phaser.GameObjects.Image;
   private transitioning: boolean;
   private transitionCancelled: boolean;
+  private browseOptions: { readOnly?: boolean; onCancel?: () => void } = {};
 
   constructor(scene: BattleScene) {
     super(scene, Mode.EGG_GACHA);
@@ -222,8 +223,10 @@ export default class EggGachaUiHandler extends MessageUiHandler {
 
   show(args: any[]): boolean {
     super.show(args);
+    this.browseOptions = args[0] ?? {};
 
-    this.getUi().showText(defaultText, 0);
+    this.getUi().showText(this.browseOptions.readOnly ? '已有个人蛋券 · 此处仅供查看\n取消返回；合作蛋券领取暂未开放' : defaultText, 0);
+    this.eggGachaOptionsContainer.setVisible(!this.browseOptions.readOnly);
 
     this.setGachaCursor(1);
 
@@ -236,7 +239,7 @@ export default class EggGachaUiHandler extends MessageUiHandler {
 
     this.eggGachaContainer.setVisible(true);
 
-    handleTutorial(this.scene, Tutorial.Egg_Gacha);
+    if (!this.browseOptions.readOnly) handleTutorial(this.scene, Tutorial.Egg_Gacha);
 
     return true;
   }
@@ -248,6 +251,7 @@ export default class EggGachaUiHandler extends MessageUiHandler {
   }
 
   pull(pullCount?: integer, count?: integer, eggs?: Egg[]): void {
+    if (this.active === false || this.browseOptions.readOnly) return;
     this.eggGachaOptionsContainer.setVisible(false);
     this.setTransitioning(true);
 
@@ -462,6 +466,7 @@ export default class EggGachaUiHandler extends MessageUiHandler {
   }
 
   consumeVouchers(voucherType: VoucherType, count: integer): void {
+    if (this.active === false || this.browseOptions.readOnly) return;
     this.scene.gameData.voucherCounts[voucherType] = Math.max(this.scene.gameData.voucherCounts[voucherType] - count, 0);
     this.updateVoucherCounts();
   }
@@ -501,7 +506,12 @@ export default class EggGachaUiHandler extends MessageUiHandler {
   }
 
   processInput(button: Button): boolean {
+    if (this.active === false) return false;
     const ui = this.getUi();
+    if (this.browseOptions.readOnly) {
+      if (button === Button.CANCEL) { this.browseOptions.onCancel?.(); return true; }
+      return false;
+    }
 
     let success = false;
     let error = false;

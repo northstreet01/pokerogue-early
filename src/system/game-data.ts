@@ -198,11 +198,14 @@ export class GameData {
   public voucherCounts: VoucherCounts;
   public eggs: Egg[];
 
-  constructor(scene: BattleScene) {
+  private readonlyView: boolean;
+
+  constructor(scene: BattleScene, options: { readOnly?: boolean } = {}) {
     this.scene = scene;
-    this.loadSettings();
-    this.trainerId = Utils.randSeedInt(65536);
-    this.secretId = Utils.randSeedInt(65536);
+    this.readonlyView = !!options.readOnly;
+    if (!this.readonlyView) this.loadSettings();
+    this.trainerId = this.readonlyView ? 0 : Utils.randSeedInt(65536);
+    this.secretId = this.readonlyView ? 0 : Utils.randSeedInt(65536);
     this.starterMoveData = {};
     this.starterEggMoveData = {};
     this.gameStats = new GameStats();
@@ -225,6 +228,7 @@ export class GameData {
   }
 
   public saveSystem(): Promise<boolean> {
+    if (this.readonlyView) return Promise.resolve(false);
     return new Promise<boolean>(resolve => {
       updateUserInfo().then((success: boolean) => {
         if (!success)
@@ -274,13 +278,17 @@ export class GameData {
     });
   }
 
-  public loadSystem(): Promise<boolean> {
+  public loadSystem(options: { readOnly?: boolean } = {}): Promise<boolean> {
+    const readOnly = this.readonlyView || options.readOnly;
     return new Promise<boolean>((resolve, reject) => {
       const handleSystemData = (systemDataStr: string) => {
         try {
           const systemData = this.parseSystemData(systemDataStr);
+          if (readOnly && (!systemData?.dexData || typeof systemData.dexData !== 'object' || Array.isArray(systemData.dexData)
+            || ![systemData.trainerId, systemData.secretId].every(id => Number.isInteger(id) && id >= 0 && id < 65536)))
+            throw new Error('个人收藏资料格式不完整，请使用存档工具检查原资料');
 
-          console.debug(systemData);
+          if (!readOnly) console.debug(systemData);
 
           /*const versions = [ this.scene.game.config.gameVersion, data.gameVersion || '0.0.0' ];
           
@@ -293,7 +301,7 @@ export class GameData {
 
           this.gender = systemData.gender;
 
-          this.saveSetting(Setting.Player_Gender, systemData.gender === PlayerGender.FEMALE ? 1 : 0);
+          if (!readOnly) this.saveSetting(Setting.Player_Gender, systemData.gender === PlayerGender.FEMALE ? 1 : 0);
 
           this.starterMoveData = systemData.starterMoveData || {};
           
@@ -402,6 +410,7 @@ export class GameData {
   }
 
   public saveSetting(setting: Setting, valueIndex: integer): boolean {
+    if (this.readonlyView) return false;
     let settings: object = {};
     if (localStorage.hasOwnProperty('settings'))
       settings = JSON.parse(localStorage.getItem('settings'));

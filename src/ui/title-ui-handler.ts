@@ -57,7 +57,8 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
   }
 
   updatePlayerCount(): void {
-    this.playerCountLabel.setText('Local save · Single player');
+    this.playerCountLabel.setText(this.config?.contextLabel ?? '本地存档 · 单人冒险');
+    this.playerCountLabel.setY(this.config?.contextLabel ? 80 : 90);
   }
 
   show(args: any[]): boolean {

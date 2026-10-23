@@ -7,6 +7,11 @@ import { getBiomeKey } from '../field/arena';
 import { CommonBattleAnim, MoveAnim, initMoveAnim, loadMoveAnimAssets } from '../data/battle-anims';
 import { trainerConfigs } from '../data/trainer-config';
 import { getPokeballName } from '../data/pokeball';
+import { animatePokemonExit } from '../field/pokemon-exit-animation';
+import { animatePokemonSummon } from '../field/pokemon-summon-animation';
+import { CoopBattleAudio } from './battle-audio';
+import { Biome } from '../data/enums/biome';
+import { animateEncounterScroll, animateBiomeBackground } from '../field/encounter-animation';
 
 export function captureResultText(event: any): string {
   const ball = getPokeballName(event.pokeballType);
@@ -32,12 +37,30 @@ const within = async (task: Promise<unknown>, ms: number, signal: AbortSignal) =
 const wait = (ms: number, signal: AbortSignal) => within(new Promise(() => {}), ms, signal)
   .catch(error => { if (error.message !== 'PRESENTATION_TIMEOUT') throw error; });
 
+/** A timed-out original effect must stop before final-state reconciliation. */
+async function visual(start: (signal: AbortSignal, done: () => void) => void, ms: number, parent: AbortSignal) {
+  const controller = new AbortController();
+  let release: ReturnType<typeof setTimeout> | undefined;
+  const cancel = () => { controller.abort(); clearTimeout(release); };
+  if (parent.aborted) controller.abort();
+  else parent.addEventListener('abort', cancel, { once: true });
+  try { await within(new Promise<void>(done => start(controller.signal, done)), ms, parent); }
+  catch (error) { controller.abort(); throw error; }
+  finally {
+    // The original summon particles finish shortly after the release tween.
+    // Keep their cancellation linked until their own bounded lifetime ends.
+    if (controller.signal.aborted) parent.removeEventListener('abort', cancel);
+    else release = setTimeout(() => parent.removeEventListener('abort', cancel), 1500);
+  }
+}
+
 /** Original display Container around a codec copy, without a Pokemon constructor. */
-export function createCoopPokemonDisplay(scene: BattleScene, model: Pokemon, player = true): Pokemon {
+export function createCoopPokemonDisplay(scene: BattleScene, model: Pokemon, player = true, slot?: number): Pokemon {
   const display = new Phaser.GameObjects.Container(scene, player ? 106 : 236, player ? 148 : 84);
   Object.setPrototypeOf(display, Object.getPrototypeOf(model));
   Object.assign(display, model, { scene });
   Object.assign(display, { randSeedInt: () => { throw new Error('CLIENT_RULE_RNG_FORBIDDEN'); } });
+  if (slot !== undefined) Object.assign(display, { getFieldIndex: () => slot % 2, getBattlerIndex: () => slot });
   (display as Pokemon).generateName();
   return display as Pokemon;
 }
@@ -50,18 +73,35 @@ export class CoopBattlePresentation {
   private playedEvents = new Set<string>();
   private trainerSprite: any = null;
   private lifetime = new AbortController();
+  private lastSnapshot: any = null;
+  private field: (Pokemon | null)[] = [null, null, null, null];
+  private pending: any = null;
+  private modelKeys = new Map<number, string>();
+  private looks = new Map<number, string>();
+  private audio: CoopBattleAudio;
   private static readonly EVENT_STORAGE = 'coop-presentation-events-v1';
   constructor(private scene: BattleScene) {
+    this.audio = new CoopBattleAudio(scene);
     try {
       const saved = globalThis.sessionStorage?.getItem(CoopBattlePresentation.EVENT_STORAGE);
       for (const id of saved ? JSON.parse(saved) : []) if (typeof id === 'string') this.playedEvents.add(id);
     } catch { /* replay storage never changes or commits rule state */ }
   }
 
-  cancel() { this.lifetime.abort(); }
+  cancel() {
+    this.lifetime.abort();
+    for (const pokemon of this.displayed) {
+      const info = (pokemon as any).battleInfo;
+      if (info) for (const target of [info, info.hpBar, info.expBar].filter(Boolean)) this.scene.tweens.killTweensOf(target);
+      const children = (pokemon as any).list ?? [];
+      for (const child of children) this.scene.tweens.killTweensOf(child);
+      if (!(pokemon as any).maskEnabled) children[1]?.setVisible(false).setAlpha(1);
+    }
+  }
 
   clear() {
     this.cancel();
+    this.audio.stop();
     this.lifetime = new AbortController();
     for (const pokemon of this.displayed) {
       const info = (pokemon as any).battleInfo;
@@ -70,6 +110,8 @@ export class CoopBattlePresentation {
       pokemon.destroy();
     }
     this.displayed = [];
+    this.pending = null; this.lastSnapshot = null;
+    this.field = [null, null, null, null]; this.modelKeys.clear(); this.looks.clear();
     this.displayedById.clear();
     if (this.trainerSprite && this.trainerSprite !== this.scene.trainer) this.trainerSprite.destroy?.();
     this.trainerSprite = null;
@@ -80,22 +122,33 @@ export class CoopBattlePresentation {
    * No rule state, RNG, PP, EXP or damage is recalculated here. */
   async playEvents(events: any[], context: { revision?: number; decisionId?: string;
     isCurrent?: () => boolean } = {}) {
-    if (!Array.isArray(events) || !events.length) return;
+    if (!Array.isArray(events)) return;
+    const batch = this.pending;
     const ordered = [...events].sort((a, b) => (a.eventIndex ?? 0) - (b.eventIndex ?? 0));
     const started = Date.now();
+    const budget = Math.min(120000, Math.max(20000, ordered.length * 5500));
     const signal = this.lifetime.signal;
     const hp = this.displayed.map(pokemon => [pokemon, pokemon.hp] as const);
     try {
       for (const event of ordered) {
         if (signal.aborted || context.isCurrent?.() === false) return;
-        if (Date.now() - started > 20000) throw new Error('PRESENTATION_TIMEOUT');
+        if (Date.now() - started > budget) throw new Error('PRESENTATION_TIMEOUT');
         if (!event || typeof event !== 'object') continue;
         const key = event.eventId ?? `${context.revision ?? 'r'}:${event.eventIndex ?? '?'}:${event.kind}`;
         if (this.playedEvents.has(key)) continue;
         try {
-          if (event.kind === 'battle-animation') await this.playAnimation(event, signal);
+          if (event.kind === 'bgm') this.audio.play(event.key);
+          else if (batch && !batch.replay && ['battle-animation', 'damage-display', 'pokemon-hp', 'pokemon-exit', 'pokemon-enter', 'faint-cry', 'showInfo'].includes(event.kind)) continue;
+          else if (event.kind === 'battle-animation') await this.playAnimation(event, signal);
           else if (event.kind === 'phase-start') await this.playPhase(event, signal);
-          else if (event.kind === 'damage-display') await this.playDamage(event, signal);
+          else if (event.kind === 'damage-display' || event.kind === 'pokemon-hp') await this.playDamage(event, signal);
+          else if (event.kind === 'faint-cry') {
+            const pokemon = this.displayedById.get(event.pokemonId);
+            if (pokemon) await visual((local, done) => pokemon.faintCry(done, local), 3500, signal);
+          } else if (event.kind === 'pokemon-exit') {
+            const pokemon = this.displayedById.get(event.pokemonId);
+            if (pokemon) await visual((local, done) => animatePokemonExit(pokemon, event.animation, done, local), 1500, signal);
+          } else if (event.kind === 'pokemon-enter' || event.kind === 'showInfo') await this.showPokemon(event, signal);
           else if (event.kind === 'dialogue') await this.playDialogue(event, signal);
           else if (event.kind === 'message') await this.playMessage(event, signal);
           else if (event.kind === 'experience-bar') await this.playExperience(event, signal);
@@ -111,7 +164,8 @@ export class CoopBattlePresentation {
       }
     } finally {
       // A shortened/failed replay must still leave the committed final frame.
-      if (!signal.aborted) for (const [pokemon, finalHp] of hp) {
+      if (!signal.aborted && batch && this.pending === batch) await this.finish(batch, signal);
+      else if (!signal.aborted && !batch) for (const [pokemon, finalHp] of hp) {
         pokemon.hp = finalHp;
         pokemon.setVisible?.(finalHp > 0);
         try { await within(Promise.resolve(pokemon.updateInfo?.(true)), 1200, signal); }
@@ -121,9 +175,35 @@ export class CoopBattlePresentation {
   }
 
   private async playPhase(event: any, signal: AbortSignal) {
-    if (event.phase === 'NewBattlePhase' || event.phase === 'NextEncounterPhase'
-      || event.phase === 'TrainerVictoryPhase') {
-      await this.fade(90, signal);
+    if (event.phase === 'NextEncounterPhase' || event.phase === 'NewBiomeEncounterPhase') {
+      const batch = this.pending;
+      if (!batch || batch.encounterShown) return;
+      batch.encounterShown = true;
+      const next = this.scene.arenaNextEnemy;
+      const biomeKey = getBiomeKey(batch.snapshot.shared.biome);
+      if (next) { next.base.setTexture(`${biomeKey}_b`); next.setPosition(-300, 0).setVisible(true); }
+      const enemies = batch.field.slice(2).filter(Boolean);
+      for (const display of enemies) { display.x -= 300; display.setVisible(display.hp > 0); }
+      const field = [...this.field.slice(0, 2), ...batch.field.slice(2)];
+      this.attachField(field, batch.snapshot.shared);
+      for (const display of enemies) this.displayedById.set(display.id, display);
+      await visual((local, done) => animateEncounterScroll(this.scene,
+        [this.scene.arenaEnemy, next, ...enemies, this.trainerSprite], done, local), 2600, signal);
+      if (signal.aborted) return;
+      this.paint(batch.snapshot.shared); next?.setVisible(false);
+    } else if (event.phase === 'SwitchBiomePhase') {
+      const batch = this.pending;
+      if (!batch || batch.biomeShown) return;
+      batch.biomeShown = true;
+      await visual((local, done) => animateEncounterScroll(this.scene,
+        [this.scene.arenaEnemy, ...this.field.slice(2), this.trainerSprite], done, local), 2600, signal);
+      if (signal.aborted) return;
+      const key = getBiomeKey(batch.snapshot.shared.biome);
+      this.scene.arenaBgTransition.setTexture(`${key}_bg`).setAlpha(0).setVisible(true);
+      const transition = this.scene.arenaPlayerTransition;
+      transition.base.setTexture(`${key}_a`); transition.setAlpha(0).setVisible(true);
+      await visual((local, done) => animateBiomeBackground(this.scene, done, local), 2600, signal);
+      if (!signal.aborted) this.paint(batch.snapshot.shared);
     } else if (event.phase === 'ShowTrainerPhase') {
       const trainer = this.trainerSprite ?? this.scene.trainer;
       if (!trainer) return;
@@ -158,10 +238,41 @@ export class CoopBattlePresentation {
   private async playDamage(event: any, signal: AbortSignal) {
     const target = this.displayedById.get(event.pokemonId);
     if (!target) return;
-    (this.scene as any).damageNumberHandler?.add(target, event.amount, event.result, event.critical);
+    if (event.kind === 'damage-display') (this.scene as any).damageNumberHandler?.add(target, event.amount, event.result, event.critical);
     if (typeof event.remainingHp === 'number') {
+      if (event.kind === 'pokemon-hp' && target.hp === event.remainingHp && target.getMaxHp() === event.maxHp) return;
       target.hp = event.remainingHp;
-      await within(Promise.resolve(target.updateInfo?.(true)), 1200, signal);
+      if (typeof event.maxHp === 'number' && event.maxHp !== target.getMaxHp()) {
+        if (Object.prototype.hasOwnProperty.call(target, 'getMaxHp')) target.getMaxHp = () => event.maxHp;
+        else target.stats[0] = event.maxHp;
+      }
+      await within(Promise.resolve(target.updateInfo?.(false)), 5500, signal);
+    }
+  }
+
+  private async showPokemon(event: any, signal: AbortSignal) {
+    const batch = this.pending;
+    if (!batch) return;
+    let entry = batch.entries.get(event.pokemonId);
+    if (!entry && event.view) {
+      const model = this.model(event.view, batch.applied), display = this.container(model, event.view.owner !== null, event.view.fieldIndex);
+      display.init(); this.scene.field.add(display); this.displayed.push(display);
+      await within(display.loadAssets(true, signal), 5000, signal);
+      if (signal.aborted) return;
+      entry = { display, model, view: event.view, key: '' }; // May leave again before the final field snapshot.
+      batch.entries.set(event.pokemonId, entry);
+    }
+    if (!entry) return;
+    const display = entry.display;
+    const slot = event.view?.fieldIndex ?? batch.snapshot.shared.field.indexOf(event.pokemonId);
+    if (slot < 0 || slot > 3) return;
+    const field = [...this.field]; field[slot] = display;
+    this.displayedById.set(display.id, display); this.attachField(field, batch.snapshot.shared);
+    void display.setFieldPosition(slot % 2 ? FieldPosition.RIGHT : FieldPosition.LEFT);
+    if (event.kind === 'pokemon-enter') {
+      await visual((local, done) => animatePokemonSummon(display, slot < 2, { complete: done }, local), 3000, signal);
+    } else if (!display.visible) {
+      display.showInfo(); display.setVisible(display.hp > 0);
     }
   }
 
@@ -216,16 +327,16 @@ export class CoopBattlePresentation {
     finally { tween!?.stop(); }
   }
 
-  private container(model: Pokemon, player: boolean): Pokemon {
+  private container(model: Pokemon, player: boolean, slot?: number): Pokemon {
     // Phaser's Container initializes events/transforms/list ownership. Copying
     // an uninitialized checkpoint directly into the display list cannot do so.
-    return createCoopPokemonDisplay(this.scene, model, player);
+    return createCoopPokemonDisplay(this.scene, model, player, slot);
   }
 
   private publicModel(view: any): Pokemon {
     const model = Object.create(view.owner === null ? EnemyPokemon.prototype : PlayerPokemon.prototype);
     Object.assign(model, { species: getPokemonSpecies(view.speciesId), formIndex: view.formIndex,
-      id: view.id, level: view.level, hp: view.hp, gender: view.gender, shiny: view.shiny,
+      id: view.id, level: view.level, hp: view.hp, gender: view.gender, shiny: view.shiny, pokeball: view.pokeball,
       moveset: [], exp: 0, levelExp: 0,
       // These methods expose public display facts, not invented combat stats,
       // ability, moves, IVs or random state for a teammate/enemy.
@@ -237,71 +348,122 @@ export class CoopBattlePresentation {
     return model;
   }
 
-  async apply(snapshot: any, applied: any) {
-    this.clear();
-    const signal = this.lifetime.signal;
-    const shared = snapshot.shared;
-    const make = (id: number | null): Pokemon | null => {
-      if (id === null) return null;
-      const view = shared.pokemon.find((p: any) => p.id === id);
-      if (!view) throw new Error('PUBLIC_FIELD_MODEL_MISSING');
-      const owned = applied.byId.get(id);
-      const model = owned ? restorePokemonState(capturePokemonState(owned.pokemon)) : this.publicModel(view);
-      const display = this.container(model, view.owner !== null);
-      this.displayed.push(display);
-      this.displayedById.set(view.id, display);
-      return display;
-    };
-    const field = shared.field.map(make);
-    // Preserve both global seats, including an empty/fainted seat. Never shift
-    // seat 1 or a private bench member into seat 0's field position.
+  private model(view: any, applied: any): Pokemon {
+    const owned = applied.byId.get(view.id);
+    return owned ? restorePokemonState(capturePokemonState(owned.pokemon)) : this.publicModel(view);
+  }
+
+  private attachField(field: (Pokemon | null)[], shared: any) {
+    this.field = field;
     (this.scene as any).party = field.slice(0, 2);
     this.scene.currentBattle = { ...shared, enemyParty: field.slice(2, 4),
       randSeedInt: () => { throw new Error('CLIENT_RULE_RNG_FORBIDDEN'); } } as any;
-    const biomeKey = getBiomeKey(shared.biome);
-    // Original shaders read these scene/arena values. A browser's fresh scene
-    // offset would otherwise give each seat (and each refresh) different light.
-    this.scene.waveCycleOffset = shared.waveCycleOffset;
-    this.scene.arena.biomeType = shared.biome;
-    this.scene.arenaBg.setTexture(`${biomeKey}_bg`).setPosition(0, 0);
-    this.scene.arenaBg.pipelineData = { terrainColorRatio: shared.terrainColorRatio };
+  }
+
+  private paint(shared: any) {
+    const key = getBiomeKey(shared.biome);
+    this.scene.arena.biomeType = shared.biome; this.scene.arena.bgm = Biome[shared.biome].toLowerCase();
+    this.scene.arenaBg.setTexture(`${key}_bg`).setPosition(0, 0);
     this.scene.arenaBgTransition.setVisible(false);
-    // Reuse the original base containers/textures without calling setBiome's
-    // decorative RNG or starting an EncounterPhase on the browser.
+    this.scene.arenaPlayerTransition?.setVisible(false);
     for (const base of [this.scene.arenaPlayer, this.scene.arenaEnemy]) {
-      base.base.setTexture(`${biomeKey}_${base.player ? 'a' : 'b'}`);
-      base.add(base.base);
-      base.setPosition(0, 0).setVisible(true);
+      base.base.setTexture(`${key}_${base.player ? 'a' : 'b'}`);
+      base.add(base.base); base.setPosition(0, 0).setVisible(true); base.setAlpha?.(1);
       base.props.forEach(prop => prop.setVisible(false));
     }
-    this.scene.trainer.setVisible(false);
-    this.trainerSprite = null;
-    const trainer = shared.trainer;
-    if (trainer?.spriteKey && this.scene.trainer) {
-      try {
-        if (!this.scene.textures.exists(trainer.spriteKey)) {
-          await within(trainerConfigs[trainer.type].loadAssets(this.scene, trainer.variant), 2000, signal);
-        }
-        if (signal.aborted) return;
-        this.scene.trainer.setTexture(trainer.spriteKey).setFrame(0).setPosition(106, 80).setVisible(true);
-        this.trainerSprite = this.scene.trainer;
-      } catch (error) { if (signal.aborted) return; this.scene.trainer.setVisible(false); }
-    }
-    try {
-      for (const pokemon of this.displayed) {
-        pokemon.init();
-        this.scene.field.add(pokemon);
-        await within(pokemon.loadAssets(), 5000, signal);
-        // The original immediate branch changes position but does not resolve
-        // its Promise; do not await that legacy presentation-only return value.
-        void pokemon.setFieldPosition(pokemon.getFieldIndex() ? FieldPosition.RIGHT : FieldPosition.LEFT);
-        await within(pokemon.updateInfo(true), 1200, signal);
-        // Snapshot application shows the final frame, without replaying rule
-        // phases or their animation callbacks.
-        (pokemon as any).battleInfo.setVisible(true);
-        pokemon.setVisible(pokemon.hp > 0);
+  }
+
+  private async finish(batch: any, signal: AbortSignal) {
+    if (signal.aborted || this.pending !== batch) return;
+    for (const [id, entry] of batch.entries) {
+      if (!batch.snapshot.shared.field.includes(id)) continue;
+      const { display, model, key } = entry;
+      if (this.modelKeys.get(id) !== key) {
+        Object.assign(display, model, { scene: this.scene });
+        display.generateName();
+        await within(Promise.resolve(display.updateInfo(true)), 1200, signal);
+        if (signal.aborted || this.pending !== batch) return;
+        this.modelKeys.set(id, key);
       }
-    } catch (error) { if (!signal.aborted) this.clear(); throw error; }
-    return field;
+      display.setVisible(display.hp > 0);
+      (display as any).battleInfo?.setVisible(display.hp > 0);
+    }
+    const keep = new Set(batch.field.filter(Boolean));
+    for (const display of this.displayed) if (!keep.has(display)) {
+      this.scene.tweens.killTweensOf((display as any).battleInfo);
+      this.scene.tweens.killTweensOf(display);
+      this.scene.field?.remove?.(display);
+      display.destroy();
+    }
+    this.displayed = [...keep] as Pokemon[];
+    this.displayedById = new Map(this.displayed.map(display => [display.id, display]));
+    if (batch.preserveFieldBinding) this.field = batch.field;
+    else this.attachField(batch.field, batch.snapshot.shared);
+    if (batch.sceneChanged) this.paint(batch.snapshot.shared);
+    if (!batch.replay || !(batch.snapshot.events ?? []).some((event: any) => event.kind === 'bgm')) this.audio.apply(batch.snapshot);
+    this.lastSnapshot = batch.snapshot; this.pending = null;
+  }
+
+  async apply(snapshot: any, applied: any, options: { replay?: boolean; preserveFieldBinding?: boolean } = {}) {
+    this.cancel(); this.lifetime = new AbortController();
+    const signal = this.lifetime.signal, shared = snapshot.shared;
+    const continuous = !!this.lastSnapshot && this.lastSnapshot.runId === snapshot.runId
+      && this.lastSnapshot.connectionEpoch === snapshot.connectionEpoch;
+    const replay = !!options.replay && continuous;
+    const entries = new Map<number, any>();
+    const batch = { snapshot, applied, entries, field: [] as (Pokemon | null)[], replay, preserveFieldBinding: !!options.preserveFieldBinding };
+    this.pending = batch;
+    try {
+      if (!options.preserveFieldBinding) this.attachField(this.field, shared);
+      for (const view of shared.pokemon) {
+        if (!shared.field.includes(view.id)) continue;
+        const look = JSON.stringify([view.speciesId, view.formIndex, view.gender, view.shiny]);
+        const model = this.model(view, applied);
+        const key = applied.byId.has(view.id) ? JSON.stringify(capturePokemonState(model)) : JSON.stringify(view);
+        let display = this.displayedById.get(view.id);
+        if (!display || this.looks.get(view.id) !== look) {
+          display = this.container(model, view.owner !== null, shared.field.indexOf(view.id));
+          this.displayed.push(display);
+          display.init(); this.scene.field.add(display);
+          await within(display.loadAssets(true, signal), 5000, signal);
+          if (signal.aborted) return;
+          // Original immediate setFieldPosition does not resolve its Promise.
+          const slot = shared.field.indexOf(view.id);
+          void display.setFieldPosition(slot % 2 ? FieldPosition.RIGHT : FieldPosition.LEFT);
+          await within(Promise.resolve(display.updateInfo(true)), 1200, signal);
+          display.setVisible(!replay && display.hp > 0);
+          (display as any).battleInfo.setVisible(!replay && display.hp > 0);
+          this.looks.set(view.id, look);
+          this.modelKeys.set(view.id, key);
+        }
+        entries.set(view.id, { display, model, key, view });
+      }
+      batch.field = shared.field.map((id: number | null) => id === null ? null : entries.get(id)?.display ?? null);
+      if (!replay) this.attachField(batch.field, shared);
+      const sceneChanged = !this.lastSnapshot || this.lastSnapshot.shared.biome !== shared.biome
+        || this.lastSnapshot.shared.waveIndex !== shared.waveIndex;
+      (batch as any).sceneChanged = sceneChanged;
+      this.scene.waveCycleOffset = shared.waveCycleOffset;
+      this.scene.arena.biomeType = shared.biome;
+      this.scene.arena.bgm = Biome[shared.biome].toLowerCase();
+      this.scene.arenaBg.pipelineData = { terrainColorRatio: shared.terrainColorRatio };
+      if (sceneChanged && !replay) this.paint(shared);
+      const trainer = shared.trainer;
+      if (JSON.stringify(trainer) !== JSON.stringify(this.lastSnapshot?.shared.trainer) || !this.lastSnapshot) {
+        this.scene.trainer.setVisible(false); this.trainerSprite = null;
+        if (trainer?.spriteKey) {
+          if (!this.scene.textures.exists(trainer.spriteKey))
+            await within(trainerConfigs[trainer.type].loadAssets(this.scene, trainer.variant), 2000, signal);
+          if (signal.aborted) return;
+          this.scene.trainer.setTexture(trainer.spriteKey).setFrame(0).setPosition(106, 80).setVisible(true);
+          this.trainerSprite = this.scene.trainer;
+        }
+      }
+      if (!replay) await this.finish(batch, signal);
+      return batch.field;
+    } catch (error) {
+      if (signal.aborted) return;
+      throw error;
+    }
   }
 }

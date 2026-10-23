@@ -30,3 +30,8 @@ export { createOriginalRuntime, constructOriginalPokemon, capturePokemonState, r
 
 export { withStarterRandomContext } from '../../src/server/original-runtime';
 export { updateUserInfo } from '../../src/account';
+export { CoopBattleAudio } from '../../src/coop/battle-audio';
+export { animatePokemonExit } from '../../src/field/pokemon-exit-animation';
+export { animatePokemonSummon } from '../../src/field/pokemon-summon-animation';
+export { animateEncounterScroll, animateBiomeBackground } from '../../src/field/encounter-animation';
+export { bindPresentationPort } from '../../src/battle-core/presentation-port.mjs';

@@ -1373,7 +1373,8 @@ export default class BattleScene extends Phaser.Scene {
 		return this.bgm && this.bgm.isPlaying;
 	}
 
-	playBgm(bgmName?: string, fadeOut?: boolean): void {
+	playBgm(bgmName?: string, fadeOut?: boolean, signal?: AbortSignal): void {
+		if (signal?.aborted) return;
 		if (bgmName === undefined)
 			bgmName = this.currentBattle.getBgmOverride(this) || this.arena.bgm;
 		if (this.bgm && bgmName === this.bgm.key) {
@@ -1394,6 +1395,7 @@ export default class BattleScene extends Phaser.Scene {
 			: this.getBgmLoopPoint(bgmName);
 		let loaded = false;
 		const playNewBgm = () => {
+			if (signal?.aborted) return;
 			if (bgmName === null && this.bgm && !this.bgm.pendingRemove) {
 				this.bgm.play({
 					volume: this.masterVolume * this.bgmVolume
@@ -1410,12 +1412,14 @@ export default class BattleScene extends Phaser.Scene {
 				this.bgm.on('looped', () => this.bgm.play({ seek: loopPoint }));
 		};
 		this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+			if (signal?.aborted) return;
 			loaded = true;
 			if (!fadeOut || !this.bgm.isPlaying)
 				playNewBgm();
 		});
 		if (fadeOut) {
 			const onBgmFaded = () => {
+				if (signal?.aborted) return;
 				if (loaded && (!this.bgm.isPlaying || this.bgm.pendingRemove))
 					playNewBgm();
 			};

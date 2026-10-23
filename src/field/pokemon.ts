@@ -271,11 +271,13 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
 
   abstract getBattlerIndex(): BattlerIndex;
 
-  loadAssets(ignoreOverride: boolean = true): Promise<void> {
+  loadAssets(ignoreOverride: boolean = true, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.resolve();
     return new Promise(resolve => {
       const moveIds = this.getMoveset().map(m => m.getMove().id);
       Promise.allSettled(moveIds.map(m => initMoveAnim(m)))
         .then(() => {
+          if (signal?.aborted) return resolve();
           loadMoveAnimAssets(this.scene, moveIds);
           this.getSpeciesForm().loadAssets(this.scene, this.getGender() === Gender.FEMALE, this.formIndex, this.shiny);
           if (this.isPlayer() || this.getFusionSpeciesForm())
@@ -285,6 +287,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
             this.scene.loadPokemonAtlas(this.getFusionBattleSpriteKey(true, ignoreOverride), this.getFusionBattleSpriteAtlasPath(true, ignoreOverride));
           }
           this.scene.load.once(Phaser.Loader.Events.COMPLETE, () => {
+            if (signal?.aborted) return resolve();
             if (this.isPlayer()) {
               const originalWarn = console.warn;
               // Ignore warnings for missing frames, because there will be a lot
@@ -1250,9 +1253,10 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
     return cry;
   }
 
-  faintCry(callback: Function): void {
+  faintCry(callback: Function, signal?: AbortSignal): void {
+    if (signal?.aborted) return;
     if (this.fusionSpecies)
-      return this.fusionFaintCry(callback);
+      return this.fusionFaintCry(callback, signal);
 
     const key = this.getSpeciesForm().getCryKey(this.formIndex);
     let i = 0;
@@ -1289,25 +1293,30 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
         } else {
           faintCryTimer.destroy();
           faintCryTimer = null;
-          if (callback)
-            callback();
+          finish();
         }
       }
     });
 
     // Failsafe
-    this.scene.time.delayedCall(Utils.fixedInt(3000), () => {
+    const failsafe = this.scene.time.delayedCall(Utils.fixedInt(3000), () => {
       if (!faintCryTimer || !this.scene)
         return;
       if (cry?.isPlaying)
         cry.stop();
       faintCryTimer.destroy();
-      if (callback)
-        callback();
+      finish();
     });
+    const finish = () => {
+      signal?.removeEventListener('abort', cancel); failsafe.destroy();
+      if (!signal?.aborted) callback?.();
+    };
+    const cancel = () => { faintCryTimer?.destroy(); failsafe.destroy(); cry?.stop();  };
+    signal?.addEventListener('abort', cancel, { once: true });
   }
 
-  private fusionFaintCry(callback: Function): void {
+  private fusionFaintCry(callback: Function, signal?: AbortSignal): void {
+    if (signal?.aborted) return;
     const key = this.getSpeciesForm().getCryKey(this.formIndex);
     let i = 0;
     let rate = 0.85;
@@ -1371,14 +1380,13 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
         if ((!cry || cry.pendingRemove) && (!fusionCry || fusionCry.pendingRemove)) {
           faintCryTimer.destroy();
           faintCryTimer = null;
-          if (callback)
-            callback();
+          finish();
         }
       }
     });
 
     // Failsafe
-    this.scene.time.delayedCall(Utils.fixedInt(3000), () => {
+    const failsafe = this.scene.time.delayedCall(Utils.fixedInt(3000), () => {
       if (!faintCryTimer || !this.scene)
         return;
       if (cry?.isPlaying)
@@ -1386,9 +1394,14 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
       if (fusionCry?.isPlaying)
         fusionCry.stop();
       faintCryTimer.destroy();
-      if (callback)
-        callback();
+      finish();
     });
+    const finish = () => {
+      signal?.removeEventListener('abort', cancel); failsafe.destroy();
+      if (!signal?.aborted) callback?.();
+    };
+    const cancel = () => { faintCryTimer?.destroy(); failsafe.destroy(); cry?.stop(); fusionCry?.stop(); };
+    signal?.addEventListener('abort', cancel, { once: true });
   }
 
   isOppositeGender(pokemon: Pokemon): boolean {

@@ -104,12 +104,20 @@ function installPokemonDisplayPort() {
   proto.init = function () { this.fieldPosition = FieldPosition.CENTER; };
   for (const name of ['tint', 'untint', 'cry', 'showInfo', 'hideInfo', 'playAnim', 'sparkle', 'updateScale', 'initBattleInfo'])
     proto[name] = function () {
-      this.scene.nativeEvents.push({ kind: name, pokemonId: this.id });
+      const view = name === 'showInfo' ? this.scene.nativePublicPokemon?.(this) : null;
+      this.scene.nativeEvents.push({ kind: name, pokemonId: this.id, ...(view ? { view } : {}) });
       if (name === 'hideInfo') return Promise.resolve();
     };
   proto.loadAssets = function () { return Promise.resolve(); };
-  proto.updateInfo = function () { return Promise.resolve(); };
-  proto.faintCry = function (callback) { this.scene.time.delayedCall(0, callback); };
+  proto.updateInfo = function () {
+    const view = this.scene.nativePublicPokemon?.(this);
+    if (view) this.scene.nativeEvents.push({ kind: 'pokemon-hp', pokemonId: this.id, remainingHp: view.hp, maxHp: view.maxHp });
+    return Promise.resolve();
+  };
+  proto.faintCry = function (callback) {
+    this.scene.nativeEvents.push({ kind: 'faint-cry', pokemonId: this.id });
+    this.scene.time.delayedCall(0, callback);
+  };
   proto.getSprite = function () { return new DisplayTarget(); };
   proto.destroy = function () {}; // Renderer disposal only; the original release owns party/modifier changes.
   proto.setFieldPosition = function (position) { this.fieldPosition = position; return Promise.resolve(); };
@@ -161,6 +169,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     return view;
   });
   root.modifiers = c.players.flatMap(p => p.modifiers);
+  root.nativePublicPokemon = pokemon => {
+    const owner = views.indexOf(pokemon.scene), index = owner >= 0 ? parties[owner].indexOf(pokemon) : root.getEnemyParty().indexOf(pokemon);
+    if (index < 0 || (owner >= 0 ? index !== 0 : index > 1)) return null;
+    return { ...publicPokemonView({ pokemon, owner: owner >= 0 ? owner : null, index }),
+      fieldIndex: owner >= 0 ? owner : 2 + index, pokeball: pokemon.pokeball };
+  };
   for (const { pokemon, owner } of c.roster.entries) {
     pokemon.scene = owner === null ? root : views[owner];
     // M2 deliberately excludes display position. Reattach display coordinates
@@ -185,7 +199,11 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   };
   root.shiftPhase = () => { check(++ended === 1, 'NATIVE_PHASE_COMPLETED_TWICE'); completePhase?.(); };
   root.initSession = () => { intents.push({ kind: 'session-start' }); };
-  root.playBgm = root.playSound = root.playSoundWithoutBgm = () => {};
+  root.playBgm = (key, fadeOut) => {
+    key ??= root.currentBattle.getBgmOverride(root) || root.arena.bgm || Biome[root.arena.biomeType].toLowerCase();
+    events.push({ kind: 'bgm', key, fadeOut: !!fadeOut });
+  };
+  root.playSound = root.playSoundWithoutBgm = () => {};
   root.updateFieldScale = root.setFieldScale = () => Promise.resolve();
   root.updateUIPositions = root.updateWaveCountText = root.updateMoneyText = root.updateScoreText = () => {};
   root.trainer = root.arenaPlayer = root.arenaEnemy = root.arenaNextEnemy = new DisplayTarget();

@@ -16,6 +16,15 @@ const declarations=file=>parse(file).statements.filter(n=>ts.isClassDeclaration(
 const dependencies=file=>Object.fromEntries(parse(file).statements.filter(ts.isImportDeclaration).map(n=>[n.moduleSpecifier.text,{}]));
 class Phase{constructor(scene){this.scene=scene;}start(){}end(){this.scene.shiftPhase();}}
 const deps=dependencies('phases.ts');
+// Keep the legacy isolated rule tests wired to the actual extracted visual
+// helpers. Rendering ports stay in their existing scenes; no replacement rules.
+Object.assign(deps['./data/pokeball'],evaluate(parse('data/pokeball.ts').statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n')));
+deps['./field/pokemon-exit-animation']=evaluate(parse('field/pokemon-exit-animation.ts').getText(),{
+  '../data/pokeball':deps['./data/pokeball'],'../battle-core/presentation-port.mjs':{presentOnHost}});
+deps['./field/pokemon-summon-animation']=evaluate(parse('field/pokemon-summon-animation.ts').getText(),{
+  '../data/pokeball':deps['./data/pokeball'],'./anims':deps['./field/anims'],
+  '../battle-core/presentation-port.mjs':{presentOnHost}});
+deps['./field/encounter-animation']=evaluate(parse('field/encounter-animation.ts').getText());
 Object.assign(deps,{'./phase':{Phase},'./battle-core/switch-command.mjs':{selectSwitchSummon},'./battle-core/switch-finish.mjs':{finishSwitchSummon},
   './battle-core/move-action.mjs':{executeMoveAction},'./battle-core/move-hit-check.mjs':{checkMoveHit},
   './battle-core/faint-queue.mjs':{queueFaintContinuation},'./battle-core/victory-experience.mjs':{queueVictoryExperience},

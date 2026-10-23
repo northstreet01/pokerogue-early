@@ -3,28 +3,30 @@ import { PokeballType } from "../data/pokeball";
 import * as Utils from "../utils";
 import { presentOnHost } from '../battle-core/presentation-port.mjs';
 
-export function addPokeballOpenParticles(scene: BattleScene, x: number, y: number, pokeballType: PokeballType): void {
+export function addPokeballOpenParticles(scene: BattleScene, x: number, y: number, pokeballType: PokeballType, signal?: AbortSignal): void {
   if (presentOnHost(scene, 'pokeball-open', { x, y, pokeballType })) return;
+  if (signal?.aborted) return;
+  const scope = signal ? new ParticleLifetime(scene, signal) : undefined;
   switch (pokeballType) {
     case PokeballType.POKEBALL:
-      doDefaultPbOpenParticles(scene, x, y, 48);
+      doDefaultPbOpenParticles(scene, x, y, 48, scope);
       break;
     case PokeballType.GREAT_BALL:
-      doDefaultPbOpenParticles(scene, x, y, 96);
+      doDefaultPbOpenParticles(scene, x, y, 96, scope);
       break;
     case PokeballType.ULTRA_BALL:
-      doUbOpenParticles(scene, x, y, 8);
+      doUbOpenParticles(scene, x, y, 8, scope);
       break;
     case PokeballType.ROGUE_BALL:
-      doUbOpenParticles(scene, x, y, 10);
+      doUbOpenParticles(scene, x, y, 10, scope);
       break;
     case PokeballType.MASTER_BALL:
-      doMbOpenParticles(scene, x, y);
+      doMbOpenParticles(scene, x, y, scope);
       break;
   }
 }
 
-function doDefaultPbOpenParticles(scene: BattleScene, x: number, y: number, radius: number) {
+function doDefaultPbOpenParticles(scene: BattleScene, x: number, y: number, radius: number, scope?: ParticleLifetime) {
   const pbOpenParticlesFrameNames = scene.anims.generateFrameNames('pb_particles', { start: 0, end: 3, suffix: '.png' });
   scene.anims.create({
     key: 'pb_open_particle',
@@ -34,7 +36,9 @@ function doDefaultPbOpenParticles(scene: BattleScene, x: number, y: number, radi
   });
 
   const addParticle = (index: integer) => {
+    if (scope?.aborted) return;
     const particle = scene.add.sprite(x, y, 'pb_open_particle');
+    scope?.sprite(particle);
     scene.field.add(particle);
     const angle = index * 45;
     const [ xCoord, yCoord ] = [ radius * Math.cos(angle * Math.PI / 180), radius * Math.sin(angle * Math.PI / 180) ];
@@ -67,10 +71,10 @@ function doDefaultPbOpenParticles(scene: BattleScene, x: number, y: number, radi
   });
 }
 
-function doUbOpenParticles(scene: BattleScene, x: number, y: number, frameIndex: integer) {
+function doUbOpenParticles(scene: BattleScene, x: number, y: number, frameIndex: integer, scope?: ParticleLifetime) {
   let particles: Phaser.GameObjects.Image[] = [];
   for (let i = 0; i < 10; i++)
-    particles.push(doFanOutParticle(scene, i * 25, x, y, 1, 1, 5, frameIndex));
+    particles.push(doFanOutParticle(scene, i * 25, x, y, 1, 1, 5, frameIndex, scope));
 
   scene.tweens.add({
     targets: particles,
@@ -85,11 +89,11 @@ function doUbOpenParticles(scene: BattleScene, x: number, y: number, frameIndex:
   });
 }
 
-function doMbOpenParticles(scene: BattleScene, x: number, y: number) {
+function doMbOpenParticles(scene: BattleScene, x: number, y: number, scope?: ParticleLifetime) {
   let particles: Phaser.GameObjects.Image[] = [];
   for (let j = 0; j < 2; j++) {
     for (let i = 0; i < 8; i++)
-      particles.push(doFanOutParticle(scene, i * 32, x, y, j ? 1 : 2, j ? 2 : 1, 8, 4));
+      particles.push(doFanOutParticle(scene, i * 32, x, y, j ? 1 : 2, j ? 2 : 1, 8, 4, scope));
 
     scene.tweens.add({
       targets: particles,
@@ -105,10 +109,11 @@ function doMbOpenParticles(scene: BattleScene, x: number, y: number) {
   }
 }
 
-function doFanOutParticle(scene: BattleScene, trigIndex: integer, x: integer, y: integer, xSpeed: integer, ySpeed: integer, angle: integer, frameIndex: integer): Phaser.GameObjects.Image {
+function doFanOutParticle(scene: BattleScene, trigIndex: integer, x: integer, y: integer, xSpeed: integer, ySpeed: integer, angle: integer, frameIndex: integer, scope?: ParticleLifetime): Phaser.GameObjects.Image {
   let f = 0; 
 
   const particle = scene.add.image(x, y, 'pb_particles', `${frameIndex}.png`);
+  scope?.sprite(particle);
   scene.field.add(particle);
   
   const updateParticle = () => {
@@ -180,4 +185,27 @@ export function sin(index: integer, amplitude: integer): number {
 
 export function cos(index: integer, amplitude: integer): number {
   return amplitude * Math.cos(index * (Math.PI / 128));
+}
+
+/** Only the optional cooperative lifetime owns these original visual resources. */
+class ParticleLifetime {
+  aborted = false;
+  private sprites: Phaser.GameObjects.GameObject[] = [];
+  private timers: Phaser.Time.TimerEvent[] = [];
+  private counters: Phaser.Tweens.Tween[] = [];
+  constructor(private scene: BattleScene, signal: AbortSignal) {
+    const cancel = () => {
+      this.aborted = true;
+      this.timers.forEach(timer => timer.remove());
+      this.counters.forEach(tween => tween.stop());
+      this.sprites.forEach(sprite => { scene.tweens.killTweensOf(sprite); if (sprite.scene) sprite.destroy(); });
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    // Original particles have all expired by 1000 ms; release the abort listener.
+    const release = scene.time.delayedCall(1500, () => signal.removeEventListener('abort', cancel));
+    this.timers.push(release);
+  }
+  sprite(sprite: Phaser.GameObjects.GameObject) { this.sprites.push(sprite); }
+  timer(timer: Phaser.Time.TimerEvent) { this.timers.push(timer); }
+  counter(tween: Phaser.Tweens.Tween) { this.counters.push(tween); }
 }

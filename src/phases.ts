@@ -1,3 +1,6 @@
+import { animateEncounterScroll, animateBiomeBackground } from './field/encounter-animation';
+import { animatePokemonSummon } from './field/pokemon-summon-animation';
+import { animatePokemonExit } from './field/pokemon-exit-animation';
 import { queueVictoryExperience } from './battle-core/victory-experience.mjs';
 import { executeMoveAction } from './battle-core/move-action.mjs';
 import { checkMoveHit } from './battle-core/move-hit-check.mjs';
@@ -892,11 +895,7 @@ export class NextEncounterPhase extends EncounterPhase {
     this.scene.arenaNextEnemy.setVisible(true);
 
     const enemyField = this.scene.getEnemyField();
-    this.scene.tweens.add({
-      targets: [ this.scene.arenaEnemy, this.scene.arenaNextEnemy, this.scene.currentBattle.trainer, enemyField, this.scene.lastEnemyTrainer ].flat(),
-      x: '+=300',
-      duration: 2000,
-      onComplete: () => {
+    animateEncounterScroll(this.scene, [ this.scene.arenaEnemy, this.scene.arenaNextEnemy, this.scene.currentBattle.trainer, enemyField, this.scene.lastEnemyTrainer ].flat(), () => {
         this.scene.arenaEnemy.setX(this.scene.arenaNextEnemy.x);
         this.scene.arenaEnemy.setAlpha(1);
         this.scene.arenaNextEnemy.setX(this.scene.arenaNextEnemy.x - 300);
@@ -906,7 +905,6 @@ export class NextEncounterPhase extends EncounterPhase {
         
         if (!this.tryOverrideForBattleSpec())
           this.doEncounterCommon();
-      }
     });
   }
 }
@@ -927,14 +925,9 @@ export class NewBiomeEncounterPhase extends NextEncounterPhase {
     this.scene.arena.trySetWeather(getRandomWeatherType(this.scene.arena), false);
 
     const enemyField = this.scene.getEnemyField();
-    this.scene.tweens.add({
-      targets: [ this.scene.arenaEnemy, enemyField ].flat(),
-      x: '+=300',
-      duration: 2000,
-      onComplete: () => {
+    animateEncounterScroll(this.scene, [ this.scene.arenaEnemy, enemyField ].flat(), () => {
         if (!this.tryOverrideForBattleSpec())
           this.doEncounterCommon();
-      }
     });
   }
 }
@@ -1018,11 +1011,7 @@ export class SwitchBiomePhase extends BattlePhase {
     if (this.nextBiome === undefined)
       return this.end();
 
-    this.scene.tweens.add({
-      targets: [ this.scene.arenaEnemy, this.scene.lastEnemyTrainer ],
-      x: '+=300',
-      duration: 2000,
-      onComplete: () => {
+    animateEncounterScroll(this.scene, [ this.scene.arenaEnemy, this.scene.lastEnemyTrainer ], () => {
         this.scene.arenaEnemy.setX(this.scene.arenaEnemy.x - 600);
 
         this.scene.newArena(this.nextBiome);
@@ -1036,13 +1025,7 @@ export class SwitchBiomePhase extends BattlePhase {
         this.scene.arenaPlayerTransition.setAlpha(0);
         this.scene.arenaPlayerTransition.setVisible(true);
 
-        this.scene.tweens.add({
-          targets: [ this.scene.arenaPlayer, this.scene.arenaBgTransition, this.scene.arenaPlayerTransition ],
-          duration: 1000,
-          delay: 1000,
-          ease: 'Sine.easeInOut',
-          alpha: (target: any) => target === this.scene.arenaPlayer ? 0 : 1,
-          onComplete: () => {
+        animateBiomeBackground(this.scene, () => {
             this.scene.arenaBg.setTexture(bgTexture);
             this.scene.arenaPlayer.setBiome(this.nextBiome);
             this.scene.arenaPlayer.setAlpha(1);
@@ -1055,10 +1038,8 @@ export class SwitchBiomePhase extends BattlePhase {
               this.scene.lastEnemyTrainer.destroy();
 
             this.end();
-          }
-        });
-      }
     });
+        });
   }
 }
 
@@ -1109,78 +1090,15 @@ export class SummonPhase extends PartyMemberPokemonPhase {
 
   summon(): void {
     const pokemon = this.getPokemon();
-
-    const pokeball = this.scene.addFieldSprite(this.player ? 36 : 248, this.player ? 80 : 44, 'pb', getPokeballAtlasKey(pokemon.pokeball));
-    pokeball.setVisible(false);
-    pokeball.setOrigin(0.5, 0.625);
-    this.scene.field.add(pokeball);
-
-    if (this.fieldIndex === 1)
-      pokemon.setFieldPosition(FieldPosition.RIGHT, 0);
+    if (this.fieldIndex === 1) pokemon.setFieldPosition(FieldPosition.RIGHT, 0);
     else {
       const availablePartyMembers = this.getParty().filter(p => !p.isFainted()).length;
       pokemon.setFieldPosition(!this.scene.currentBattle.double || availablePartyMembers === 1 ? FieldPosition.CENTER : FieldPosition.LEFT);
     }
-
-    const fpOffset = pokemon.getFieldPositionOffset();
-
-    pokeball.setVisible(true);
-
-    this.scene.tweens.add({
-      targets: pokeball,
-      duration: 650,
-      x: (this.player ? 100 : 236) + fpOffset[0]
-    });
-
-    this.scene.tweens.add({
-      targets: pokeball,
-      duration: 150,
-      ease: 'Cubic.easeOut',
-      y: (this.player ? 70 : 34) + fpOffset[1],
-      onComplete: () => {
-        this.scene.tweens.add({
-          targets: pokeball,
-          duration: 500,
-          ease: 'Cubic.easeIn',
-          angle: 1440,
-          y: (this.player ? 132 : 86) + fpOffset[1],
-          onComplete: () => {
-            this.scene.playSound('pb_rel');
-            pokeball.destroy();
-            this.scene.add.existing(pokemon);
-            this.scene.field.add(pokemon);
-            if (!this.player) {
-              const playerPokemon = this.scene.getPlayerPokemon() as Pokemon;
-              if (playerPokemon?.visible)
-                this.scene.field.moveBelow(pokemon, playerPokemon);
-              this.scene.currentBattle.seenEnemyPartyMemberIds.add(pokemon.id);
-            }
-            addPokeballOpenParticles(this.scene, pokemon.x, pokemon.y - 16, pokemon.pokeball);
-            this.scene.updateModifiers(this.player);
-            this.scene.updateFieldScale();
-            pokemon.showInfo();
-            pokemon.playAnim();
-            pokemon.setVisible(true);
-            pokemon.getSprite().setVisible(true);
-            pokemon.setScale(0.5);
-            pokemon.tint(getPokeballTintColor(pokemon.pokeball));
-            pokemon.untint(250, 'Sine.easeIn');
-            this.scene.updateFieldScale();
-            this.scene.tweens.add({
-              targets: pokemon,
-              duration: 250,
-              ease: 'Sine.easeIn',
-              scale: pokemon.getSpriteScale(),
-              onComplete: () => {
-                pokemon.cry(pokemon.getHpRatio() > 0.25 ? undefined : { rate: 0.85 });
-                pokemon.getSprite().clearTint();
-                pokemon.resetSummonData();
-                this.scene.time.delayedCall(1000, () => this.end());
-              }
-            });
-          }
-        });
-      }
+    animatePokemonSummon(pokemon, this.player, {
+      seen: () => { if (!this.player) this.scene.currentBattle.seenEnemyPartyMemberIds.add(pokemon.id); },
+      released: () => { this.scene.updateModifiers(this.player); },
+      complete: () => { pokemon.resetSummonData(); this.scene.time.delayedCall(1000, () => this.end()); },
     });
   }
 
@@ -1250,20 +1168,11 @@ export class SwitchSummonPhase extends SummonPhase {
     applyPreSwitchOutAbAttrs(PreSwitchOutAbAttr, pokemon);
 
     this.scene.ui.showText(this.player ? `Come back, ${pokemon.name}!` : `${this.scene.currentBattle.trainer.getName(!(this.fieldIndex % 2) ? TrainerSlot.TRAINER : TrainerSlot.TRAINER_PARTNER)}\nwithdrew ${pokemon.name}!`);
-    this.scene.playSound('pb_rel');
-    pokemon.hideInfo();
-    pokemon.tint(getPokeballTintColor(pokemon.pokeball), 1, 250, 'Sine.easeIn');
-    this.scene.tweens.add({
-      targets: pokemon,
-      duration: 250,
-      ease: 'Sine.easeIn',
-      scale: 0.5,
-      onComplete: () => {
+    animatePokemonExit(pokemon, 'return', () => {
         pokemon.setVisible(false);
         this.scene.field.remove(pokemon);
         this.scene.triggerPokemonFormChange(pokemon, SpeciesFormChangeActiveTrigger, true);
         this.scene.time.delayedCall(750, () => this.switchAndSummon());
-      }
     });
   }
 
@@ -2633,16 +2542,8 @@ export class FaintPhase extends PokemonPhase {
     pokemon.faintCry(() => {
       const friendshipDecrease = new Utils.IntegerHolder(10);
       pokemon.friendship = Math.max(pokemon.friendship - friendshipDecrease.value, 0);
-      pokemon.hideInfo();
-      this.scene.playSound('faint');
-      this.scene.tweens.add({
-        targets: pokemon,
-        duration: 500,
-        y: pokemon.y + 150,
-        ease: 'Sine.easeIn',
-        onComplete: () => {
+      animatePokemonExit(pokemon, 'faint', () => {
           pokemon.setVisible(false);
-          pokemon.y -= 150;
           pokemon.trySetStatus(StatusEffect.FAINT);
           if (pokemon.isPlayer())
             this.scene.currentBattle.removeFaintedParticipant(pokemon as PlayerPokemon);
@@ -2652,7 +2553,6 @@ export class FaintPhase extends PokemonPhase {
           }
           this.scene.field.remove(pokemon);
           this.end();
-        }
       });
     });
   }

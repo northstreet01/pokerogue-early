@@ -86,6 +86,14 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       if (args.length >= 3) {
         this.awaitingActionInput = true;
         this.onActionInput = args[2];
+        if (args[4]?.preparation) {
+          this.inputPresentation = args[4]; this.rerollCost = args[3];
+          this.options.forEach(option => option.setAlpha(this.inputPresentation.preparation.rewardResolved ? 0.35 : 1));
+          this.completeButtonText?.setText(this.inputPresentation.preparation.ready ? '已完成，等待伙伴（取消准备）'
+            : this.inputPresentation.preparation.rewardResolved ? '本轮整备完成 [Enter]' : '领取／跳过奖励后完成整备');
+          this.rerollButtonContainer.setVisible(this.inputPresentation.allowReroll !== false);
+          this.updateCostText();
+        }
       }
       return false;
     }

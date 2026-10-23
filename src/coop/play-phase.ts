@@ -611,7 +611,7 @@ export default class CoopPlayPhase extends Phase {
       for (const pokemon of party) pokemon.scene = personalScene;
       // Party and Summary also query their handler's scene for held icons.
       // Use the same detached personal inventory for that temporary view.
-      this.scene.modifiers = personalScene.modifiers;
+      (this.scene as any).modifiers = personalScene.modifiers;
     const battle = Object.create(savedBattle);
     battle.double = false; battle.getBattlerCount = () => 1;
     (this.scene as any).party = party; this.scene.currentBattle = battle;
@@ -636,7 +636,7 @@ export default class CoopPlayPhase extends Phase {
         this.controls.replaceChildren();
       }
       if (this.scene.currentBattle === battle) this.scene.currentBattle = savedBattle;
-        if (this.scene.modifiers === personalScene.modifiers) {
+        if ((this.scene as any).modifiers === personalScene.modifiers) {
           if (savedModifiers) Object.defineProperty(this.scene, 'modifiers', savedModifiers); else delete (this.scene as any).modifiers;
         }
       if (settled) dispose();

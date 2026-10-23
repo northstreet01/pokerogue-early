@@ -1,5 +1,6 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
 import { buildCoopRuntime } from '../scripts/build-coop-runtime.mjs';
 import { createOriginalRuleHost } from '../server/original-rule-host.mjs';
 
@@ -13,7 +14,7 @@ const frontPhase = checkpoint =>
   (checkpoint.continuation.phaseQueuePrepend.at(-1) ?? checkpoint.continuation.phaseQueue[0])?.phase.type;
 const prepAction = (operation, extra = {}) => ({ kind: 'preparation', operation, ...extra });
 
-let matrix, firstBattle, firstAction0, firstControl0;
+let original, matrix, firstBattle, firstAction0, firstControl0;
 let won, prep, prepSnapshot, oneSkip, oneReady, skipResult, nextBattle, switchConfirm, switchSelect;
 let confirmSeat, confirmTrue, confirmFalse, selectSeat, selectReserve, selectCancel;
 let confirmResult, selectResult, p18Result, otherSeat, selectOtherSeat;
@@ -48,6 +49,8 @@ const useSwitch = (value, checkpoint, inputs) =>
 
 before(async () => {
   await buildCoopRuntime();
+  original=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');
+  original.describeOriginalCatalogs();
   matrix = await createOriginalRuleHost(config);
   firstBattle = (await matrix.request('native-open-to-input', clone(selection))).checkpoint;
   firstAction0 = firstBattle.decision.options[0].find(action => Number.isInteger(action.target) && action.target >= 2);
@@ -139,13 +142,6 @@ const prepCases = [
     checkpoint: clone(oneSkip), seat: 0, action: prepAction('skip-reward'),
   }), 'REWARD_ALREADY_RESOLVED', () => oneSkip, () => clone(oneSkip),
     () => prepare(matrix, prep, 0, prepAction('skip-reward')), () => skipResult],
-  ['P12', 'complete reward action for a real option', () => ({
-    checkpoint: clone(prep), seat: 0,
-    action: prepAction('reward', {
-      optionId: prep.decision.players[0].rewards[0].id, pokemonId: null, moveIndex: null, fusionId: null,
-    }),
-  }), 'PREPARATION_EFFECT_UNAVAILABLE', () => prep, () => prepSnapshot,
-    () => prepare(matrix, prep, 0, prepAction('skip-reward')), () => skipResult],
   ['P13', 'reward action uses an unknown optionId', () => ({
     checkpoint: clone(prep), seat: 0,
     action: prepAction('reward', {
@@ -190,6 +186,30 @@ for (const [id, label, make, code, stage, stageSnapshot, control, expected] of p
       : id === 'P20' ? 'native-run-to-boundary' : 'native-prepare-action';
   test(`${id} ${label}`, () => runReject({ operation, make, code, stage, stageSnapshot, control, expected }));
 }
+
+test('P12 real ordinary persistent reward executes once through native rules and preserves the original control checkpoint',async t=>{
+  // This unchanged natural menu used to stop at the unimplemented effect gate.
+  // VS18 connects its original persistent mechanism; keep P12 as a positive
+  // effect/restart/ownership regression rather than expecting an obsolete error.
+  const option=prep.decision.players[0].rewards[0];
+  const action=prepAction('reward',{optionId:option.id,pokemonId:null,moveIndex:null,fusionId:null});
+  const payload={checkpoint:clone(prep),seat:0,action},before=clone(payload);
+  const result=await matrix.request('native-prepare-action',payload);
+  assert.deepEqual(payload,before);assert.deepEqual(prep,prepSnapshot);
+  const restored=original.originalDecisionStateCodec.restore(result.checkpoint);
+  assert.equal(restored.players[0].modifiers.length,1);
+  assert.equal(restored.players[0].modifiers[0].type.id,option.type.catalogId);
+  assert.equal(restored.players[0].modifiers[0].stackCount,1);
+  assert.equal(result.checkpoint.decision.players[0].rewardResolved,true);
+  assert.deepEqual(result.checkpoint.players[1],prep.players[1]);
+  assert.deepEqual(result.checkpoint.roster,prep.roster);
+  assert.deepEqual(result.checkpoint.continuation,prep.continuation);
+  assert.equal(result.checkpoint.sceneRandom,prep.sceneRandom);
+  const restarted=await host(t);
+  assert.deepEqual(await restarted.request('native-prepare-action',clone(payload)),result);
+  await assert.rejects(prepare(matrix,result.checkpoint,0,action),/REWARD_ALREADY_RESOLVED|INVALID_PREPARATION_OPTION/);
+  assert.deepEqual(await prepare(matrix,prep,0,prepAction('skip-reward')),skipResult);
+});
 
 test('P11 unfunded real preparation rejects reroll before the effect boundary without side effects', async () => {
   // The original ordinary entry starts at zero money; this fixture cannot

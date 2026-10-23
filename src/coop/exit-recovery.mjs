@@ -23,6 +23,8 @@ export function allowAutoResume() {
   if (globalThis.location?.search && globalThis.history?.replaceState) {
     const url = new URL(globalThis.location.href);
     url.searchParams.delete('fresh');
+    url.searchParams.delete('resumeRoom');
+    url.searchParams.delete('resumeSeat');
     globalThis.history.replaceState(null, '', url);
   }
 }

@@ -1,5 +1,5 @@
 // Only the return from cooperative exit adds this small navigation notice.
-// The existing solo title screen and all three game entry points stay separate.
+// Root now offers explicit mode selection.
 export function showCoopExitReturn(doc = document, page = location) {
   const result = new URLSearchParams(page.search).get('coopExit');
   if (!['saved', 'limited'].includes(result)) return null;
@@ -15,7 +15,7 @@ export function showCoopExitReturn(doc = document, page = location) {
     : '已离开当前联机，但退出记录未确认保存。请从下方入口重开，避免自动续旧房；新建／加入仍需本地存储可用。';
   const link = doc.createElement('a'); link.href = '/coop-play.html?fresh=1';
   link.textContent = '重新进入联机'; link.style.color = '#9ac7ff';
-  const solo = doc.createElement('button'); solo.type = 'button'; solo.textContent = '继续单人界面';
+  const solo = doc.createElement('button'); solo.type = 'button'; solo.textContent = '返回模式选择';
   solo.addEventListener('click', () => notice.remove());
   for (const type of ['keydown', 'keyup']) notice.addEventListener(type, event => event.stopPropagation());
   notice.append(message, link, solo); doc.body.append(notice);

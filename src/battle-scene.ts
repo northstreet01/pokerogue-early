@@ -6,6 +6,7 @@ import { getMaxExpLevel as calculateMaxExpLevel } from './battle-core/levels.mjs
 import UI, { Mode } from './ui/ui';
 import { NextEncounterPhase, NewBiomeEncounterPhase, SelectBiomePhase, MessagePhase, TurnInitPhase, ReturnPhase, LevelCapPhase, ShowTrainerPhase, LoginPhase, ConsolidateDataPhase, MovePhase, TitlePhase } from './phases';
 import CoopPlayPhase from './coop/play-phase';
+import { HomePhase, entryPhases } from './home-phase';
 import Pokemon, { PlayerPokemon, EnemyPokemon } from './field/pokemon';
 import PokemonSpecies, { PokemonSpeciesFilter, allSpecies, getPokemonSpecies, initSpecies } from './data/pokemon-species';
 import * as Utils from './utils';
@@ -645,13 +646,8 @@ export default class BattleScene extends Phaser.Scene {
 			initCommonAnims().then(() => loadCommonAnimAssets(this, true)),
 			initMoveAnim(Moves.STRUGGLE).then(() => loadMoveAnimAssets(this, [ Moves.STRUGGLE ], true))
 		]).then(() => {
-			this.pushPhase(new LoginPhase(this));
-			if (!bypassLogin)
-				this.pushPhase(new ConsolidateDataPhase(this)); // TODO: Remove
-			if ((window as any).__COOP_PLAY__)
-				this.pushPhase(new CoopPlayPhase(this));
-			else
-				this.pushPhase(new TitlePhase(this));
+			for (const phase of entryPhases(this, !!(window as any).__COOP_PLAY__,
+				new URLSearchParams(location.search).get('solo') === '1')) this.pushPhase(phase);
 
 			this.shiftPhase();
 		});

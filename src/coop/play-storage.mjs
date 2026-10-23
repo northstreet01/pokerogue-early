@@ -39,6 +39,34 @@ export function createPlayStorage(factory = globalThis.indexedDB) {
     };
   };
   return Object.freeze({
+    listSeats(origin) {
+      return transact(SEATS, 'readonly', (target, done) => {
+        const out = [];
+        target.openCursor().onsuccess = event => {
+          const cursor = event.target.result;
+          if (!cursor) { done(out); return; }
+          const value = cursor.value;
+          if (String(cursor.key).startsWith(origin + '|') && /^[A-Z0-9]{6}$/i.test(value?.roomId)
+            && [0, 1].includes(value.seat) && typeof value.token === 'string' && value.token)
+            out.push({ roomId: value.roomId, seat: value.seat });
+          cursor.continue();
+        };
+      });
+    },
+    // Only a deliberate home selection may reactivate an explicitly paused seat.
+    resumeSession(origin, session, roomId, seat) {
+      return transact(SEATS, 'readwrite', (target, done) => {
+        const key = seatKey(origin, roomId, seat);
+        target.get(key).onsuccess = event => {
+          const value = event.target.result;
+          if (!session.isCurrent() || value?.roomId !== roomId || value?.seat !== seat || !value?.token) {
+            done(null); return;
+          }
+          target.put({ sessionId: session.id, key, paused: false }, `active:${origin}`);
+          done(value);
+        };
+      });
+    },
     async loadSeat(origin) {
       const active = await get(SEATS, `active:${origin}`);
       if (active && typeof active === 'object') return active.paused || !active.key ? null : get(SEATS, active.key);

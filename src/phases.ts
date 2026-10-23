@@ -208,6 +208,7 @@ export class TitlePhase extends Phase {
         }
       )
     });
+    options.push({ label: '返回初始界面', handler: () => location.assign('/') });
     const config: OptionSelectConfig = {
       options: options,
       noCancel: true,

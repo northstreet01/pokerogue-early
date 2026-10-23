@@ -16,6 +16,12 @@ export { createOriginalClientModel } from '../../src/coop/original-client-model.
 export { default as ModifierSelectUiHandler } from "../../src/ui/modifier-select-ui-handler";
 export { modifierTypes, captureModifierTypeState } from "../../src/modifier/modifier-type";
 export { captureModifierState, restoreModifierState } from '../../src/modifier/modifier';
+export { HomePhase, entryPhases } from '../../src/home-phase';
+export { TitlePhase, LoginPhase } from '../../src/phases';
+export { Egg, GachaType } from '../../src/data/egg';
+export { default as EggListUiHandler } from '../../src/ui/egg-list-ui-handler';
+export { default as EggGachaUiHandler } from '../../src/ui/egg-gacha-ui-handler';
+export { readLocalSave, writeLocalSave, readLocalSaveSnapshot } from '../../src/system/local-save-store';
 export { CoopBattlePresentation, createCoopPokemonDisplay } from '../../src/coop/battle-presentation';
 export { CommonBattleAnim } from '../../src/data/battle-anims';
 export { trainerConfigs } from '../../src/data/trainer-config';

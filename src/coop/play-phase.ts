@@ -1049,10 +1049,15 @@ export default class CoopPlayPhase extends Phase {
     if (!this.current(lifecycle)) return;
     // An ordinary reconnect resumes this page's known seat; explicit leave has
     // already disposed the page and is never routed through this path.
+    const query = new URLSearchParams(location.search);
+    const resumeRoom = query.get('resumeRoom'), resumeSeat = query.get('resumeSeat');
+    const explicit = query.get('fresh') !== '1' && /^[A-Z0-9]{6}$/i.test(resumeRoom ?? '') && ['0', '1'].includes(resumeSeat ?? '');
     const value = this.roomId && this.token ? { roomId: this.roomId, seat: this.seat, token: this.token }
+      : explicit ? await this.storage.resumeSession(this.origin, this.session(lifecycle, recovery), resumeRoom, Number(resumeSeat))
       : autoResumePaused() ? null : await this.storage.beginSession(this.origin, this.session(lifecycle, recovery), true);
     if (!this.current(lifecycle) || recovery !== this.recoveryVersion) return;
     if (value?.roomId && value?.token) {
+      if (explicit) allowAutoResume();
       this.roomId = value.roomId; this.seat = value.seat; this.token = value.token;
       this.resuming = true;
       this.send({ type: 'resumeSeat', roomId: value.roomId, resumeToken: value.token });

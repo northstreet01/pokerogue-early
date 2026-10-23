@@ -477,6 +477,8 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
             icon.clearTint();
           else if (dexEntry.seenAttr)
             icon.setTint(0x808080);
+          else
+            icon.setTint(0);
         });
       }
 

@@ -192,13 +192,13 @@ test('real IDB conscious recovery lists own metadata only; paused seat and outbo
 function renderPort() {
   return {visible:false,text:'',setVisible(v){this.visible=v;return this;},setText(v){this.text=v;return this;},
     setFrame(v){this.frame=v;return this;},setScale(){return this;},setOrigin(){return this;},
-    setPosition(){return this;},clearTint(){},setTint(){},setInteractive(){},on(){},off(){}};
+    setPosition(){return this;},clearTint(){this.tint=null;},setTint(v){this.tint=v;},setInteractive(){},on(){},off(){}};
 }
 test('original readonly Starter opens, shows owned IVs, blocks add/start/move editing and tears down asset callback',async t=>{
   const {scene,p}=home(t);await settle(p);scene.ui.playSelect=()=>{};
   const gd=new api.GameData(scene,{readOnly:true});scene.gameData=gd;
-  const h=new api.StarterSelectUiHandler(scene),species=api.getPokemonSpecies(1),ivCalls=[];
-  Object.assign(h,{genSpecies:[[species]],starterSelectGenIconContainers:[{getAt:()=>renderPort()}],
+  const h=new api.StarterSelectUiHandler(scene),species=api.getPokemonSpecies(1),ivCalls=[],icon=renderPort();
+  Object.assign(h,{genSpecies:[[species]],starterSelectGenIconContainers:[{getAt:()=>icon}],
     startLabel:renderPort(),valueLimitLabel:renderPort(),starterSelectContainer:renderPort(),
     startCursorObj:renderPort(),pokemonSprite:renderPort(),statsContainer:{...renderPort(),updateIvs:ivs=>ivCalls.push(ivs)},
     starterGens:[],starterCursors:[],starterAttr:[],starterNatures:[],starterMovesets:[],
@@ -213,6 +213,8 @@ test('original readonly Starter opens, shows owned IVs, blocks add/start/move ed
   h.processInput(api.Button.CANCEL);h.processInput(api.Button.CANCEL);assert.equal(cancels,1);
   const cancelled={value:false};h.assetLoadCancelled=cancelled;h.clear();assert.equal(cancelled.value,true);
   assert.equal(h.processInput(api.Button.ACTION),false);assert.equal(h.tryStart(),false);
+  gd.dexData[1].caughtAttr=0n;gd.dexData[1].seenAttr=0n;
+  h.show([()=>submits++,{readOnly:true}]);assert.equal(icon.tint,0);h.clear();
 });
 
 test('original EggList handles empty and 99 owned eggs, navigation and return without any write',async t=>{

@@ -7,6 +7,7 @@ import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEf
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
 import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase, TrainerVictoryPhase, MoneyRewardPhase } from '../phases';
 import { SelectModifierPhase } from '../phases';
+import { preparationItemTarget, isPreparationConsumable } from '../coop/preparation-item';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase } from '../phases';
 import { Mode } from '../ui/ui';
 import { GameData } from '../system/game-data';
@@ -35,7 +36,7 @@ import { advancePreparationEffect, validatePreparationEffect } from '../battle-c
 import { advanceNextBattle } from '../battle-core/next-battle-runner.mjs';
 import { originalSafeDecisionCodec } from '../original-phase-checkpoints';
 import { captureModifierTypeState, getPlayerShopModifierTypeOptionsForWave, modifierTypes,
-  ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
+  ModifierTypeOption, restoreModifierTypeState } from '../modifier/modifier-type';
 import { fixedBattles, BattleType } from '../battle';
 import { Biome } from '../data/enums/biome';
 import { PokeballType } from '../data/pokeball';
@@ -46,7 +47,7 @@ import PartyUiHandler, { PartyOption, PartyUiMode } from '../ui/party-ui-handler
 import { createCaptureChoice, validateCaptureChoice } from '../battle-core/capture-choice.mjs';
 import { hasLegacyCaptures, legacyCaptureOptions, validateLegacyCapture } from '../battle-core/legacy-capture.mjs';
 import { nextSafeDecisionId } from '../battle-core/safe-decisions.mjs';
-import { PokemonHeldItemModifier, AddPokeballModifier, PokemonHpRestoreModifier } from '../modifier/modifier';
+import { PokemonHeldItemModifier } from '../modifier/modifier';
 import { EncoreTag, TrappedTag } from '../data/battler-tags';
 import { CheckTrappedAbAttr, applyCheckTrappedAbAttrs } from '../data/ability';
 import * as Utils from '../utils';
@@ -697,6 +698,7 @@ export async function openNativeSelectedBattle(runtime, payload) {
 
   const fork = createOriginalRuntime(runtime.scene.seed, runtime.scene.gameData, runtime.context.sceneRandom.capture());
   const root: any = fork.scene; root.initializeRunResources();
+  root.money = root.gameMode.getStartingMoney();
   const entries = withOriginalRules(fork.context, () => selections.flatMap((party, owner) =>
     party.map((selection, index) => {
       root.gameData.trainerId = payload.identities[owner].trainerId;
@@ -964,64 +966,79 @@ export async function submitNativeActions(runtime, payload) {
 export async function openNativePreparation(runtime, checkpoint) {
   const c = codec.restore(checkpoint);
   const result = await openPreparation(c, codec, {
-    async openPersonalMenu(candidate, _queued, { seat }) {
-      const binding = bindNativeScene(candidate, runtime.scene.gameData), scene = binding.views[seat];
-      const phase = new SelectModifierPhase(scene);
-      let menu;
-      (phase as any).getExcludedModifierIds = () => coopRewardExclusions;
-      scene.ui = { setMode: (mode, _player, options, callback, cost) => {
-        check(mode === Mode.MODIFIER_SELECT, 'NATIVE_UI_DECISION_REQUIRED'); menu = { options, callback, cost };
-      } };
-      try {
-        const shop = await withOriginalRules(candidate, () => {
-          phase.start();
-          const shop = getPlayerShopModifierTypeOptionsForWave(candidate.battle.waveIndex, scene.getWaveMoneyAmount(1));
-          for (const option of shop) if (!option.type.id) option.type.id = Object.keys(modifierTypes).find(id => {
-            const type = modifierTypes[id](); return type.constructor === option.type.constructor && type.name === option.type.name;
-          });
-          return shop;
-        });
-        delete (phase as any).getExcludedModifierIds;
-        check(menu, 'NATIVE_REWARD_MENU_MISSING'); binding.sync();
-        phases.capture(phase, candidate, seat);
-        const pack = (list, prefix) => list.map((option, index) => ({ id: `${prefix}-${index}`,
-          type: captureModifierTypeState(option.type), cost: option.cost }));
-        return { completed: false, suspended: true, pendingTasks: 0, phase,
-          rewards: pack(menu.options, 'reward'), shop: pack(shop, 'shop'), rerollCost: menu.cost,
-          events: [{ kind: 'preparation-open', seat }], grants: [] };
-      } finally { delete (phase as any).getExcludedModifierIds; binding.dispose(); }
-    }
+    openPersonalMenu: (candidate, _queued, { seat }) => openNativePersonalMenu(candidate, runtime, seat),
   }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}` });
   return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
 }
 
-function preparationEffectDriver(runtime) {
+async function openNativePersonalMenu(candidate, runtime, seat, rerolledPhase = null) {
+  const binding = bindNativeScene(candidate, runtime.scene.gameData), scene = binding.views[seat];
+  const phase = rerolledPhase ?? new SelectModifierPhase(scene);
+  phase.scene = scene;
+  let menu;
+  (phase as any).getExcludedModifierIds = () => coopRewardExclusions;
+  scene.ui = { setMode: (mode, _player, options, callback, cost) => {
+    check(mode === Mode.MODIFIER_SELECT, 'NATIVE_UI_DECISION_REQUIRED'); menu = { options, callback, cost };
+  } };
+  try {
+    const shop = await withOriginalRules(candidate, () => {
+      phase.start();
+      const shop = getPlayerShopModifierTypeOptionsForWave(candidate.battle.waveIndex, scene.getWaveMoneyAmount(1));
+      for (const option of shop) if (!option.type.id) option.type.id = Object.keys(modifierTypes).find(id => {
+        const type = modifierTypes[id](); return type.constructor === option.type.constructor && type.name === option.type.name;
+      });
+      return shop;
+    });
+    delete (phase as any).getExcludedModifierIds;
+    check(menu, 'NATIVE_REWARD_MENU_MISSING'); binding.sync();
+    phases.capture(phase, candidate, seat);
+    const pack = (list, prefix) => list.map((option, index) => ({ id: `${prefix}-${index}`,
+      type: captureModifierTypeState(option.type), cost: option.cost }));
+    return { completed: false, suspended: true, pendingTasks: 0, phase,
+      rewards: pack(menu.options, 'reward'), shop: pack(shop, 'shop'), rerollCost: menu.cost,
+      events: [{ kind: 'preparation-open', seat }], grants: [] };
+  } finally { delete (phase as any).getExcludedModifierIds; binding.dispose(); }
+}
+
+function preparationEffectDriver(runtime, intents = []) {
   return {
     validate(c, seat, action) {
       if (['skip-reward', 'ready', 'unready'].includes(action.operation)) return;
-      check(action.operation === 'reward', 'PREPARATION_EFFECT_UNAVAILABLE');
       const row = c.decision.players[seat];
-      const option = row.rewards.find(o => o.id === action.optionId);
+      if (action.operation === 'reroll') {
+        const phase = new SelectModifierPhase({ currentBattle: c.battle } as any, row.rerollCount);
+        check(row.rerollCost === phase.getRerollCost(), 'STALE_REROLL_PRICE');
+        return;
+      }
+      check(['reward', 'buy'].includes(action.operation), 'PREPARATION_EFFECT_UNAVAILABLE');
+      const options = action.operation === 'buy' ? row.shop : row.rewards;
+      const option = options.find(o => o.id === action.optionId);
       check(option, 'INVALID_PREPARATION_OPTION');
-      const type = restoreModifierTypeState(option.type);
-      check(!(type instanceof PokemonReviveModifierType), 'PREPARATION_EFFECT_UNAVAILABLE');
-      if (type instanceof PokemonHpRestoreModifierType) {
-        check(action.pokemonId !== null && action.moveIndex === null && action.fusionId === null,
+      check(!option.type.catalogId.startsWith('VOUCHER'), 'COOP_VOUCHER_RULE_UNCONFIRMED');
+      if (action.operation === 'buy') {
+        const shop = getPlayerShopModifierTypeOptionsForWave(c.battle.waveIndex,
+          BattleScene.prototype.getWaveMoneyAmount.call({ currentBattle: c.battle }, 1));
+        const live = shop[options.indexOf(option)];
+        check(live && live.cost === option.cost, 'STALE_PREPARATION_SHOP');
+        live.type.id = option.type.catalogId;
+        check(canonical(captureModifierTypeState(live.type)) === canonical(option.type), 'STALE_PREPARATION_SHOP');
+      }
+      const type: any = restoreModifierTypeState(option.type);
+      const targetKind = preparationItemTarget(type);
+      check(targetKind !== null, 'PREPARATION_EFFECT_UNAVAILABLE');
+      if (targetKind !== 'none') {
+        check(action.pokemonId !== null && action.fusionId === null,
           'INVALID_PREPARATION_TARGET');
         const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
           && e.pokemon.id === action.pokemonId);
         check(entry, 'INVALID_PREPARATION_OWNER');
         check(type.selectFilter(entry.pokemon) === null, 'INVALID_PREPARATION_TARGET');
+        if (targetKind === 'move') check(action.moveIndex !== null && entry.pokemon.getMoveset()[action.moveIndex]
+          && type.moveSelectFilter(entry.pokemon.getMoveset()[action.moveIndex]) === null, 'INVALID_PREPARATION_MOVE');
+        else check(action.moveIndex === null, 'INVALID_PREPARATION_MOVE');
         return;
       }
-      let modifier;
-      try { modifier = type.newModifier(); } catch { modifier = null; }
-      if (modifier instanceof AddPokeballModifier) {
-        check(action.pokemonId === null && action.moveIndex === null && action.fusionId === null,
-          'INVALID_PREPARATION_TARGET');
-        return;
-      }
-      check(false, 'PREPARATION_EFFECT_UNAVAILABLE');
+      check(action.pokemonId === null && action.moveIndex === null && action.fusionId === null, 'INVALID_PREPARATION_TARGET');
     },
     async execute(c, phase, { seat, action }) {
       check(phases.isPhase(phase), 'INVALID_PREPARATION_PHASE');
@@ -1035,24 +1052,32 @@ function preparationEffectDriver(runtime) {
       view.sound = { get: () => null };
       Object.defineProperty(view, 'money', { configurable: true, get: () => c.players[seat].money,
         set: value => { c.players[seat].money = value; } });
-      let ended = false;
+      let ended = false, next = null;
+      const beforeMoney = c.players[seat].money;
+      const displayTasks = party.map(pokemon => {
+        const descriptor = Object.getOwnPropertyDescriptor(pokemon, 'updateInfo'), update = pokemon.updateInfo;
+        pokemon.updateInfo = (...args) => observeRulePromise(view, update.apply(pokemon, args));
+        return () => { if (descriptor) Object.defineProperty(pokemon, 'updateInfo', descriptor); else delete (pokemon as any).updateInfo; };
+      });
+      view.unshiftPhase = phase => { check(!next && phase instanceof SelectModifierPhase, 'UNEXPECTED_PREPARATION_PHASE'); next = phase; };
+      view.validateAchvs = BattleScene.prototype.validateAchvs; // validateAchv is the existing deferred owned port.
       view.shiftPhase = () => { ended = true; };
       view.ui = {
         clearText() {}, playError() { throw new Error('ORIGINAL_MENU_REJECTED'); },
         getHandler: () => ({ updateCostText() {} }),
         setMode: () => Promise.resolve(),
-        setModeWithoutClear(mode, _partyMode, _unused, callback, filter) {
+        setModeWithoutClear(mode, _partyMode, _unused, callback, filter, moveFilter) {
           check(mode === Mode.PARTY, 'UNSUPPORTED_MENU_MODE');
           const index = party.findIndex(pokemon => pokemon.id === action.pokemonId);
           const target = party[index];
           check(target && filter(target) === null, 'INVALID_PREPARATION_TARGET');
-          return callback(index, undefined);
+          if (moveFilter) check(moveFilter(target.getMoveset()[action.moveIndex]) === null, 'INVALID_PREPARATION_MOVE');
+          return callback(index, action.moveIndex === null ? undefined : PartyOption.MOVE_1 + action.moveIndex);
         },
       };
       view.addModifier = (...args) => {
         const modifier = args[0];
-        check(modifier instanceof AddPokeballModifier || modifier instanceof PokemonHpRestoreModifier
-          && !modifier.fainted, 'PREPARATION_EFFECT_UNAVAILABLE');
+        check(isPreparationConsumable(modifier), 'PREPARATION_EFFECT_UNAVAILABLE');
         return observeRulePromise(view, BattleScene.prototype.addModifier.apply(view, args));
       };
       try {
@@ -1060,19 +1085,34 @@ function preparationEffectDriver(runtime) {
         const typeOptions = row.rewards.map(option =>
           new ModifierTypeOption(restoreModifierTypeState(option.type), 0, option.cost));
         const callback = phase.createModifierSelectCallback(typeOptions);
-        const index = row.rewards.findIndex(option => option.id === action.optionId);
-        check(index >= 0, 'INVALID_PREPARATION_OPTION');
         await withOriginalRules(c, async () => {
-          callback(1, index);
+          if (action.operation === 'reroll') callback(0, 0);
+          else {
+            const options = action.operation === 'buy' ? row.shop : row.rewards;
+            const index = options.findIndex(option => option.id === action.optionId);
+            check(index >= 0, 'INVALID_PREPARATION_OPTION');
+            const rowCursor = action.operation === 'reward' ? 1 : options.length > 6 && index < 6 ? 3 : 2;
+            callback(rowCursor, action.operation === 'buy' && options.length > 6 && index >= 6 ? index - 6 : index);
+          }
           // The original Party callback schedules addModifier on a microtask.
           // Keep the scope bound until that original task and its effects settle.
           await Promise.resolve();
           await binding.drainTasks();
         });
-        check(ended, 'INCOMPLETE_PREPARATION_EFFECT');
-        return { completed: true, pendingTasks: 0, ended: true,
-          events: [{ kind: 'preparation-effect', seat, operation: 'reward' }], grants: [] };
-      } finally { binding.dispose(); }
+        check(ended === (action.operation !== 'buy'), 'INCOMPLETE_PREPARATION_EFFECT');
+        intents.push(...binding.intents);
+        const events = [{ kind: 'preparation-effect', seat, operation: action.operation }];
+        if (c.players[seat].money !== beforeMoney) events.push({ kind: 'message', scope: seat,
+          text: `资金${c.players[seat].money > beforeMoney ? '增加' : '支出'} ₽${Math.abs(c.players[seat].money - beforeMoney)}，余额 ₽${c.players[seat].money}` } as any);
+        if (action.operation === 'reroll') {
+          check(next instanceof SelectModifierPhase, 'INCOMPLETE_ORIGINAL_REROLL');
+          binding.dispose();
+          const menu = await openNativePersonalMenu(c, runtime, seat, next);
+          return { completed: true, pendingTasks: 0, ended, events: [...events, ...menu.events], grants: [], menu, phase: menu.phase };
+        }
+        check(next === null, 'UNEXPECTED_PREPARATION_PHASE');
+        return { completed: true, pendingTasks: 0, ended, events, grants: [] };
+      } finally { displayTasks.forEach(restore => restore()); binding.dispose(); }
     },
   };
 }
@@ -1104,8 +1144,9 @@ export async function chooseNativePreparation(runtime, payload) {
     } finally { binding.dispose(); }
   }
   check(!hasLegacyCaptures(c, payload.seat) || payload.action?.operation === 'unready', 'LEGACY_CAPTURE_PENDING');
-  const result = await advancePreparationEffect(c, payload.seat, payload.action, codec, originalSafeDecisionCodec, preparationEffectDriver(runtime));
-  return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
+  const intents = [];
+  const result = await advancePreparationEffect(c, payload.seat, payload.action, codec, originalSafeDecisionCodec, preparationEffectDriver(runtime, intents));
+  return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 
 export async function nextNativeBattle(runtime, checkpoint) {

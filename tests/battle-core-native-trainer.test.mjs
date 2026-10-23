@@ -11,21 +11,22 @@ before(()=>buildCoopRuntime());
 test('natural trainer prize persists owned original phases and cannot regrant seat zero after a phase restart',async()=>{
   const route=await defaultTrainerVictory();let h=route.h;
   try{
-    assert.deepEqual(route.c.players.map(p=>p.money),[55,55]);
+    const startingMoney=route.beforeVictory.players.map(p=>p.money),awardedMoney=startingMoney.map(money=>money+55);
+    assert.deepEqual(route.c.players.map(p=>p.money),awardedMoney);
     let c=(await progressDefault(h,route.beforeVictory)).checkpoint,sawHalf=false,events=[];
     for(let n=0;n<160;n++){
       const front=c.continuation.phaseQueuePrepend.at(-1)??c.continuation.phaseQueue[0];
       if(front?.phase.type==='SelectModifierPhase')break;
       await h.close();h=await createOriginalRuleHost(route.config);
       const result=await h.request('native-step',c);c=result.checkpoint;events.push(...result.events);
-      if(c.players[0].money===55&&c.players[1].money===0){
+      if(c.players[0].money===awardedMoney[0]&&c.players[1].money===startingMoney[1]){
         sawHalf=true;
         const remaining=[...c.continuation.phaseQueue,...c.continuation.phaseQueuePrepend].filter(d=>d.phase.type==='MoneyRewardPhase');
         assert.equal(remaining.length,1);assert.equal(remaining[0].phase.scope,1);
       }
     }
     assert.ok(sawHalf,'checkpoint after the first owned original award');
-    assert.deepEqual(c.players.map(p=>p.money),[55,55]);
+    assert.deepEqual(c.players.map(p=>p.money),awardedMoney);
     assert.equal(events.filter(e=>e.kind==='phase-start'&&e.phase==='MoneyRewardPhase').length,2);
     const normalize=value=>{const s=structuredClone(value);for(const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue'])for(const d of s.continuation[key])delete d.phaseId;return s;};
     assert.deepEqual(normalize(c),normalize(route.c));
@@ -206,6 +207,7 @@ test('default route resumes after a real trainer enemy faint without committing 
 test('default route splits the original trainer prize, prepares and naturally fights the following wild encounter',async()=>{
   const {h,c:source}=await defaultTrainerRoute();
   try{
+    const awardedMoney=source.players.map(p=>p.money+55);
     let c=(await h.request('native-next',source)).checkpoint;
     c=(await h.request('native-run-to-boundary',c)).checkpoint;
     const events=[];
@@ -214,13 +216,13 @@ test('default route splits the original trainer prize, prepares and naturally fi
       if(c.battle.waveIndex===6&&c.decision.kind==='wait-actions')break;
     }
     assert.equal(c.battle.waveIndex,6);assert.equal(c.battle.battleType,0);
-    assert.deepEqual(c.players.map(p=>p.money),[55,55]);
+    assert.deepEqual(c.players.map(p=>p.money),awardedMoney);
     assert.equal(events.filter(e=>e.kind==='phase-start'&&e.phase==='MoneyRewardPhase').length,2);
     assert.equal(events.filter(e=>e.kind==='message'&&e.scope===0).length,1);
     assert.equal(events.filter(e=>e.kind==='message'&&e.scope===1).length,1);
     const submitted=(await progressDefault(h,c)).checkpoint;
     const round=await h.request('native-run-to-boundary',submitted);
     assert.ok(round.events.some(e=>e.kind==='phase-start'&&e.phase==='MoveEffectPhase'));
-    assert.deepEqual(round.checkpoint.players.map(p=>p.money),[55,55]);
+    assert.deepEqual(round.checkpoint.players.map(p=>p.money),awardedMoney);
   }finally{await h.close();}
 });

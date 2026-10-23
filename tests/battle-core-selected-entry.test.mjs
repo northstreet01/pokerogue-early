@@ -75,6 +75,8 @@ test('two seats of six v2 selections reach the real first action input', async (
   try {
     const opened = await h.request('native-open-selected-to-input', payload());
     const c = opened.checkpoint;
+    const originalStartingMoney = api.createOriginalRuntime(seed, identities[0]).scene.gameMode.getStartingMoney();
+    assert.deepEqual(c.players.map(player => player.money), [originalStartingMoney, originalStartingMoney]);
     assert.equal(c.decision.kind, 'wait-actions');
     assert.deepEqual(c.decision.requiredSeats, [0, 1]);
     const players = c.roster.entries.filter(entry => entry.owner !== null);
@@ -100,6 +102,22 @@ test('two seats of six v2 selections reach the real first action input', async (
     assert.deepEqual(c.eggState.players[1], []);
     assert.ok(players.every(entry => entry.pokemon.fields.moveset.length > 0
       && entry.pokemon.fields.moveset.every(move => move.fields.ppUsed === 0)));
+  } finally { await h.close(); }
+});
+
+test('restoring a selected run preserves spent wallets without granting starting money again', async () => {
+  const h = await hostFor();
+  try {
+    const start = (await h.request('native-open-selected', payload())).checkpoint;
+    // Explicit old/spent checkpoint, including a zero balance. Only new entry grants money.
+    start.players[0].money = 0; start.players[1].money = 321;
+    const before = structuredClone(start);
+    const fresh = await hostFor();
+    try {
+      const result = await fresh.request('native-run-to-boundary', JSON.parse(JSON.stringify(start)));
+      assert.deepEqual(result.checkpoint.players.map(player => player.money), [0, 321]);
+      assert.deepEqual(start, before);
+    } finally { await fresh.close(); }
   } finally { await h.close(); }
 });
 

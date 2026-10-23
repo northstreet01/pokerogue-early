@@ -34,6 +34,8 @@ export { captureStarterSelection, restoreStarterSelection, validateStarterSelect
 export { PROFILE_VERSION, captureProfile, validateProfile, restoreProfile, priceProfile } from '../coop/original-profile-entry';
 export { captureProfileDraft, validateProfileDraft, priceProfileDraft } from '../coop/original-profile-entry';
 export { Egg } from '../data/egg';
+export { modifierTypes, captureModifierTypeState, getPlayerShopModifierTypeOptionsForWave } from '../modifier/modifier-type';
+export { Status, StatusEffect } from '../data/status-effect';
 
 // Test/diagnostic entry: run an independent original construction under the
 // same committed random context without exposing a general rules RPC.

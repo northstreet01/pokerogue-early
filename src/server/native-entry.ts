@@ -295,7 +295,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     const event: any = { kind: 'battle-animation', animation: this.constructor.name,
       sourceId: animation.user?.id ?? null, targetId: animation.target?.id ?? null };
     if (animation.move !== undefined) event.moveId = animation.move;
-    if (animation.anim !== undefined) event.commonAnim = animation.anim;
+    if (animation.commonAnim !== undefined) event.commonAnim = animation.commonAnim;
     scene.nativeEvents.push(event);
     scene.time.delayedCall(0, callback);
   };

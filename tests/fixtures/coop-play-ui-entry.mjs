@@ -14,5 +14,7 @@ export { createOriginalClientModel } from '../../src/coop/original-client-model.
 export { default as ModifierSelectUiHandler } from "../../src/ui/modifier-select-ui-handler";
 export { modifierTypes, captureModifierTypeState } from "../../src/modifier/modifier-type";
 export { CoopBattlePresentation, createCoopPokemonDisplay } from '../../src/coop/battle-presentation';
+export { CommonBattleAnim } from '../../src/data/battle-anims';
+export { trainerConfigs } from '../../src/data/trainer-config';
 export { default as SummaryUiHandler, SummaryUiMode } from '../../src/ui/summary-ui-handler';
 export { createOriginalRuntime, constructOriginalPokemon, capturePokemonState, restorePokemonState } from '../../src/server/original-runtime';

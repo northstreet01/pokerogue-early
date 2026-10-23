@@ -287,6 +287,13 @@ export default class UI extends Phaser.GameObjects.Container {
     (this.scene as BattleScene).playSound('error');
   }
 
+  /** Stop an abandoned display transition without leaving an opaque overlay. */
+  cancelFade(): void {
+    this.scene.tweens.killTweensOf(this.overlay);
+    this.overlay.setVisible(false).setAlpha(0);
+    this.overlayActive = false;
+  }
+
   fadeOut(duration: integer): Promise<void> {
     return new Promise(resolve => {
       if (this.overlayActive)

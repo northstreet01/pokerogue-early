@@ -378,7 +378,9 @@ test('authoritative snapshot events are replayed once in order and never mutate 
   const scene = { ui: {
     setMode: async () => {},
     showText: (text, _delay, callback) => { calls.push(text); callback?.(); },
-    showDialogue: (text, _speaker, _arg, callback) => { calls.push(text); callback?.(); },
+    getMessageHandler: () => ({ showDialogue: (text, _speaker, delay, callback, _callbackDelay, prompt) => {
+      assert.equal(delay, 0); assert.equal(prompt, false); calls.push(text); callback?.();
+    } }),
   }, tweens: { add: config => { config.onComplete?.(); return { stop() {} }; }, killTweensOf() {} }, getField: () => [] };
   const presentation = new api.CoopBattlePresentation(scene);
   const events = [
@@ -389,6 +391,84 @@ test('authoritative snapshot events are replayed once in order and never mutate 
   assert.deepEqual(calls, ['first', 'trainer']);
   await presentation.playEvents(events, { revision: 1, isCurrent: () => true });
   assert.deepEqual(calls, ['first', 'trainer'], 'a replayed snapshot event id is not displayed twice');
+});
+
+test('cancel during message display prevents later text and leaves unfinished events replayable', async () => {
+  let entered;
+  const pending = new Promise(resolve => { entered = resolve; });
+  const calls = [];
+  const presentation = new api.CoopBattlePresentation({ ui: {
+    setMode: () => assert.fail('replay must not start a new mode transition'),
+    showText: text => { calls.push(text); entered(); },
+  } });
+  const event = { kind: 'message', eventId: 'cancelled-message', text: 'old text' };
+  const playing = presentation.playEvents([event, {kind:'message',text:'late text',eventIndex:1,eventId:'late-message'}]);
+  await pending;
+  presentation.cancel();
+  await playing;
+  assert.deepEqual(calls, ['old text']);
+  assert.equal(presentation.playedEvents.has(event.eventId), false);
+});
+
+test('abandoned original fade clears its overlay and stops the outstanding tween', () => {
+  const calls = [];
+  const ui = Object.create(api.UI.prototype);
+  ui.overlay = { setVisible(value) { calls.push(['visible',value]); return this; },
+    setAlpha(value) { calls.push(['alpha',value]); return this; } };
+  ui.scene = { tweens: { killTweensOf: target => assert.equal(target,ui.overlay) } };
+  ui.overlayActive = true;
+  ui.cancelFade();
+  assert.equal(ui.overlayActive,false);
+  assert.deepEqual(calls,[['visible',false],['alpha',0]]);
+});
+
+test('replay failure restores committed HP on the display copy without touching the model', async () => {
+  const model = { hp: 9 }, display = { hp: model.hp, updateInfo: async () => {} };
+  const presentation = new api.CoopBattlePresentation({ damageNumberHandler: { add() {} } });
+  presentation.displayed = [display]; presentation.displayedById.set(1, display);
+  presentation.playPhase = async () => { throw new Error('synthetic resource failure'); };
+  await assert.rejects(presentation.playEvents([
+    { kind: 'damage-display', pokemonId: 1, remainingHp: 20, eventIndex: 0, eventId: 'hp-intermediate' },
+    { kind: 'phase-start', phase: 'test', eventIndex: 1, eventId: 'hp-failure' },
+  ]), /synthetic resource failure/);
+  assert.equal(display.hp, 9); assert.equal(model.hp, 9);
+  assert.equal(presentation.playedEvents.has('hp-failure'), false);
+});
+
+test('experience replay closes the original bar before showing another member', async () => {
+  const calls = [];
+  const presentation = new api.CoopBattlePresentation({ partyExpBar: {
+    showPokemonExp: async (pokemon, exp) => calls.push(['show', pokemon.id, exp]),
+    hide: async () => calls.push(['hide']),
+  } });
+  presentation.displayedById.set(1, { id: 1 }); presentation.displayedById.set(2, { id: 2 });
+  await presentation.playEvents([1, 2].map((id, eventIndex) => ({ kind: 'experience-bar',
+    pokemonId: id, exp: 7, eventIndex, eventId: `exp-${id}` })));
+  assert.deepEqual(calls, [['show', 1, 7], ['hide'], ['show', 2, 7], ['hide']]);
+});
+
+test('original animation abort stops its tween and restores sprites once; solo completion remains valid', () => {
+  for (const cancel of [true, false]) {
+    const configs = [], stopped = [], sprites = [];
+    const pokemon = () => {
+      const sprite = { pipelineData: {}, setPosition() { return this; }, setScale() { return this; },
+        setAlpha() { return this; }, setAngle() { return this; }, setVisible(value) { this.visible = value; return this; } };
+      sprites.push(sprite);
+      return { x: 0, y: 0, isOnField: () => true, getSprite: () => sprite };
+    };
+    const animation = new api.CommonBattleAnim(0, pokemon(), pokemon());
+    animation.getAnim = () => ({ frames: [] });
+    const scene = { tweens: { addCounter: config => {
+      configs.push(config); return { stop: () => stopped.push(true) };
+    } } };
+    let completed = 0;
+    const controller = new AbortController();
+    animation.play(scene, () => completed++, cancel ? controller.signal : undefined);
+    if (cancel) { controller.abort(); configs[0].onRepeat(); }
+    configs[0].onComplete();
+    assert.equal(completed, 1); assert.equal(stopped.length, cancel ? 1 : 0);
+    assert.ok(sprites.every(sprite => sprite.visible));
+  }
 });
 
 test('trainer entrance events reuse the original trainer sprite and tween without server state', async () => {
@@ -417,6 +497,28 @@ test('original display uses authoritative biome and day/night offset across seat
     assert.equal(displayScene.waveCycleOffset, 17);
     assert.equal(displayScene.arena.biomeType, 0);
   }
+});
+
+test('late original trainer asset completion cannot revive a cleared trainer; refresh uses its stable position', async () => {
+  const sprite = () => ({ visible: false, setTexture() { return this; }, setFrame() { return this; },
+    setPosition(x,y) { this.x=x; this.y=y; return this; }, setVisible(value) { this.visible=value; return this; } });
+  const base = player => ({ base:sprite(),player,props:[],add(){},setPosition(){return this;},setVisible(){return this;} });
+  let complete;
+  const scene = { arena:{},arenaBg:sprite(),arenaBgTransition:sprite(),arenaPlayer:base(true),arenaEnemy:base(false),trainer:sprite(),
+    textures:{exists:()=>false},loadAtlas(){},load:{once(_event,callback){complete=callback;},isLoading:()=>false,start(){}},
+    anims:{generateFrameNames:()=>[],create(){}} };
+  const shared = { field:[null,null,null,null],pokemon:[],biome:0,waveCycleOffset:17,terrainColorRatio:1 };
+  const type=Object.keys(api.trainerConfigs).find(key=>api.trainerConfigs[key].getSpriteKey);
+  const trainer={type:Number(type),variant:0,spriteKey:api.trainerConfigs[type].getSpriteKey(false)};
+  const presentation=new api.CoopBattlePresentation(scene);
+  const old=presentation.apply({shared:{...shared,trainer}},{byId:new Map()});
+  assert.equal(typeof complete,'function');
+  await presentation.apply({shared},{byId:new Map()});
+  complete();await old;
+  assert.equal(scene.trainer.visible,false,'a late loader cannot overwrite the new wild encounter');
+  scene.textures.exists=()=>true;
+  await presentation.apply({shared:{...shared,trainer}},{byId:new Map()});
+  assert.equal(scene.trainer.visible,true);assert.equal(scene.trainer.x,106,'restored trainer does not wait offscreen for a deduplicated entrance');
 });
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));

@@ -165,6 +165,23 @@ test('fresh default collection reaches original wave five, restores Trainer call
   }finally{await h.close();}
 });
 
+test('synthetic original CommonAnimPhase exports its real commonAnim and stable Pokemon ids',async()=>{
+  const h=await createOriginalRuleHost({seed:'review-common-animation',identity:{trainerId:1,secretId:2}});
+  try{
+    const c=(await h.request('native-open-to-input',{parties:[[1,4,7],[906,909,912]],eggState:{players:[[],[]]}})).checkpoint;
+    const value=value=>({presence:'value',value});
+    c.decision={id:'native-1-901',kind:'continuing',requiredSeats:[],reason:'effects'};
+    c.continuation={currentPhase:null,standbyPhase:null,phaseQueuePrepend:[],nextCommandPhaseQueue:[],phaseQueuePrependSpliceIndex:-1,
+      phaseQueue:[{kind:'original-phase',phaseId:901,remaining:'start',phase:{version:1,type:'CommonAnimPhase',scope:null,presentation:{},
+        fields:{anim:value(0),targetIndex:value(0),battlerIndex:value(0),player:value(true),fieldIndex:value(0)}}}]};
+    const result=await h.request('native-step',c);
+    const event=result.events.find(e=>e.kind==='battle-animation');
+    assert.equal(event.animation,'CommonBattleAnim');assert.equal(event.commonAnim,0);
+    assert.equal(event.sourceId,c.roster.field[0]);assert.equal(event.targetId,c.roster.field[2]);
+    assert.deepEqual(result.checkpoint.players,c.players);
+  }finally{await h.close();}
+});
+
 test('default route resumes after a real trainer enemy faint without committing a failed candidate',async()=>{
   const {h,c:source}=await defaultTrainerRoute();
   try{

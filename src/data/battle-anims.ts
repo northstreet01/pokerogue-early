@@ -710,7 +710,8 @@ export abstract class BattleAnim {
         return ret;
     }
 
-    play(scene: BattleScene, callback?: Function) {
+    play(scene: BattleScene, callback?: Function, signal?: AbortSignal) {
+        if (signal?.aborted) return;
         const isOppAnim = this.isOppAnim();
         const user = !isOppAnim ? this.user : this.target;
         const target = !isOppAnim ? this.target : this.user;
@@ -744,10 +745,35 @@ export abstract class BattleAnim {
         };
         const spritePriorities: integer[] = [];
 
-        scene.tweens.addCounter({
+        let tailTween: Phaser.Tweens.Tween;
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            signal?.removeEventListener('abort', abort);
+            for (const sprite of [userSprite, targetSprite]) {
+                sprite.setPosition(0, 0);
+                sprite.setScale(1);
+                sprite.setAlpha(1);
+                sprite.pipelineData['tone'] = [ 0.0, 0.0, 0.0, 0.0 ];
+                sprite.setAngle(0);
+            }
+            if (signal?.aborted || !this.isHideUser()) userSprite.setVisible(true);
+            if (signal?.aborted || (!this.isHideTarget() && (targetSprite !== userSprite || !this.isHideUser()))) targetSprite.setVisible(true);
+            for (const sprite of Object.values(spriteCache).flat()) sprite?.destroy();
+            this.bgSprite?.destroy();
+            if (callback) callback();
+        };
+        const abort = () => {
+            frameTween?.stop();
+            tailTween?.stop();
+            finish();
+        };
+        const frameTween = scene.tweens.addCounter({
             duration: Utils.getFrameMs(3),
             repeat: anim.frames.length,
             onRepeat: () => {
+                if (finished) return;
                 if (!f) {
                     userSprite.setVisible(false);
                     targetSprite.setVisible(false);
@@ -882,43 +908,21 @@ export abstract class BattleAnim {
                 r--;
             },
             onComplete: () => {
-                const cleanUpAndComplete = () => {
-                    userSprite.setPosition(0, 0);
-                    userSprite.setScale(1);
-                    userSprite.setAlpha(1);
-                    userSprite.pipelineData['tone'] = [ 0.0, 0.0, 0.0, 0.0 ];
-                    userSprite.setAngle(0);
-                    targetSprite.setPosition(0, 0);
-                    targetSprite.setScale(1);
-                    targetSprite.setAlpha(1);
-                    targetSprite.pipelineData['tone'] = [ 0.0, 0.0, 0.0, 0.0 ];
-                    targetSprite.setAngle(0);
-                    if (!this.isHideUser())
-                        userSprite.setVisible(true);
-                    if (!this.isHideTarget() && (targetSprite !== userSprite || !this.isHideUser()))
-                        targetSprite.setVisible(true);
-                    for (let ms of Object.values(spriteCache).flat()) {
-                        if (ms)
-                            ms.destroy();
-                    }
-                    if (this.bgSprite)
-                        this.bgSprite.destroy();
-                    if (callback)
-                        callback();
-                };
+                if (finished) return;
                 for (let ms of Object.values(spriteCache).flat()) {
                     if (ms && !ms.getData('locked'))
                         ms.destroy();
                 }
                 if (r) {
-                    scene.tweens.addCounter({
+                    tailTween = scene.tweens.addCounter({
                         duration: Utils.getFrameMs(r),
-                        onComplete: () => cleanUpAndComplete()
+                        onComplete: finish
                     });
                 } else
-                    cleanUpAndComplete();
+                    finish();
             }
         });
+        if (!finished) signal?.addEventListener('abort', abort, { once: true });
     }
 }
 

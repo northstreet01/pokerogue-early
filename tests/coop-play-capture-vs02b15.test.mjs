@@ -39,7 +39,7 @@ const until = async (predicate, description) => {
 
 // Original phase + original Command/Ball handlers + real IDB/WS/service/Worker.
 // Rendering/asset ports are headless: this is not a browser visual acceptance.
-async function openUiRoom(seat, t) {
+async function openUiRoom(seat, t, lobbyOnly = false) {
   const directory = await mkdtemp(join(tmpdir(), 'vs02b15-ui-'));
   const adapter = createOriginalCoopAdapter({ fixture: { profileLobby: true,
     seed: 'learning-natural-2', identities: profiles.map(profile => profile.trainer) } });
@@ -104,18 +104,63 @@ async function openUiRoom(seat, t) {
     await until(() => peerLatest, 'peer room'); await phase.joinRoom(peerLatest.roomId);
   }
   await until(() => phase.inputReady && peerLatest && phase.latest?.personal.decision.kind === 'lobby', 'lobby ACK');
+  const submitPeer = action => peer.send({ type: 'submitAction', roomId: peerLatest.roomId, runId: peerLatest.runId,
+    decisionId: peerLatest.decisionId, expectedRevision: peerLatest.revision, actionId: crypto.randomUUID(), action });
+  const environment = { phase, command, ball, ui, peer, errors, modes, server, directory, adapter,
+    peerSnapshot: () => peerLatest, submitPeer, close };
+  if (lobbyOnly) return environment;
   await phase.sendProfile(true, profiles[seat]);
   await until(() => !phase.actionId && phase.latest.shared.ready[seat] && phase.inputReady
     && peerLatest.revision === phase.latest.revision, 'primary profile');
-  const submitPeer = action => peer.send({ type: 'submitAction', roomId: peerLatest.roomId, runId: peerLatest.runId,
-    decisionId: peerLatest.decisionId, expectedRevision: peerLatest.revision, actionId: crypto.randomUUID(), action });
   submitPeer({ kind: 'profile-ready', profile: profiles[1 - seat], ready: true });
   await until(() => phase.inputReady && phase.latest?.personal.decision.kind === 'wait-actions'
     && peerLatest.personal.decision.kind === 'wait-actions', 'selected Worker battle');
-  return { phase, command, ball, ui, peer, errors, modes, server, directory, adapter,
-    peerSnapshot: () => peerLatest, submitPeer,
-    close };
+  return environment;
 }
+
+for (const seat of [0, 1]) test(`VS16 original Starter callbacks seat ${seat}: draft IDB/WS/model ACK, readiness, selected Worker and FIGHT`, { timeout: 90000 }, async t => {
+  const env = await openUiRoom(seat, t, true);
+  try {
+    const { phase, modes } = env;
+    // A real owned profile, original codecs and minimal headless rendering ports.
+    const own = profiles[seat];
+    const records = Object.fromEntries(own.starters.map((starter, index) => [starter.speciesId, {
+      ...own.costs[index], ...own.unlocks[index], caughtAttr: BigInt(own.unlocks[index].caughtAttr),
+    }]));
+    phase.scene.gameData = { ...own.trainer, eggs: [], dexData: records,
+      starterEggMoveData: Object.fromEntries(own.starters.map(starter =>
+        [api.getPokemonSpecies(starter.speciesId).getRootSpeciesId(), starter.eggMoves])) };
+    const starters = own.starters.map(api.restoreStarterSelection).map(({ species, dexAttr, nature, moveset, pokerus }) =>
+      ({ species, dexAttr, nature, moveset, pokerus }));
+    await phase.openStarterSelect();
+    const [, confirm, config] = modes.at(-1);
+    const priorModes = modes.length;
+    config.onChange(starters.slice(0, 1));
+    await until(() => phase.inputReady && !phase.actionId && phase.latest.personal.profile?.starters.length === 1, 'accepted one-starter draft');
+    assert.equal(modes.length, priorModes, 'draft sync does not close original Starter');
+    await until(() => env.peerSnapshot().revision === phase.latest.revision, 'peer draft ACK');
+    assert.equal(env.peerSnapshot().shared.selections[seat].state, 'draft');
+    assert.equal(env.peerSnapshot().shared.selections[seat].starters.length, 1);
+    assert.equal(env.peerSnapshot().personal.profile, null);
+    assert.deepEqual(phase.latest.shared.ready, [false, false]);
+    config.onChange(starters);
+    await until(() => phase.inputReady && !phase.actionId && phase.latest.personal.profile?.starters.length === 2, 'accepted two-starter draft');
+    confirm(starters);
+    await until(() => phase.inputReady && !phase.actionId && phase.latest.shared.ready[seat], 'confirmed exact draft');
+    await until(() => env.peerSnapshot().revision === phase.latest.revision, 'peer final lobby');
+    env.submitPeer({ kind: 'profile-ready', profile: profiles[1 - seat], ready: true });
+    await until(() => phase.inputReady && phase.latest.personal.decision.kind === 'wait-actions'
+      && env.peerSnapshot().personal.decision.kind === 'wait-actions', 'original selected battle');
+    assert.deepEqual(phase.latest.personal.party.map(entry => entry.pokemon.fields.species), own.starters.map(starter => starter.speciesId));
+    const revision = phase.latest.revision;
+    await phase.sendAction(attack(phase.latest), 'original FIGHT');
+    await until(() => phase.submitted, 'owned FIGHT receipt');
+    env.submitPeer(attack(env.peerSnapshot()));
+    await until(() => phase.latest.revision > revision && phase.inputReady, 'next FIGHT input');
+    assert.deepEqual(env.errors, []);
+    assert.deepEqual(await phase.storage.pendingActions(location.origin, phase.roomId, seat), []);
+  } finally { await env.close(); }
+});
 
 const attack = snapshot => {
   const options = snapshot.personal.decision.options.filter(option => option.kind === 'fight' && (option.target === null || option.target >= 2));

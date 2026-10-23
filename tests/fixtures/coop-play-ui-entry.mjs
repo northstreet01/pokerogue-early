@@ -6,6 +6,8 @@ export { default as CommandUiHandler } from '../../src/ui/command-ui-handler';
 export { default as BallUiHandler } from '../../src/ui/ball-ui-handler';
 export { default as PartyUiHandler, PartyOption, PartyUiMode } from '../../src/ui/party-ui-handler';
 export { default as StarterSelectUiHandler } from '../../src/ui/starter-select-ui-handler';
+export { captureProfileDraft, priceProfileDraft } from '../../src/coop/original-profile-entry';
+export { restoreStarterSelection } from '../../src/coop/original-starter-selection';
 export { Mode } from '../../src/ui/ui';
 export { Button } from '../../src/battle-scene';
 export { describeOriginalCatalogs, getPokemonSpecies, GameData } from '../../src/server/original-runtime';

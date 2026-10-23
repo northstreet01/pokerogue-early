@@ -112,7 +112,10 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
   private iconAnimHandler: PokemonIconAnimHandler;
 
   private starterSelectCallback: StarterSelectCallback;
-  private starterSelectOptions: { gameMode?: GameModes; onCancel?: () => void } = {};
+  private starterSelectOptions: { gameMode?: GameModes; onCancel?: () => void;
+    onChange?: StarterSelectCallback; starters?: Starter[] } = {};
+  private starterChangeSignature = '';
+  private restoringStarters = false;
 
   constructor(scene: BattleScene) {
     super(scene, Mode.STARTER_SELECT);
@@ -480,10 +483,16 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
 
       this.starterSelectContainer.setVisible(true);
 
+      this.restoringStarters = true;
       this.setGenMode(false);
       this.setCursor(0);
       this.setGenMode(true);
       this.setCursor(0);
+
+      if (this.starterSelectOptions.starters) this.restoreSelectedStarters(this.starterSelectOptions.starters);
+      this.restoringStarters = false;
+      this.starterChangeSignature = '';
+      this.notifyStarterChange();
 
       handleTutorial(this.scene, Tutorial.Starter_Select);
 
@@ -604,6 +613,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
                   this.starterAttr.push(this.dexAttrCursor);
                   this.starterNatures.push(this.natureCursor as unknown as Nature);
                   this.starterMovesets.push(this.starterMoveset.slice(0) as StarterMoveset);
+                  this.notifyStarterChange();
                   if (this.speciesLoaded.get(species.speciesId))
                     species.cry(this.scene);
                   if (this.starterCursors.length === 6 || this.value === 10)
@@ -1177,6 +1187,13 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     if (!this.starterMoveset)
       this.starterMoveset = this.speciesStarterMoves.slice(0, 4) as StarterMoveset;
 
+    if (this.starterSelectOptions.onChange && !this.restoringStarters) {
+      const selectedIndex = this.starterGens.findIndex((gen, index) =>
+        this.genSpecies[gen][this.starterCursors[index]] === species);
+      if (selectedIndex >= 0) this.starterMovesets[selectedIndex] = this.starterMoveset.slice(0) as StarterMoveset;
+      this.notifyStarterChange();
+    }
+
     for (let m = 0; m < 4; m++) {
       const move = m < this.starterMoveset.length ? allMoves[this.starterMoveset[m]] : null;
       this.pokemonMoveBgs[m].setFrame(Type[move ? move.type : Type.UNKNOWN].toString().toLowerCase());
@@ -1211,6 +1228,51 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     this.starterIcons[this.starterCursors.length].setTexture('pokemon_icons_0');
     this.starterIcons[this.starterCursors.length].setFrame('unknown');
     this.tryUpdateValue();
+    this.notifyStarterChange();
+  }
+
+  private selectedStarters(): Starter[] {
+    return this.starterGens.map((gen, index) => {
+      const species = this.genSpecies[gen][this.starterCursors[index]];
+      return { species, dexAttr: this.starterAttr[index], nature: this.starterNatures[index],
+        moveset: this.starterMovesets[index]?.slice(0) as StarterMoveset,
+        pokerus: [0, 1, 2].some(n => this.pokerusGens[n] === species.generation - 1
+          && this.pokerusCursors[n] === this.genSpecies[species.generation - 1].indexOf(species)) };
+    });
+  }
+
+  private notifyStarterChange(): void {
+    if (!this.starterSelectOptions.onChange || this.restoringStarters) return;
+    const starters = this.selectedStarters();
+    const signature = JSON.stringify(starters.map(starter => ({ ...starter,
+      species: starter.species.speciesId, dexAttr: starter.dexAttr.toString() })));
+    if (signature === this.starterChangeSignature) return;
+    this.starterChangeSignature = signature;
+    this.starterSelectOptions.onChange(starters);
+  }
+
+  private restoreSelectedStarters(starters: Starter[]): void {
+    this.restoringStarters = true;
+    try {
+      starters.forEach((starter, index) => {
+        const gen = this.genSpecies.findIndex(species => species.includes(starter.species));
+        if (gen < 0) throw new Error('STARTER_NOT_IN_ORIGINAL_SELECTOR');
+        const cursor = this.genSpecies[gen].indexOf(starter.species);
+        const props = this.scene.gameData.getSpeciesDexAttrProps(starter.species, starter.dexAttr);
+        this.setSpeciesDetails(starter.species, props.shiny, props.formIndex, props.female, props.abilityIndex, starter.nature);
+        const moves = starter.moveset ?? this.starterMoveset;
+        this.starterGens.push(gen); this.starterCursors.push(cursor);
+        this.starterAttr.push(starter.dexAttr); this.starterNatures.push(starter.nature);
+        this.starterMovesets.push(moves.slice(0) as StarterMoveset);
+        const icon = this.starterIcons[index];
+        icon.setTexture(starter.species.getIconAtlasKey(props.formIndex));
+        icon.setFrame(starter.species.getIconId(props.female, props.formIndex, props.shiny));
+        this.starterCursorObjs[index].setPosition(148 + 18 * (cursor % 9), 10 + 18 * Math.floor(cursor / 9));
+        this.starterCursorObjs[index].setVisible(true);
+      });
+      this.tryUpdateValue();
+      this.setGenMode(false); this.setCursor(0); this.setGenMode(true); this.setCursor(0);
+    } finally { this.restoringStarters = false; }
   }
 
   tryUpdateValue(add?: integer): boolean {
@@ -1253,16 +1315,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
           const thisObj = this;
           const originalStarterSelectCallback = this.starterSelectCallback;
           this.starterSelectCallback = null;
-          originalStarterSelectCallback(new Array(this.starterGens.length).fill(0).map(function (_, i) {
-            const starterSpecies = thisObj.genSpecies[thisObj.starterGens[i]][thisObj.starterCursors[i]];
-            return {
-              species: starterSpecies,
-              dexAttr: thisObj.starterAttr[i],
-              nature: thisObj.starterNatures[i] as Nature,
-              moveset: thisObj.starterMovesets[i],
-              pokerus: !![ 0, 1, 2 ].filter(n => thisObj.pokerusGens[n] === starterSpecies.generation - 1 && thisObj.pokerusCursors[n] === thisObj.genSpecies[starterSpecies.generation - 1].indexOf(starterSpecies)).length
-            };
-          }));
+          originalStarterSelectCallback(thisObj.selectedStarters());
         };
         if (this.starterSelectOptions.gameMode !== undefined)
           startRun(this.starterSelectOptions.gameMode);
@@ -1330,6 +1383,8 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     super.clear();
     this.cursor = -1;
     this.starterSelectContainer.setVisible(false);
+
+    this.starterSelectOptions = {}; // Teardown is not an edit (nor an empty draft).
 
     while (this.starterCursors.length)
       this.popStarter();

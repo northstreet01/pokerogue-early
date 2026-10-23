@@ -3,10 +3,12 @@ import { Phase } from '../phase';
 import { Mode } from '../ui/ui';
 import { capturePokemonState, restorePokemonState } from '../field/pokemon';
 import { CoopBattlePresentation, createCoopPokemonDisplay, captureResultText } from './battle-presentation';
-import { captureProfile } from './original-profile-entry';
+import { captureProfile, captureProfileDraft } from './original-profile-entry';
+import { restoreStarterSelection } from './original-starter-selection';
+import { getPokemonSpecies } from '../data/pokemon-species';
 import { createOriginalClientModel } from './original-client-model.mjs';
 import { createSnapshotConsumer } from '../battle-core/coop-client.mjs';
-import { PROTOCOL_VERSION, CHECKPOINT_VERSION } from '../battle-core/coop-contract.mjs';
+import { PROTOCOL_VERSION, CHECKPOINT_VERSION, canonical } from '../battle-core/coop-contract.mjs';
 import { createPlayStorage } from './play-storage.mjs';
 import { pauseAutoResume, autoResumePaused, allowAutoResume } from './exit-recovery.mjs';
 import { GameModes } from '../game-mode';
@@ -45,6 +47,8 @@ export default class CoopPlayPhase extends Phase {
   private actionId: string | null = null;
   private pendingAction: any = null;
   private starterOpen = false;
+  private starterMenuEpoch = 0;
+  private starterTransition: Promise<void> = Promise.resolve();
   private origin = location.origin;
   private storage = createPlayStorage();
   private messageChain = Promise.resolve();
@@ -58,6 +62,10 @@ export default class CoopPlayPhase extends Phase {
   private switchSignature = '';
   private submitted = false;
   private profileDirty = false;
+  private lobbyDraft: { profile: any; retries: number; error: string | null } | null = null;
+  private draftFinal = false;
+  private draftResync = false;
+  private lobbySelections: HTMLDivElement | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private lifecycle = 0;
@@ -99,6 +107,8 @@ export default class CoopPlayPhase extends Phase {
     this.disposed = true; this.lifecycle++;
     this.epoch = null; this.consumer = null;
     this.inputReady = false; this.battleInputActive = false; this.starterOpen = false;
+    this.starterMenuEpoch++;
+    this.lobbyDraft = null; this.draftFinal = false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     const socket = this.socket; this.socket = null;
@@ -134,9 +144,10 @@ export default class CoopPlayPhase extends Phase {
     this.status = document.createElement('div'); this.status.className = 'status'; this.status.textContent = '连接中…';
     this.budget = document.createElement('div'); this.budget.className = 'status';
     this.roomLine = document.createElement('div'); this.roomLine.className = 'status';
+    this.lobbySelections = document.createElement('div'); this.lobbySelections.className = 'status';
     this.controls = document.createElement('div');
     this.reserveLine = document.createElement('div'); this.reserveLine.className = 'status'; this.reserveLine.hidden = true;
-    this.panel.append(title, this.status, this.roomLine, this.budget, this.reserveLine, this.controls);
+    this.panel.append(title, this.status, this.roomLine, this.budget, this.lobbySelections, this.reserveLine, this.controls);
     // Keep this outside the decision controls: no sync/menu state may hide it.
     const exit = this.button('退出本局／返回首页', () => this.leaveSession());
     exit.id = 'coop-exit-session'; exit.type = 'button';
@@ -175,6 +186,11 @@ export default class CoopPlayPhase extends Phase {
           if (ready) { this.setStatus('请先取消准备，再重新选队'); return; }
           await this.openStarterSelect();
         }, true));
+      if (this.lobbyDraft?.error) row.append(this.button('重试同步选队', async () => {
+        if (!this.lobbyDraft) return;
+        this.lobbyDraft.error = null; this.lobbyDraft.retries = 0;
+        await this.flushLobbyDraft();
+      }));
       this.controls.append(row);
       return;
     }
@@ -216,7 +232,7 @@ export default class CoopPlayPhase extends Phase {
       this.clearPreparationParty();
       this.clearActiveSwitchParty();
       this.inputReady = false; this.battleInputActive = false;
-      void this.scene.ui.setMode(Mode.MESSAGE);
+      this.closeStarterSelect();
       this.reconnectTimer = setTimeout(() => this.connect(), 1000);
     });
     socket.addEventListener('error', () => { if (current()) this.setStatus('WebSocket 连接失败', true); });
@@ -276,6 +292,10 @@ export default class CoopPlayPhase extends Phase {
           } else if (message.reason === 'DISCONNECTED') this.setStatus('队友连接已断开，等待恢复…');
           if (this.latest.personal.decision.kind === 'lobby' && this.inputReady && this.lastProfile && !this.actionId)
             this.setStatus(this.latest.shared.ready?.[this.seat!] ? '已准备，等待队友…' : '选队已保留，可以提交准备');
+          if (this.latest.personal.decision.kind === 'lobby') {
+            await this.flushLobbyDraft();
+            this.renderDraftStatus();
+          }
         }
         return;
       }
@@ -287,6 +307,18 @@ export default class CoopPlayPhase extends Phase {
         const action = this.pendingAction?.action;
         this.actionId = null; this.pendingAction = null;
         this.preparationSignature = ''; this.switchSignature = '';
+        if (action?.kind === 'profile-draft') {
+          if (!message.accepted && this.lobbyDraft && this.sameProfile(action.profile, this.lobbyDraft.profile)) {
+            const draft = this.lobbyDraft;
+            if (['STALE_DECISION', 'SYNC_BLOCKED'].includes(message.code) && draft.retries++ < 1) {
+              this.draftResync = true;
+              this.send({ type: 'requestSnapshot', roomId: this.roomId, runId: this.runId,
+                knownRevision: this.latest.revision, reason: 'DRAFT_RETRY' });
+            } else draft.error = `操作被拒绝：${message.code}`;
+          }
+          this.renderDraftStatus(); this.renderLobbyControls();
+          return;
+        }
         // A replayed durable receipt can belong to an earlier decision after
         // reconnect. Clear its outbox entry without locking the new menu.
         if (message.revision !== this.latest?.revision || message.decisionId !== this.latest?.decisionId) {
@@ -339,6 +371,7 @@ export default class CoopPlayPhase extends Phase {
           && previous.sharedHash === message.sharedHash && previous.personalHash === message.personalHash;
         this.runId = message.runId;
         this.latest = duplicate ? previous : message;
+        this.draftResync = false;
         this.inputReady = false;
         await this.persistSeat();
         if (!current()) return;
@@ -359,16 +392,27 @@ export default class CoopPlayPhase extends Phase {
       this.budget.textContent = `共享点数 ${shared.budget.used}/${shared.budget.shared}（剩余 ${shared.budget.remaining}）`
         + ` · 个人点数 ${snapshot.personal.priced?.total ?? 0}/10`
         + ` · 准备 ${shared.ready.filter(Boolean).length}/2`;
+      if (this.lobbySelections) {
+        this.lobbySelections.hidden = false;
+        this.lobbySelections.textContent = (shared.selections ?? []).map((player: any) =>
+          `席位${player.seat + 1} ${player.ready ? '已准备' : player.state === 'draft' ? '编辑中' : '未准备'}：`
+          + (player.starters.map((starter: any) => `${getPokemonSpecies(starter.speciesId).name}`
+            + `${starter.formIndex ? `（形态${starter.formIndex}）` : ''} ${starter.cost}点`).join('、') || '未选')
+          + `（${player.total}/10）`).join(' ｜ ');
+      }
       if (!this.profileDirty) this.lastProfile = snapshot.personal.profile ?? this.lastProfile;
       if (!snapshot.personal.profile && !this.lastProfile && !this.starterOpen)
         void this.openStarterSelect().catch(error => this.setStatus(`选队界面失败：${error?.message ?? error}`, true));
       else if (snapshot.personal.profile) this.setStatus('已导入选队，等待队友…');
       this.renderLobbyControls();
+      this.renderDraftStatus();
       return;
     }
     this.roomLine.textContent = `房间 ${snapshot.roomId} · 席位 ${snapshot.seat + 1}`;
     this.budget.textContent = `波次 ${snapshot.shared.waveIndex} · 回合 ${snapshot.shared.turn} · 状态已同步`;
     this.controls.replaceChildren();
+    if (this.lobbySelections) this.lobbySelections.hidden = true;
+    this.lobbyDraft = null; this.draftFinal = false;
     await this.enterBattle(snapshot);
   }
 
@@ -992,25 +1036,87 @@ export default class CoopPlayPhase extends Phase {
     if (this.disposed || this.starterOpen) return;
     const lifecycle = this.lifecycle;
     this.starterOpen = true;
-    await this.scene.ui.setMode(Mode.STARTER_SELECT, (starters: any[]) => {
-      if (!this.current(lifecycle)) return;
-      this.starterOpen = false;
-      try {
-        const profile = captureProfile(this.scene.gameData, starters);
-        this.lastProfile = profile;
-        this.profileDirty = true;
-        void this.scene.ui.setMode(Mode.MESSAGE);
-        void this.sendProfile(true, profile);
-      } catch (error: any) {
-        void this.scene.ui.setMode(Mode.MESSAGE); // The original callback was consumed; leave before reopening it.
-        this.setStatus(`选队失败：${error?.message ?? error}`, true);
+    this.draftFinal = false;
+    const menuEpoch = ++this.starterMenuEpoch;
+    const roomId = this.roomId, runId = this.runId;
+    const current = () => this.current(lifecycle) && this.roomId === roomId && this.runId === runId
+      && this.starterMenuEpoch === menuEpoch;
+    try {
+      await this.starterTransition.catch(() => {});
+      if (!current()) return;
+      this.starterTransition = this.scene.ui.setMode(Mode.STARTER_SELECT, (starters: any[]) => {
+        if (!current()) return;
+        try {
+          const profile = captureProfile(this.scene.gameData, starters);
+          this.queueLobbyDraft(profile);
+          this.draftFinal = true;
+          this.closeStarterSelect();
+          void this.flushLobbyDraft().catch(error => this.setStatus(`选队提交失败：${error?.message ?? error}`, true));
+        } catch (error: any) {
+          this.closeStarterSelect(); // The original callback was consumed; leave before reopening it.
+          this.setStatus(`选队失败：${error?.message ?? error}`, true);
+        }
+      }, { gameMode: GameModes.CLASSIC,
+        starters: this.lastProfile?.starters.map(restoreStarterSelection),
+        onChange: (starters: any[]) => {
+          if (!current() || !this.starterOpen) return;
+          try { this.queueLobbyDraft(captureProfileDraft(this.scene.gameData, starters)); }
+          catch (error: any) { this.setStatus(`选队草稿失败：${error?.message ?? error}`, true); }
+        }, onCancel: () => {
+          if (!current()) return;
+          this.draftFinal = false;
+          this.closeStarterSelect();
+          this.setStatus('已返回大厅，可重新选队');
+        } });
+      await this.starterTransition;
+    } catch (error) { if (current()) this.closeStarterSelect(); throw error; }
+  }
+
+  private closeStarterSelect() {
+    this.starterOpen = false; this.starterMenuEpoch++;
+    const lifecycle = this.lifecycle;
+    this.starterTransition = this.starterTransition.catch(() => {}).then(() => this.scene.ui.setMode(Mode.MESSAGE)).catch(error => {
+      if (this.current(lifecycle)) this.setStatus(`选队转场失败：${error?.message ?? error}，可重选或退出`, true);
+    });
+  }
+
+  private sameProfile(left: any, right: any) { return canonical(left ?? null) === canonical(right ?? null); }
+
+  private queueLobbyDraft(profile: any) {
+    if (this.disposed || this.latest?.personal.decision.kind !== 'lobby' || this.latest.shared.ready?.[this.seat!]) return;
+    if (this.lobbyDraft && this.sameProfile(this.lobbyDraft.profile, profile)) return;
+    this.lastProfile = profile; this.profileDirty = true; this.draftFinal = false;
+    this.lobbyDraft = { profile, retries: 0, error: null };
+    this.renderDraftStatus(); this.renderLobbyControls();
+    void this.flushLobbyDraft().catch(error => this.setStatus(`草稿同步失败：${error?.message ?? error}`, true));
+  }
+
+  private renderDraftStatus() {
+    if (!this.lobbyDraft || this.latest?.personal.decision.kind !== 'lobby') return;
+    const draft = this.lobbyDraft;
+    const accepted = this.sameProfile(draft.profile, this.latest.personal.profile);
+    this.setStatus(draft.error ? `${draft.error}；本地选择保留，共享剩余${this.latest.shared.budget.remaining}点，请改选或重试`
+      : this.latest.shared.ready?.[this.seat!] ? '已准备，等待队友…'
+      : accepted ? '选队已获服务器接受，可继续编辑或提交准备'
+      : '选队待同步；公共队伍和预算以服务器已接受内容为准', !!draft.error);
+  }
+
+  private async flushLobbyDraft() {
+    const draft = this.lobbyDraft;
+    if (!draft || this.disposed || this.draftResync || draft.error || !this.inputReady || this.actionId
+      || this.latest?.personal.decision.kind !== 'lobby' || this.latest.shared.ready?.[this.seat!]) return;
+    if (this.sameProfile(draft.profile, this.latest.personal.profile)) {
+      this.profileDirty = false;
+      if (this.draftFinal && !this.starterOpen) {
+        this.draftFinal = false;
+        await this.sendAction({ kind: 'profile-ready', profile: draft.profile, ready: true }, '准备已提交，等待回执…');
       }
-    }, { gameMode: GameModes.CLASSIC, onCancel: () => {
-      if (!this.current(lifecycle)) return;
-      this.starterOpen = false;
-      void this.scene.ui.setMode(Mode.MESSAGE);
-      this.setStatus('已返回大厅，可重新选队');
-    } });
+      return;
+    }
+    const saved = await this.sendAction({ kind: 'profile-draft', profile: draft.profile, ready: false }, '选队草稿已提交，等待服务器接受…');
+    if (!saved && this.lobbyDraft === draft && !this.disposed) {
+      draft.error = '草稿未确认提交'; this.renderDraftStatus(); this.renderLobbyControls();
+    }
   }
 
   private async sendAction(action: any, submittedText: string) {
@@ -1052,6 +1158,13 @@ export default class CoopPlayPhase extends Phase {
   private async sendProfile(ready: boolean, profile = this.lastProfile) {
     if (!profile || !this.latest || this.seat === null || !this.roomId) return;
     if (this.latest.personal.decision.kind !== 'lobby') return;
+    if (ready && !profile.starters?.length) { this.setStatus('请至少选择一只精灵再准备', true); return; }
+    if (ready && this.lobbyDraft) {
+      if (this.starterOpen) { this.setStatus('请先在原选队界面确认队伍', true); return; }
+      this.draftFinal = true;
+      await this.flushLobbyDraft(); return;
+    }
+    if (!ready) profile = this.latest.personal.profile ?? profile;
     await this.sendAction({ kind: 'profile-ready', profile, ready },
       ready ? '已提交，等待回执…' : '取消准备已提交…');
   }
@@ -1068,6 +1181,10 @@ export default class CoopPlayPhase extends Phase {
       this.actionId = message.actionId; this.pendingAction = message;
       this.lastProfile ??= message.action?.profile;
       if (message.action?.kind === 'profile-ready') this.profileDirty = true;
+      if (message.action?.kind === 'profile-draft' && !this.lobbyDraft) {
+        this.lastProfile = message.action.profile; this.profileDirty = true;
+        this.lobbyDraft = { profile: message.action.profile, retries: 0, error: null };
+      }
       this.send(message); // Exact persisted actionId/message, never rebase a retry.
     }
   }

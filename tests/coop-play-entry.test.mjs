@@ -42,6 +42,218 @@ function phase() {
     capturePokemonState: () => { throw new Error('NO_PARTY_EXPECTED'); } });
   return { p, sent, errors };
 }
+
+function draftGameData() {
+  return Object.assign(Object.create(api.GameData.prototype), { trainerId: 1, secretId: 2, eggs: [],
+    dexData: Object.fromEntries([1, 4, 7].map(id => [id, { ivs: [10, 10, 10, 10, 10, 10],
+      caughtAttr: 149n, natureAttr: 2, caughtCount: 0, hatchedCount: 0 }])), starterEggMoveData: { 1: 0, 4: 0, 7: 0 } });
+}
+const draftStarters = ids => ids.map(id => ({ species: api.getPokemonSpecies(id), dexAttr: 149n, nature: 0,
+  pokerus: false }));
+const waitUntil = async predicate => {
+  for (let n = 0; n < 100 && !predicate(); n++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(predicate(), 'bounded async condition');
+};
+async function draftPhase() {
+  const state = phase(), { p } = state, modes = [];
+  await p.onMessage(welcome); await p.onMessage(await snapshot());
+  p.scene = { gameData: draftGameData(), ui: { setMode: async (...args) => { modes.push(args); } } };
+  p.inputReady = true;
+  await p.openStarterSelect();
+  return { ...state, modes, config: modes.at(-1)[2], confirm: modes.at(-1)[1] };
+}
+async function commitDraftForUi(p, action, revision) {
+  await p.onMessage({ type: 'actionReceipt', roomId: p.roomId, actionId: p.actionId,
+    decisionId: p.latest.decisionId, revision: p.latest.revision, accepted: true, code: 'ACCEPTED' });
+  const next = await snapshot(revision);
+  next.personal.profile = structuredClone(action.profile);
+  next.personal.priced = api.priceProfileDraft(action.profile);
+  next.shared.budget.used = next.personal.priced.total;
+  next.shared.budget.remaining = 14 - next.shared.budget.used;
+  next.personalHash = await digestProjection(next.personal); next.sharedHash = await digestProjection(next.shared);
+  await p.onMessage(next);
+  await p.onMessage({ type: 'syncStatus', roomId: p.roomId, runId: p.runId, revision,
+    blocked: false, submitted: [false, false], reason: 'READY' });
+}
+
+test('real IDB draft queue coalesces unsent edits, keeps durable bytes, preserves open Starter and readies only accepted selection', async () => {
+  const { p, config, confirm, sent, modes } = await draftPhase();
+  config.onChange(draftStarters([1]));
+  config.onChange(draftStarters([1, 4]));
+  config.onChange(draftStarters([4]));
+  await waitUntil(() => sent.some(message => message.type === 'submitAction'));
+  let actions = sent.filter(message => message.type === 'submitAction');
+  assert.equal(actions.length, 1);
+  assert.deepEqual(actions[0].action.profile.starters.map(starter => starter.speciesId), [1]);
+  assert.deepEqual(await p.storage.pendingActions(origin, p.roomId, p.seat), [actions[0]]);
+  await commitDraftForUi(p, actions[0].action, 1);
+  await waitUntil(() => sent.filter(message => message.type === 'submitAction').length === 2);
+  actions = sent.filter(message => message.type === 'submitAction');
+  assert.deepEqual(actions[1].action.profile.starters.map(starter => starter.speciesId), [4]);
+  assert.equal(p.lastProfile.starters[0].speciesId, 4);
+  assert.equal(p.starterOpen, true);
+  assert.equal(modes.length, 1, 'background update never closes or reopens original Starter');
+  confirm(draftStarters([4]));
+  await commitDraftForUi(p, actions[1].action, 2);
+  await waitUntil(() => sent.filter(message => message.type === 'submitAction').length === 3);
+  const ready = sent.filter(message => message.type === 'submitAction')[2];
+  assert.equal(ready.action.kind, 'profile-ready'); assert.equal(ready.action.ready, true);
+  assert.deepEqual(ready.action.profile, actions[1].action.profile);
+});
+
+test('budget rejection retains local draft and stops automatic retries; a new edit can submit without closing Starter', async () => {
+  const { p, config, sent, errors, modes } = await draftPhase();
+  config.onChange(draftStarters([1]));
+  await waitUntil(() => sent.some(message => message.type === 'submitAction'));
+  await p.onMessage({ type: 'actionReceipt', roomId: p.roomId, actionId: p.actionId,
+    decisionId: p.latest.decisionId, revision: p.latest.revision, accepted: false, code: 'SHARED_BUDGET_EXCEEDED' });
+  for (let n = 0; n < 3; n++) await p.onMessage({ type: 'syncStatus', roomId: p.roomId, runId: p.runId,
+    revision: 0, blocked: false, submitted: [false, false], reason: 'READY' });
+  assert.equal(sent.filter(message => message.type === 'submitAction').length, 1);
+  assert.equal(p.lastProfile.starters[0].speciesId, 1);
+  assert.ok(errors.some(error => error.includes('SHARED_BUDGET_EXCEEDED')));
+  assert.equal(modes.length, 1);
+  config.onChange([]);
+  await waitUntil(() => sent.filter(message => message.type === 'submitAction').length === 2);
+  assert.deepEqual(sent.filter(message => message.type === 'submitAction')[1].action.profile.starters, []);
+  config.onCancel();
+  await p.sendProfile(true); assert.ok(errors.some(error => error.includes('至少选择一只')));
+});
+
+test('stale draft retries once with a new ID only after resync; persisted retry bytes are unchanged', async () => {
+  const { p, config, sent } = await draftPhase();
+  config.onChange(draftStarters([1]));
+  await waitUntil(() => sent.some(message => message.type === 'submitAction'));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await p.onMessage({ type: 'actionReceipt', roomId: p.roomId, actionId: p.actionId,
+      decisionId: p.latest.decisionId, revision: p.latest.revision, accepted: false, code: 'STALE_DECISION' });
+    await p.onMessage(await snapshot());
+    await p.onMessage({ type: 'syncStatus', roomId: p.roomId, runId: p.runId, revision: 0,
+      blocked: false, submitted: [false, false], reason: 'READY' });
+    if (!attempt) await waitUntil(() => sent.filter(message => message.type === 'submitAction').length === 2);
+  }
+  const actions = sent.filter(message => message.type === 'submitAction');
+  assert.equal(actions.length, 2); assert.notEqual(actions[0].actionId, actions[1].actionId);
+  assert.deepEqual(actions[0].action, actions[1].action);
+  assert.ok(p.lobbyDraft.error.includes('STALE_DECISION'));
+});
+
+test('failed draft disk write is bounded; exit and old Starter callbacks cannot save or reactivate a session', async () => {
+  const { p, config, sent } = await draftPhase();
+  let saves = 0;
+  p.storage = { ...p.storage, saveAction: async () => { saves++; throw Error('TEST_DRAFT_STORAGE'); } };
+  config.onChange(draftStarters([1])); await waitUntil(() => !!p.lobbyDraft.error);
+  await p.flushLobbyDraft(); assert.equal(saves, 1); assert.equal(sent.length, 1); // Only the earlier state ACK.
+  p.stopSession(); config.onChange(draftStarters([4]));
+  assert.equal(saves, 1); assert.equal(p.lobbyDraft, null);
+});
+
+test('original Starter add/pop emits deduplicated drafts; solo callback remains optional and teardown emits no empty edit', () => {
+  const gd = draftGameData(), changes = [], species = api.getPokemonSpecies(1);
+  const sprite = () => ({ x: 0, y: 0, visible: false, setVisible() {}, setPosition() {}, setTexture() {}, setFrame() {} });
+  let options;
+  const ui = { setMode() {}, setModeWithoutClear: (_mode, config) => { options = config.options; }, playSelect() {}, playError() {} };
+  const handler = Object.assign(Object.create(api.StarterSelectUiHandler.prototype), {
+    scene: { ui, gameData: gd }, starterSelectOptions: { onChange: starters => changes.push(starters) },
+    starterGens: [], starterCursors: [], starterAttr: [], starterNatures: [], starterMovesets: [],
+    genSpecies: [[species]], cursor: 0, genMode: false, startCursorObj: sprite(), cursorObj: sprite(),
+    speciesStarterDexEntry: gd.dexData[1], dexAttrCursor: 149n, natureCursor: 0, starterMoveset: [33],
+    starterCursorObjs: [sprite()], starterIcons: [sprite()], speciesLoaded: new Map(), speciesStarterMoves: [33],
+    pokerusGens: [], pokerusCursors: [], getGenCursorWithScroll: () => 0, updateInstructions() {},
+    valueLimitLabel: { setText() {}, setColor() {}, setShadowColor() {} },
+  });
+  assert.equal(handler.processInput(api.Button.ACTION), true);
+  options[0].handler(); // Execute the original add-to-party implementation.
+  assert.equal(changes.length, 1); assert.equal(changes[0][0].species, species);
+  handler.notifyStarterChange(); assert.equal(changes.length, 1);
+  handler.processInput(api.Button.CANCEL); assert.equal(changes.length, 2); assert.deepEqual(changes[1], []);
+  handler.starterSelectOptions = {}; handler.notifyStarterChange(); assert.equal(changes.length, 2);
+});
+
+test('original Starter restores selected attributes and moves through its details port without publishing a transient empty draft', () => {
+  const gd = draftGameData(), changes = [], calls = [], positions = [];
+  const sprite = index => ({ setTexture() {}, setFrame() {}, setVisible() {}, setPosition: (...args) => positions[index] = args });
+  const handler = Object.assign(Object.create(api.StarterSelectUiHandler.prototype), {
+    scene: { gameData: gd }, starterSelectOptions: { onChange: starters => changes.push(starters) },
+    starterGens: [], starterCursors: [], starterAttr: [], starterNatures: [], starterMovesets: [],
+    genSpecies: [[api.getPokemonSpecies(1), api.getPokemonSpecies(4)]],
+    pokerusGens: [], pokerusCursors: [], starterIcons: [sprite(0), sprite(1)],
+    starterCursorObjs: [sprite(0), sprite(1)], tryUpdateValue() {}, setGenMode() {}, setCursor() {},
+    setSpeciesDetails(species, shiny, form, female, ability, nature) {
+      calls.push([species.speciesId, nature]); this.starterMoveset = [33]; this.notifyStarterChange();
+    },
+  });
+  const starters = draftStarters([1, 4]); starters[1].moveset = [10, 45];
+  handler.restoreSelectedStarters(starters);
+  assert.deepEqual(changes, []);
+  assert.deepEqual(calls, [[1, 0], [4, 0]]);
+  assert.deepEqual(positions, [[148, 10], [166, 10]]);
+  handler.notifyStarterChange();
+  assert.deepEqual(changes[0].map(starter => starter.moveset), [[33], [10, 45]]);
+  starters[1].moveset.pop(); assert.deepEqual(changes[0][1].moveset, [10, 45]);
+});
+
+test('public lobby renders both authoritative selections and fractional budget without replacing a dirty local draft or menu', async () => {
+  const { p, config, modes } = await draftPhase();
+  p.inputReady = false; config.onChange(draftStarters([1]));
+  p.roomLine = {}; p.budget = {}; p.lobbySelections = {};
+  const next = await snapshot(1);
+  next.shared.selections = [
+    { seat: 0, state: 'draft', ready: false, total: 0.5, starters: [{ speciesId: 10, cost: 0.5, formIndex: 0 }] },
+    { seat: 1, state: 'confirmed', ready: true, total: 3, starters: [{ speciesId: 4, cost: 3, formIndex: 0 }] },
+  ];
+  next.shared.ready = [false, true]; next.shared.budget.used = 3.5; next.shared.budget.remaining = 10.5;
+  next.personal.profile = { synthetic: 'old-accepted' }; next.personal.priced = { total: 0.5 };
+  await api.CoopPlayPhase.prototype.updateLobbyView.call(p, next);
+  assert.match(p.lobbySelections.textContent, /席位1 编辑中/);
+  assert.match(p.lobbySelections.textContent, /0.5点/); assert.match(p.lobbySelections.textContent, /席位2 已准备/);
+  assert.match(p.budget.textContent, /剩余 10.5/);
+  assert.equal(p.lastProfile.starters[0].speciesId, 1); assert.equal(modes.length, 1);
+});
+
+test('lobby prepare cannot bypass the original selector confirmation; cancel clears readiness intent and old reconnect callbacks expire', async () => {
+  const { p, config, confirm, sent, errors } = await draftPhase();
+  p.inputReady = false; config.onChange(draftStarters([1]));
+  await p.sendProfile(true);
+  assert.ok(errors.some(error => error.includes('原选队界面确认')));
+  assert.equal(p.draftFinal, false);
+  config.onCancel(); assert.equal(p.starterOpen, false); assert.equal(p.draftFinal, false);
+  const local = p.lastProfile;
+  p.lifecycle++; confirm(draftStarters([4])); config.onChange(draftStarters([4]));
+  assert.equal(p.lastProfile, local);
+  assert.equal(sent.filter(message => message.type === 'submitAction').length, 0);
+});
+
+test('cancel-to-reopen waits for the original fade and expires old same-room Starter callbacks', async () => {
+  const { p, config, confirm, sent } = await draftPhase();
+  const closing = deferred(), started = deferred(), opens = [];
+  p.scene.ui.setMode = async (mode, callback, options) => {
+    if (mode === api.Mode.MESSAGE) { started.resolve(); await closing.promise; }
+    if (mode === api.Mode.STARTER_SELECT) opens.push({ callback, options });
+  };
+  config.onCancel(); await started.promise;
+  const reopening = p.openStarterSelect();
+  await tick(); assert.equal(opens.length, 0);
+  config.onChange(draftStarters([1])); confirm(draftStarters([1]));
+  assert.equal(sent.filter(message => message.type === 'submitAction').length, 0);
+  closing.resolve(); await reopening;
+  assert.equal(opens.length, 1); assert.equal(p.starterOpen, true);
+});
+
+test('failed original Starter opening leaves to MESSAGE before a fresh retry can open', async () => {
+  const { p, config } = await draftPhase();
+  config.onCancel(); await p.starterTransition;
+  const modes = []; let fail = true;
+  p.scene.ui.setMode = async mode => {
+    modes.push(mode);
+    if (mode === api.Mode.STARTER_SELECT && fail) { fail = false; throw Error('TEST_STARTER_OPEN_FAILED'); }
+  };
+  await assert.rejects(p.openStarterSelect(), /TEST_STARTER_OPEN_FAILED/);
+  await p.starterTransition;
+  assert.deepEqual(modes, [api.Mode.STARTER_SELECT, api.Mode.MESSAGE]);
+  await p.openStarterSelect(); assert.equal(p.starterOpen, true);
+  assert.equal(modes.at(-1), api.Mode.STARTER_SELECT);
+});
 const deferred = () => {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
@@ -343,6 +555,8 @@ test('new default identity is saved once; existing, corrupt or failed profiles a
 
 test('original selected callback receives real choices and captures a v2 profile without starting local battle', async () => {
   const { p, errors } = phase();
+  await p.onMessage(welcome); await p.onMessage(await snapshot());
+  p.inputReady = true;
   const species = api.getPokemonSpecies(1), ivs = [10, 10, 10, 10, 10, 10];
   const gd = { trainerId: 1, secretId: 2, eggs: [], dexData: { 1: { ivs, caughtAttr: 149n,
     natureAttr: 2, caughtCount: 0, hatchedCount: 0 } }, starterEggMoveData: { 1: 0 } };
@@ -354,7 +568,7 @@ test('original selected callback receives real choices and captures a v2 profile
     setModeWithoutClear: (_mode, accept) => accept() };
   p.scene = { ui, gameData: gd, clearPhaseQueue: () => assert.fail('must not leave cooperation'),
     pushPhase: () => assert.fail('must not start solo phase') };
-  p.sendProfile = async (ready, profile) => { submitted = { ready, profile }; };
+  p.sendAction = async action => { submitted = action; p.actionId = 'draft-pending'; return true; };
   await p.openStarterSelect();
   const handler = Object.assign(Object.create(api.StarterSelectUiHandler.prototype), {
     scene: p.scene, starterSelectCallback: originalCallback, starterSelectOptions: options,
@@ -362,7 +576,8 @@ test('original selected callback receives real choices and captures a v2 profile
     starterNatures: [0], starterMovesets: [undefined], pokerusGens: [], pokerusCursors: [],
   });
   assert.equal(handler.tryStart(true), true); // Real original confirmation/callback implementation.
-  assert.equal(submitted.ready, true);
+  assert.equal(submitted.kind, 'profile-draft');
+  assert.equal(submitted.ready, false, 'final readiness waits for the authoritative draft snapshot');
   assert.equal(submitted.profile.version, 2);
   assert.deepEqual(submitted.profile.starters[0].ivs, ivs);
   assert.equal(submitted.profile.starters[0].speciesId, 1);
@@ -372,6 +587,7 @@ test('original selected callback receives real choices and captures a v2 profile
   await p.openStarterSelect();
   gd.starterEggMoveData = {};
   originalCallback([{ species, dexAttr: 149n, nature: 0, pokerus: false }]);
+  await p.starterTransition;
   assert.equal(p.starterOpen, false);
   assert.equal(lastMode, api.Mode.MESSAGE);
   assert.ok(errors.some(message => message.includes('MISSING_EGG_MOVE_RECORD')));
@@ -402,8 +618,9 @@ test('outbox survives a missing receipt and replays the exact message once per r
   const first = phase(); await first.p.onMessage(welcome);
   await first.p.onMessage(await snapshot());
   first.p.inputReady = true;
-  await first.p.sendProfile(true, { synthetic: 'retained-selection' });
-  await first.p.sendProfile(true, { synthetic: 'duplicate-click' });
+  const retained = api.captureProfileDraft(draftGameData(), draftStarters([1]));
+  await first.p.sendProfile(true, retained);
+  await first.p.sendProfile(true, retained);
   const [message] = first.sent.filter(message => message.type === 'submitAction');
   assert.ok(message);
   assert.equal(first.sent.filter(message => message.type === 'submitAction').length, 1);
@@ -416,18 +633,19 @@ test('outbox survives a missing receipt and replays the exact message once per r
   await second.p.onMessage({ type: 'actionReceipt', roomId: message.roomId, actionId: message.actionId,
     accepted: false, code: 'SHARED_BUDGET_EXCEEDED' });
   assert.deepEqual(await second.p.storage.pendingActions(origin, 'ABCDEF', 0), []);
-  assert.deepEqual(second.p.lastProfile, { synthetic: 'retained-selection' });
+  assert.deepEqual(second.p.lastProfile, retained);
 });
 
 test('local write failure prevents send and retains the selection for retry', async () => {
   const { p, sent, errors } = phase();
   await p.onMessage(welcome); await p.onMessage(await snapshot());
-  p.inputReady = true; p.lastProfile = { synthetic: 'selection' };
+  p.inputReady = true;
+  const retained = api.captureProfileDraft(draftGameData(), draftStarters([1])); p.lastProfile = retained;
   p.storage = { ...p.storage, saveAction: async () => { throw new Error('TEST_STORAGE_FULL'); } };
   await p.sendProfile(true);
   assert.equal(sent.filter(message => message.type === 'submitAction').length, 0);
   assert.equal(p.actionId, null);
-  assert.deepEqual(p.lastProfile, { synthetic: 'selection' });
+  assert.deepEqual(p.lastProfile, retained);
   assert.ok(errors.some(message => message.includes('TEST_STORAGE_FULL')));
 });
 
@@ -911,9 +1129,8 @@ test('active Party cancel, failed outbox and rejection restore Command without m
     if (outcome === 'disk-failure') p.storage = { ...p.storage, saveAction: async () => { throw Error('TEST_DISK_FAILURE'); } };
     await p.openActiveSwitchParty();
     assert.equal(p.scene.currentBattle.getBattlerCount(), 1);
-    modes.at(-1)[3](outcome === 'cancel' ? 6 : 1,
+    await modes.at(-1)[3](outcome === 'cancel' ? 6 : 1,
       outcome === 'cancel' ? api.PartyOption.CANCEL : api.PartyOption.SEND_OUT);
-    await tick(); await tick();
     if (outcome === 'rejected') {
       assert.equal(sent[0].action.pokemonId, target);
       await p.onMessage({ type: 'actionReceipt', roomId: p.roomId, actionId: p.actionId,

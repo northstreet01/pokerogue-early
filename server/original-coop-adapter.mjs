@@ -220,7 +220,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       for (const player of lobby.players) {
         check(player && ['priced,profile,ready', 'priced,profile,ready,selectionState'].includes(Object.keys(player).sort().join(','))
           && (!Object.hasOwn(player, 'selectionState') || player.selectionState === 'draft')
-          && (player.selectionState !== 'draft' || player.ready === false)
+          && (player.selectionState !== 'draft' || player.ready === false && player.profile !== null)
           && typeof player.ready === 'boolean', 'INVALID_CHECKPOINT');
         if (player.profile === null) {
           check(player.priced === null && player.ready === false, 'INVALID_CHECKPOINT');

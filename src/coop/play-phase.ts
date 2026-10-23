@@ -8,6 +8,7 @@ import { createOriginalClientModel } from './original-client-model.mjs';
 import { createSnapshotConsumer } from '../battle-core/coop-client.mjs';
 import { PROTOCOL_VERSION, CHECKPOINT_VERSION } from '../battle-core/coop-contract.mjs';
 import { createPlayStorage } from './play-storage.mjs';
+import { pauseAutoResume, autoResumePaused, allowAutoResume } from './exit-recovery.mjs';
 import { GameModes } from '../game-mode';
 import { Command } from '../ui/command-ui-handler';
 import { ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
@@ -59,6 +60,11 @@ export default class CoopPlayPhase extends Phase {
   private profileDirty = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  private lifecycle = 0;
+  private sessionId = crypto.randomUUID();
+  private exitTask: Promise<void> | null = null;
+  private joining = false;
+  private recoveryVersion = 0;
 
   constructor(scene: BattleScene) { super(scene); }
 
@@ -67,24 +73,57 @@ export default class CoopPlayPhase extends Phase {
     this.scene.enableTutorials = false; // Cooperative entry does not write solo tutorial flags.
     this.createOverlay();
     this.model = createOriginalClientModel({ restorePokemonState, capturePokemonState });
-    this.scene.events?.once('shutdown', () => {
-      this.disposed = true;
-      this.clearPreparationParty();
-      this.clearActiveSwitchParty();
-      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-      this.epoch = null; this.socket?.close(); this.presentation?.clear(); this.overlay.remove();
-    });
+    this.scene.events?.once('shutdown', () => this.stopSession());
     void this.loadProfileAndConnect().catch(error =>
       this.setStatus(`本人收藏不可用：${error?.message ?? error}`, true));
   }
 
   private async loadProfileAndConnect() {
+    const lifecycle = this.lifecycle;
     // Persist a genuinely new original default profile once, so its original
     // trainer identity survives refresh/reselection. Existing or corrupt saves
     // are never replaced; the original saveSystem uses its existing CAS store.
-    if (!await this.scene.gameData.loadSystem() && !await this.scene.gameData.saveSystem())
-      throw new Error('INITIAL_PROFILE_SAVE_FAILED');
-    this.connect();
+    const loaded = await this.scene.gameData.loadSystem();
+    if (!this.current(lifecycle)) return;
+    if (!loaded && !await this.scene.gameData.saveSystem()) throw new Error('INITIAL_PROFILE_SAVE_FAILED');
+    if (this.current(lifecycle)) this.connect();
+  }
+
+  private current(lifecycle = this.lifecycle) { return !this.disposed && lifecycle === this.lifecycle; }
+  private session(lifecycle = this.lifecycle, recovery = this.recoveryVersion) {
+    return { id: this.sessionId, isCurrent: () => this.current(lifecycle) && recovery === this.recoveryVersion };
+  }
+
+  private stopSession() {
+    if (this.disposed) return;
+    this.disposed = true; this.lifecycle++;
+    this.epoch = null; this.consumer = null;
+    this.inputReady = false; this.battleInputActive = false; this.starterOpen = false;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    const socket = this.socket; this.socket = null;
+    // Cleanup cannot stop local exit if an already destroyed display throws.
+    for (const clean of [() => socket?.close(), () => this.clearTeamParty(),
+      () => this.presentation?.clear(), () => this.overlay?.remove()]) {
+      try { clean(); } catch { /* Navigation tears down the remaining original UI. */ }
+    }
+  }
+
+  private leaveSession(): Promise<void> {
+    if (this.exitTask) return this.exitTask;
+    pauseAutoResume();
+    this.stopSession();
+    // Neither network nor a stalled IDB open may hold the player in this page.
+    this.exitTask = (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const committed = await Promise.race([
+        this.storage.pauseSession(this.origin, this.session()).catch(() => false),
+        new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 500); }),
+      ]);
+      if (timer) clearTimeout(timer);
+      location.assign(committed ? '/?coopExit=saved' : '/?coopExit=limited');
+    })();
+    return this.exitTask;
   }
 
   private createOverlay() {
@@ -104,16 +143,18 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private setStatus(text: string, error = false) {
+    if (this.disposed) return;
     this.status.textContent = text;
     this.status.className = error ? 'error' : 'status';
   }
   private button(label: string, handler: () => void, primary = false) {
     const button = document.createElement('button');
     button.textContent = label; if (primary) button.className = 'primary';
-    button.addEventListener('click', () => { void Promise.resolve().then(handler)
+    button.addEventListener('click', () => { void Promise.resolve().then(() => { if (!this.disposed) return handler(); })
       .catch(error => this.setStatus(`操作失败：${error?.message ?? error}`, true)); }); return button;
   }
   private renderLobbyControls() {
+    if (this.disposed) return;
     this.controls.replaceChildren();
     if (this.roomId && this.latest?.personal.decision.kind !== 'lobby' && this.latest) return;
     if (this.roomId) {
@@ -138,22 +179,28 @@ export default class CoopPlayPhase extends Phase {
 
   private connect() {
     if (this.disposed) return;
+    const lifecycle = ++this.lifecycle;
+    this.messageChain = Promise.resolve();
+    const current = () => this.current(lifecycle) && socket === this.socket;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new WebSocket(`${protocol}//${location.host}/coop/v1/ws`);
     this.socket = socket;
     socket.addEventListener('open', async () => {
+      if (!current()) return;
       this.setStatus('已连接，恢复席位…');
       this.send({ type: 'hello', protocolVersion: PROTOCOL_VERSION, checkpointVersion: CHECKPOINT_VERSION,
         rulesVersion: RULES_VERSION, contentHash: CONTENT_HASH });
     });
     socket.addEventListener('message', event => {
       this.messageChain = this.messageChain.then(async () => {
-        if (socket !== this.socket || socket.readyState !== WebSocket.OPEN) return;
+        if (!current() || socket.readyState !== WebSocket.OPEN) return;
         await this.onMessage(JSON.parse(event.data));
-      }).catch(error => this.setStatus(`同步失败：${error?.message ?? error}`, true));
+      }).catch(error => { if (current()) this.setStatus(`同步失败：${error?.message ?? error}`, true); });
     });
     socket.addEventListener('close', () => {
-      if (socket !== this.socket || this.disposed) return;
+      if (!current()) return;
+      this.lifecycle++;
+      this.joining = false;
       this.setStatus('连接已断开，正在重新连接…', true);
       this.consumer = null; this.epoch = null;
       this.presentation?.cancel();
@@ -163,23 +210,28 @@ export default class CoopPlayPhase extends Phase {
       void this.scene.ui.setMode(Mode.MESSAGE);
       this.reconnectTimer = setTimeout(() => this.connect(), 1000);
     });
-    socket.addEventListener('error', () => this.setStatus('WebSocket 连接失败', true));
+    socket.addEventListener('error', () => { if (current()) this.setStatus('WebSocket 连接失败', true); });
   }
 
   private send(message: any) {
+    if (this.disposed) return;
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) throw new Error('WEBSOCKET_NOT_OPEN');
     this.socket.send(JSON.stringify(message));
   }
 
   private async onMessage(message: any) {
+    const lifecycle = this.lifecycle, current = () => this.current(lifecycle);
+    if (!current()) return;
     try {
       if (message.type === 'welcome') {
+        this.joining = false;
         this.versions = message;
         if (message.roomId && message.resumeToken) {
           this.roomId = message.roomId; this.seat = message.seat; this.token = message.resumeToken;
           this.epoch = message.connectionEpoch;
           this.consumer = null; this.replayedEpoch = null; this.resuming = false;
           await this.persistSeat();
+          if (!current()) return;
           this.renderLobbyControls();
           this.setStatus('已加入房间，等待快照…');
         }
@@ -187,6 +239,7 @@ export default class CoopPlayPhase extends Phase {
         return;
       }
       if (message.type === 'error') {
+        this.joining = false;
         if (this.resuming) {
           this.roomId = null; this.seat = null; this.token = null; this.resuming = false;
           this.renderLobbyControls();
@@ -206,6 +259,7 @@ export default class CoopPlayPhase extends Phase {
             this.preparationSignature = ''; this.switchSignature = '';
             if (this.latest.personal.decision.kind !== 'lobby') await this.scene.ui.setMode(Mode.MESSAGE);
           } else await this.openDecisionInput();
+          if (!current()) return;
           if (['RUNNER_FAILED', 'STORAGE_FAILED'].includes(message.reason)) {
             this.setStatus(`结算已暂停：${message.reason}，已提交行动仍保留`, true);
             this.controls.replaceChildren(this.button('重新同步', () => this.send({ type: 'requestSnapshot',
@@ -219,6 +273,7 @@ export default class CoopPlayPhase extends Phase {
       if (message.type === 'actionReceipt' && message.roomId === this.roomId) {
         if (this.seat !== null)
           await this.storage.deleteAction(this.origin, this.roomId, this.seat, message.actionId);
+        if (!current()) return;
         if (message.actionId !== this.actionId) return;
         const action = this.pendingAction?.action;
         this.actionId = null; this.pendingAction = null;
@@ -239,6 +294,7 @@ export default class CoopPlayPhase extends Phase {
         if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'capture-choice', 'switch', 'ball', 'learn-move'].includes(action?.kind)) this.submitted = true;
         if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball', 'learn-move'].includes(action?.kind))
           await this.scene.ui.setMode(Mode.MESSAGE);
+        if (!current()) return;
         if (action?.kind === 'profile-ready') this.profileDirty = false;
         if (this.latest?.personal.decision.kind === 'wait-actions') this.setStatus('行动已提交，等待队友／结算…');
         else if (this.latest?.personal.decision.kind === 'preparation') this.setStatus('整备操作已提交，等待回执…');
@@ -255,18 +311,20 @@ export default class CoopPlayPhase extends Phase {
               rulesVersion: RULES_VERSION, contentHash: CONTENT_HASH },
             adapter: {
               applySnapshot: async (snapshot: any) => {
+                if (!current()) return;
                 this.model.applySnapshot(snapshot);
                 if (snapshot.personal.decision.kind !== 'lobby') await this.enterBattle(snapshot);
               },
               captureAppliedState: () => this.model.captureAppliedState(),
               applyGrantsTransaction: grants => this.model.applyGrantsTransaction(grants),
             },
-            isCurrent: epoch => epoch === this.epoch,
+            isCurrent: epoch => current() && epoch === this.epoch,
             send: message => this.send(message),
           });
         }
         const previous = this.latest;
         if (!await this.consumer(message)) return;
+        if (!current()) return;
         const duplicate = previous?.connectionEpoch === message.connectionEpoch
           && previous.revision === message.revision && previous.decisionId === message.decisionId
           && previous.sharedHash === message.sharedHash && previous.personalHash === message.personalHash;
@@ -274,15 +332,18 @@ export default class CoopPlayPhase extends Phase {
         this.latest = duplicate ? previous : message;
         this.inputReady = false;
         await this.persistSeat();
+        if (!current()) return;
         if (!duplicate) await this.updateLobbyView(message);
+        if (!current()) return;
         await this.replayOutbox();
       }
     } catch (error: any) {
-      this.setStatus(`同步失败：${error?.message ?? error}`, true);
+      if (current()) this.setStatus(`同步失败：${error?.message ?? error}`, true);
     }
   }
 
   private async updateLobbyView(snapshot: any) {
+    if (this.disposed) return;
     if (snapshot.personal.decision.kind === 'lobby') {
       const shared = snapshot.shared;
       this.roomLine.textContent = `房间 ${snapshot.roomId} · 席位 ${snapshot.seat + 1}`;
@@ -337,6 +398,7 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private async openDecisionInput() {
+    if (this.disposed) return;
     if (this.releaseTeamParty) return;
     if (this.latest?.personal.decision.kind === 'capture-choice' || this.latest?.personal.decision.legacyCapture) await this.openCaptureChoice();
     else if (this.latest?.personal.decision.kind === 'preparation') await this.openPreparationMenu();
@@ -346,7 +408,7 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private isPersonalInputCurrent(snapshot: any, epoch: string | null) {
-    return this.latest === snapshot && this.epoch === epoch && this.inputReady && !this.actionId && !this.submitted;
+    return !this.disposed && this.latest === snapshot && this.epoch === epoch && this.inputReady && !this.actionId && !this.submitted;
   }
 
   private async openPreparationMenu() {
@@ -808,6 +870,7 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private openBattleCommand() {
+    if (this.disposed) return;
     if (!this.inputReady || this.actionId || this.submitted || this.battleInputActive || this.seat === null) return;
     if (this.latest?.personal.decision.kind !== 'wait-actions'
       || !this.latest.personal.decision.requiredSeats.includes(this.seat)) return;
@@ -828,7 +891,7 @@ export default class CoopPlayPhase extends Phase {
     // Server options avoid the RNG consumed by original RANDOM_NEAR_ENEMY.
     const decision = this.latest;
     const epoch = this.epoch;
-    const current = () => this.latest === decision && this.epoch === epoch
+    const current = () => !this.disposed && this.latest === decision && this.epoch === epoch
       && this.battleInputActive && this.inputReady && !this.actionId && !this.submitted;
     const finish = async (target: number | null) => {
       if (!current()) return;
@@ -850,7 +913,13 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private async tryResume() {
-    const value = await this.storage.loadSeat(this.origin);
+    const lifecycle = this.lifecycle, recovery = this.recoveryVersion;
+    if (!this.current(lifecycle)) return;
+    // An ordinary reconnect resumes this page's known seat; explicit leave has
+    // already disposed the page and is never routed through this path.
+    const value = this.roomId && this.token ? { roomId: this.roomId, seat: this.seat, token: this.token }
+      : autoResumePaused() ? null : await this.storage.beginSession(this.origin, this.session(lifecycle, recovery), true);
+    if (!this.current(lifecycle) || recovery !== this.recoveryVersion) return;
     if (value?.roomId && value?.token) {
       this.roomId = value.roomId; this.seat = value.seat; this.token = value.token;
       this.resuming = true;
@@ -860,24 +929,40 @@ export default class CoopPlayPhase extends Phase {
     this.setStatus('输入房间码加入，或创建新房间');
   }
 
-  private createRoom() {
+  private async createRoom() {
+    if (!await this.activateSession()) return;
     this.send({ type: 'createRoom', name: `玩家${Math.floor(Math.random() * 1000)}` });
   }
-  private joinRoom(roomId: string) {
+  private async joinRoom(roomId: string) {
     if (roomId.length !== 6) { this.setStatus('请输入 6 位房间码', true); return; }
+    if (!await this.activateSession()) return;
     this.send({ type: 'joinRoom', roomId, name: `玩家${Math.floor(Math.random() * 1000)}` });
   }
 
+  private async activateSession() {
+    const lifecycle = this.lifecycle;
+    if (!this.current(lifecycle) || this.roomId || this.joining) return false;
+    this.recoveryVersion++;
+    this.joining = true;
+    try { await this.storage.beginSession(this.origin, this.session(lifecycle)); }
+    catch (error) { if (this.current(lifecycle)) this.joining = false; throw error; }
+    if (!this.current(lifecycle)) return false;
+    allowAutoResume();
+    return true;
+  }
+
   private async persistSeat() {
-    if (!this.roomId || this.seat === null || !this.token) return;
+    if (this.disposed || !this.roomId || this.seat === null || !this.token) return;
     await this.storage.saveSeat(this.origin,
-      { roomId: this.roomId, seat: this.seat, token: this.token, runId: this.runId });
+      { roomId: this.roomId, seat: this.seat, token: this.token, runId: this.runId }, this.session());
   }
 
   private async openStarterSelect() {
-    if (this.starterOpen) return;
+    if (this.disposed || this.starterOpen) return;
+    const lifecycle = this.lifecycle;
     this.starterOpen = true;
     await this.scene.ui.setMode(Mode.STARTER_SELECT, (starters: any[]) => {
+      if (!this.current(lifecycle)) return;
       this.starterOpen = false;
       try {
         const profile = captureProfile(this.scene.gameData, starters);
@@ -890,6 +975,7 @@ export default class CoopPlayPhase extends Phase {
         this.setStatus(`选队失败：${error?.message ?? error}`, true);
       }
     }, { gameMode: GameModes.CLASSIC, onCancel: () => {
+      if (!this.current(lifecycle)) return;
       this.starterOpen = false;
       void this.scene.ui.setMode(Mode.MESSAGE);
       this.setStatus('已返回大厅，可重新选队');
@@ -897,6 +983,8 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private async sendAction(action: any, submittedText: string) {
+    const lifecycle = this.lifecycle;
+    if (!this.current(lifecycle)) return false;
     if (!this.latest || this.seat === null || !this.roomId) return false;
     if (this.actionId) { this.setStatus('操作已提交，等待回执…'); return false; }
     if (!this.inputReady) { this.setStatus('正在核对双方状态，请稍后提交'); return false; }
@@ -911,9 +999,11 @@ export default class CoopPlayPhase extends Phase {
     try {
       await this.storage.saveAction(this.origin, this.seat, message);
       persisted = true;
+      if (!this.current(lifecycle)) return false;
       this.send(message);
       this.setStatus(submittedText);
     } catch (error: any) {
+      if (!this.current(lifecycle)) return false;
       if (!persisted) { this.actionId = null; this.pendingAction = null; }
       this.setStatus(`提交失败，选择已保留：${error?.message ?? error}`, true);
     }
@@ -936,9 +1026,12 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private async replayOutbox() {
+    const lifecycle = this.lifecycle;
+    if (!this.current(lifecycle)) return;
     if (this.replayedEpoch === this.epoch || this.seat === null || !this.roomId || !this.latest) return;
     this.replayedEpoch = this.epoch;
     const pending = await this.storage.pendingActions(this.origin, this.roomId, this.seat);
+    if (!this.current(lifecycle)) return;
     for (const message of pending) {
       if (message.runId !== this.runId) continue;
       this.actionId = message.actionId; this.pendingAction = message;

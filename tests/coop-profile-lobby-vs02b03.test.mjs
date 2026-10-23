@@ -27,6 +27,40 @@ class MemoryStore {
   async load() { return []; }
   async save(room) { this.room = JSON.parse(JSON.stringify(room)); }
 }
+
+test('closing one actual WS preserves the partner and disk room while a new room stays isolated after restart', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'vs02b14-exit-'));
+  let env = await startEnv(new FormalRoomStore(directory));
+  try {
+    const room = await createRoom(env);
+    const state = await syncBoth(env, room.a, room.b, room.sa, room.sb);
+    const result = await submit(room.a, state.sa, { kind: 'profile-ready', profile: profile0(), ready: true });
+    assert.equal(result.receipt.accepted, true);
+    await after(room.b, state.sb);
+    const before = (await env.store.load()).find(r => r.roomId === room.roomId);
+    const disconnected = room.b.next(m => m.type === 'syncStatus' && m.reason === 'DISCONNECTED');
+    room.a.close();
+    assert.equal((await disconnected).blocked, true);
+    const fresh = await hello(env, 'new-session');
+    fresh.send({ type: 'createRoom', name: 'new-session' });
+    const welcome = await fresh.wait(m => m.type === 'welcome' && m.roomId);
+    assert.notEqual(welcome.roomId, room.roomId);
+    const rooms = await env.store.load();
+    const preserved = rooms.find(r => r.roomId === room.roomId);
+    assert.equal(canonical(preserved.checkpoint), canonical(before.checkpoint));
+    assert.equal(canonical(preserved.receipts), canonical(before.receipts));
+    assert.equal(preserved.revision, before.revision);
+    assert.equal(rooms.length, 2);
+    await env.close(); env = await startEnv(new FormalRoomStore(directory));
+    const partner = await resume(env, room.b, room.b.resumeToken);
+    assert.equal(partner.latestSnapshot().roomId, room.roomId);
+    assert.equal(partner.latestSnapshot().revision, before.revision);
+    assert.deepEqual(partner.latestSnapshot().shared.ready, [true, false]);
+    const recovered = await env.store.load();
+    assert.equal(recovered.length, 2);
+    assert.ok(recovered.some(r => r.roomId === welcome.roomId));
+  } finally { await env.close(); await rm(directory, { recursive: true, force: true }); }
+});
 class Client {
   constructor(ws) {
     this.ws = ws; this.messages = []; this.snapshots = []; this.waiters = [];

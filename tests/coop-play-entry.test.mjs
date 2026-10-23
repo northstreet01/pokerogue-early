@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { build } from 'vite';
 import { IDBFactory } from 'fake-indexeddb';
 import { createPlayStorage } from '../src/coop/play-storage.mjs';
+import { pauseAutoResume, autoResumePaused, allowAutoResume } from '../src/coop/exit-recovery.mjs';
 import { digestProjection } from '../src/battle-core/coop-client.mjs';
 import { PROTOCOL_VERSION, CHECKPOINT_VERSION } from '../src/battle-core/coop-contract.mjs';
 
@@ -26,6 +27,7 @@ before(async () => {
 
 function phase() {
   globalThis.location = { origin };
+  delete globalThis.localStorage; delete globalThis.sessionStorage;
   globalThis.indexedDB = new IDBFactory();
   const p = new api.CoopPlayPhase({});
   const sent = [], errors = [];
@@ -38,6 +40,210 @@ function phase() {
     capturePokemonState: () => { throw new Error('NO_PARTY_EXPECTED'); } });
   return { p, sent, errors };
 }
+const deferred = () => {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+};
+function exitEnvironment(p) {
+  const navigations = [], modes = [];
+  globalThis.location = { origin, search: '', assign: url => navigations.push(url) };
+  const memory = () => {
+    const values = new Map();
+    return { setItem: (key, value) => values.set(key, value), getItem: key => values.get(key), removeItem: key => values.delete(key) };
+  };
+  globalThis.localStorage = memory(); globalThis.sessionStorage = memory();
+  p.scene.ui = { setMode: async mode => modes.push(mode) };
+  let cleared = 0, closed = 0;
+  p.presentation = { clear: () => { cleared++; } };
+  p.socket = { close: () => { closed++; } };
+  return { navigations, modes, cleared: () => cleared, closed: () => closed };
+}
+
+test('IDB explicit pause blocks the unique legacy-seat fallback and keeps credentials and original outbox', async () => {
+  const store = createPlayStorage(new IDBFactory());
+  const value = { roomId: 'ABCDEF', seat: 0, token: 'synthetic-retained' };
+  await store.saveSeat(origin, value);
+  const old = { id: 'old-session', isCurrent: () => true };
+  assert.deepEqual(await store.beginSession(origin, old, true), value);
+  const action = { roomId: value.roomId, actionId: 'synthetic-pending', expectedRevision: 3 };
+  await store.saveAction(origin, 0, action);
+  assert.equal(await store.pauseSession(origin, old), true);
+  assert.equal(await store.saveSeat(origin, value, old), false);
+  assert.equal(await store.loadSeat(origin), null);
+  assert.equal(await store.beginSession(origin, { id: 'reload', isCurrent: () => true }, true), null);
+  assert.deepEqual(await store.pendingActions(origin, value.roomId, 0), [action]);
+  const next = { id: 'new-session', isCurrent: () => true };
+  await store.beginSession(origin, next);
+  const newValue = { ...value, roomId: 'FEDCBA', token: 'synthetic-new' };
+  assert.equal(await store.saveSeat(origin, newValue, next), true);
+  assert.equal(await store.saveSeat(origin, value, old), false);
+  assert.equal(await store.pauseSession(origin, old), false);
+  assert.deepEqual(await store.loadSeat(origin), newValue);
+  assert.deepEqual(await store.pendingActions(origin, newValue.roomId, 0), []);
+  assert.deepEqual(await store.pendingActions(origin, value.roomId, 0), [action]);
+});
+
+test('real IDB delayed open cannot reactivate a left seat after a newer session commits', async () => {
+  const factory = new IDBFactory(), store = createPlayStorage(factory);
+  const old = { id: 'old', isCurrent: () => true }, next = { id: 'next', isCurrent: () => true };
+  await store.beginSession(origin, old);
+  const opened = deferred(); let resume;
+  const delayed = createPlayStorage({ open: (...args) => {
+    const request = factory.open(...args);
+    return new Proxy(request, { set(target, key, value) {
+      target[key] = key === 'onsuccess' ? event => { resume = () => value(event); opened.resolve(); } : value;
+      return true;
+    } });
+  } });
+  const late = delayed.saveSeat(origin, { roomId: 'ABCDEF', seat: 0, token: 'synthetic-old' }, old);
+  await opened.promise;
+  await store.pauseSession(origin, old);
+  await store.beginSession(origin, next);
+  const value = { roomId: 'FEDCBA', seat: 1, token: 'synthetic-next' };
+  await store.saveSeat(origin, value, next);
+  resume();
+  assert.equal(await late, false);
+  assert.deepEqual(await store.loadSeat(origin), value);
+});
+
+for (const state of ['battle', 'waiting', 'animation', 'disconnected', 'sync-error', 'starter']) {
+  test(`local exit from ${state} closes only this session, cancels display and ignores late messages`, async () => {
+    const { p, sent } = phase(), env = exitEnvironment(p);
+    await p.storage.beginSession(origin, p.session());
+    p.roomId = 'ABCDEF'; p.seat = 0; p.token = 'synthetic-retained'; p.epoch = 'epoch-1';
+    await p.persistSeat();
+    p.inputReady = state === 'battle'; p.starterOpen = state === 'starter';
+    p.messageChain = state === 'sync-error' ? new Promise(() => {}) : Promise.resolve();
+    const before = await snapshot();
+    await p.leaveSession();
+    assert.equal(p.disposed, true);
+    assert.equal(p.inputReady, false);
+    assert.equal(env.closed(), 1); assert.equal(env.cleared(), 1);
+    assert.deepEqual(env.navigations, ['/?coopExit=saved']);
+    assert.equal(await p.storage.loadSeat(origin), null);
+    assert.equal(autoResumePaused(), true);
+    await p.onMessage(welcome); await p.onMessage(before);
+    await p.onMessage({ type: 'actionReceipt', roomId: 'ABCDEF', actionId: 'old' });
+    await p.tryResume(); await p.leaveSession();
+    assert.deepEqual(sent, []);
+    assert.deepEqual(env.modes, []);
+    assert.equal(env.navigations.length, 1);
+  });
+}
+
+test('exit bounds stalled IDB and reports failed persistence, even with unavailable browser storage', async () => {
+  for (const blocked of [false, true]) {
+    const { p } = phase(), env = exitEnvironment(p);
+    globalThis.localStorage = globalThis.sessionStorage = { setItem() { throw Error('TEST_DENIED'); }, getItem() { throw Error('TEST_DENIED'); } };
+    p.storage = { pauseSession: () => blocked ? new Promise(() => {}) : Promise.reject(Error('TEST_IDB_FAILURE')) };
+    const start = performance.now();
+    await p.leaveSession();
+    assert.ok(performance.now() - start < 1500);
+    assert.deepEqual(env.navigations, ['/?coopExit=limited']);
+    location.search = '?fresh=1';
+    assert.equal(autoResumePaused(), true);
+    let loads = 0;
+    const next = phase(); location.search = '?fresh=1';
+    next.p.storage = { beginSession: async () => { loads++; throw Error('MUST_NOT_RESUME'); } };
+    await next.p.tryResume();
+    assert.equal(loads, 0); assert.deepEqual(next.sent, []);
+  }
+});
+
+test('exit during durable action write retains original action but never sends it or reopens menus', async () => {
+  const { p, sent } = phase(), env = exitEnvironment(p), written = deferred();
+  p.roomId = 'ABCDEF'; p.seat = 0; p.epoch = 'epoch-1'; p.latest = await snapshot(); p.inputReady = true;
+  await p.storage.beginSession(origin, p.session());
+  const store = p.storage;
+  p.storage = { ...store, saveAction: async (...args) => { await written.promise; await store.saveAction(...args); } };
+  const task = p.sendAction({ kind: 'synthetic-action' }, 'submitted');
+  await p.leaveSession(); written.resolve();
+  assert.equal(await task, false);
+  assert.deepEqual(sent, []); assert.deepEqual(env.modes, []);
+  const actions = await store.pendingActions(origin, 'ABCDEF', 0);
+  assert.equal(actions.length, 1); assert.equal(actions[0].actionId, p.actionId);
+  assert.equal(await store.loadSeat(origin), null);
+});
+
+test('exit during snapshot apply, receipt IO or outbox load cannot continue the old message', async () => {
+  for (const kind of ['snapshot', 'receipt', 'outbox', 'resume']) {
+    const { p, sent } = phase(), env = exitEnvironment(p), blocked = deferred(), started = deferred();
+    p.roomId = 'ABCDEF'; p.seat = 0; p.epoch = 'epoch-1'; p.runId = 'original-run';
+    p.actionId = 'old-action';
+    let task;
+    const wait = async value => { started.resolve(); await blocked.promise; return value; };
+    if (kind === 'snapshot') {
+      p.consumer = () => wait(true);
+      task = p.onMessage(await snapshot());
+    } else if (kind === 'receipt') {
+      p.storage = { ...p.storage, deleteAction: () => wait(null) };
+      task = p.onMessage({ type: 'actionReceipt', roomId: 'ABCDEF', actionId: 'old-action' });
+    } else if (kind === 'resume') {
+      p.roomId = null; p.token = null;
+      p.storage = { ...p.storage, beginSession: () => wait({ roomId: 'ABCDEF', token: 'synthetic' }) };
+      task = p.tryResume();
+    } else {
+      p.latest = await snapshot();
+      p.storage = { ...p.storage, pendingActions: () => wait([{ roomId: 'ABCDEF', runId: p.runId, actionId: 'old-outbox' }]) };
+      task = p.replayOutbox();
+    }
+    await started.promise; await p.leaveSession(); blocked.resolve(); await task;
+    assert.deepEqual(sent, []); assert.deepEqual(env.modes, []);
+    assert.equal(p.latest?.revision, kind === 'outbox' ? 0 : undefined);
+    assert.equal(p.actionId, 'old-action'); assert.equal(p.runId, 'original-run');
+  }
+});
+
+test('explicit create wins over a pending auto-resume and stale starter callbacks stay inert after exit', async () => {
+  const { p, sent } = phase(), env = exitEnvironment(p), blocked = deferred(), started = deferred();
+  const store = p.storage;
+  p.storage = { ...store, beginSession: async (...args) => {
+    if (args[2]) { started.resolve(); await blocked.promise; return { roomId: 'ABCDEF', token: 'synthetic-old' }; }
+    return store.beginSession(...args);
+  } };
+  const resume = p.tryResume(); await started.promise;
+  await p.createRoom(); blocked.resolve(); await resume;
+  assert.deepEqual(sent.map(m => m.type), ['createRoom']);
+  assert.equal(p.roomId, null);
+  let callback, cancel;
+  p.scene.ui.setMode = async (_mode, accept, config) => { callback = accept; cancel = config.onCancel; };
+  await p.openStarterSelect();
+  await p.leaveSession(); callback([]); cancel();
+  assert.deepEqual(sent.map(m => m.type), ['createRoom']);
+  assert.equal(env.navigations.length, 1);
+});
+
+test('old socket callbacks cannot reconnect after exit or feed a newer connection message chain', async t => {
+  const previous = globalThis.WebSocket;
+  const sockets = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    callbacks = {};
+    constructor() { sockets.push(this); }
+    addEventListener(name, callback) { this.callbacks[name] = callback; }
+    close() { this.readyState = 3; this.callbacks.close?.(); }
+  }
+  globalThis.WebSocket = Socket;
+  t.after(() => { globalThis.WebSocket = previous; });
+  const { p, sent } = phase(); exitEnvironment(p);
+  location.protocol = 'http:'; location.host = 'localhost:8031';
+  p.connect(); const old = sockets[0];
+  p.messageChain = new Promise(() => {});
+  p.connect(); const next = sockets[1];
+  await next.callbacks.open();
+  next.callbacks.message({ data: JSON.stringify({ type: 'welcome' }) });
+  await p.messageChain;
+  await p.leaveSession();
+  old.callbacks.open(); old.callbacks.error(); old.close();
+  old.callbacks.message({ data: JSON.stringify(welcome) });
+  next.callbacks.message({ data: JSON.stringify(welcome) });
+  await p.messageChain;
+  assert.equal(p.reconnectTimer, null);
+  assert.equal(sockets.length, 2);
+  assert.deepEqual(sent.map(m => m.type), ['hello']);
+});
 const welcome = { type: 'welcome', ...versions, roomId: 'ABCDEF', seat: 0,
   connectionEpoch: 'epoch-1', resumeToken: 'synthetic-test-token' };
 async function snapshot(revision = 0, epoch = 'epoch-1') {

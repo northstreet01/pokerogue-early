@@ -15,12 +15,15 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
   private rerollButtonContainer: Phaser.GameObjects.Container;
   private transferButtonContainer: Phaser.GameObjects.Container;
   private rerollCostText: Phaser.GameObjects.Text;
+  private completeButtonContainer: Phaser.GameObjects.Container;
+  private completeButtonText: Phaser.GameObjects.Text;
 
   private rowCursor: integer = 0;
   private player: boolean;
   private rerollCost: integer;
   private displayGeneration = 0;
-  private inputPresentation: { shopOptions?: ModifierTypeOption[]; allowReroll?: boolean; allowTransfer?: boolean } = {};
+  private inputPresentation: { shopOptions?: ModifierTypeOption[]; allowReroll?: boolean; allowTransfer?: boolean;
+    preparation?: { ready: boolean; rewardResolved: boolean; onComplete: () => void } } = {};
 
   public options: ModifierOption[];
   public shopOptionsRows: ModifierOption[][];
@@ -68,6 +71,14 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     this.rerollCostText.setOrigin(0, 0);
     this.rerollCostText.setPositionRelative(rerollButtonText, rerollButtonText.displayWidth + 5, 1);
     this.rerollButtonContainer.add(this.rerollCostText);
+    this.completeButtonContainer = this.scene.add.container((this.scene.game.canvas.width / 6) - 6, -38);
+    this.completeButtonContainer.setVisible(false); ui.add(this.completeButtonContainer);
+    this.completeButtonText = addTextObject(this.scene, 0, 0, '', TextStyle.PARTY);
+    this.completeButtonText.setOrigin(1, 0); this.completeButtonContainer.add(this.completeButtonText);
+    this.bindPointer(this.completeButtonText, () => {
+      if (!this.awaitingActionInput || !this.inputPresentation.preparation) return false;
+      this.setRowCursor(0); this.setCursor(2);
+    });
   }
 
   show(args: any[]): boolean {
@@ -85,6 +96,9 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     super.show(args);
     const generation = ++this.displayGeneration;
     this.inputPresentation = args[4] ?? {};
+    this.completeButtonContainer?.setVisible(!!this.inputPresentation.preparation);
+    this.completeButtonText?.setText(this.inputPresentation.preparation?.ready ? '已完成，等待伙伴（取消准备）'
+      : this.inputPresentation.preparation?.rewardResolved ? '本轮整备完成 [Enter]' : '领取／跳过奖励后完成整备');
 
     this.getUi().clearText();
 
@@ -115,6 +129,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       this.scene.add.existing(option);
       this.modifierContainer.add(option);
       this.options.push(option);
+      if (this.inputPresentation.preparation?.rewardResolved) option.setAlpha(0.35);
       option.setSize(96, 128);
       this.bindPointer(option, () => {
         if (!this.awaitingActionInput || generation !== this.displayGeneration) return false;
@@ -199,6 +214,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
         this.setCursor(0);
         this.awaitingActionInput = true;
         this.onActionInput = args[2];
+        if (this.inputPresentation.preparation?.rewardResolved) { this.setRowCursor(0); this.setCursor(2); }
       });
     });
 
@@ -212,6 +228,12 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       return false;
 
     let success = false;
+
+    if (this.inputPresentation.preparation && (button === Button.SUBMIT
+      || button === Button.ACTION && this.rowCursor === 0 && this.cursor === 2)) {
+      this.inputPresentation.preparation.onComplete();
+      ui.playSelect(); return true;
+    }
 
     if (button === Button.ACTION) {
       success = true;
@@ -248,7 +270,11 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
             success = this.setRowCursor(this.rowCursor - 1);
           break;
         case Button.LEFT:
-          if (!this.rowCursor)
+          if (!this.rowCursor && this.inputPresentation.preparation) {
+            const previous = [0, 1, 2].filter(index => index < this.cursor
+              && (index === 0 ? this.rerollButtonContainer.visible : index === 1 ? this.transferButtonContainer.visible : true)).at(-1);
+            if (previous !== undefined) success = this.setCursor(previous);
+          } else if (!this.rowCursor)
             success = this.rerollButtonContainer.visible && this.setCursor(0);
           else if (this.cursor)
             success = this.setCursor(this.cursor - 1);
@@ -256,7 +282,11 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
             success = this.setRowCursor(0);
           break;
         case Button.RIGHT:
-          if (!this.rowCursor)
+          if (!this.rowCursor && this.inputPresentation.preparation) {
+            const next = [0, 1, 2].find(index => index > this.cursor
+              && (index === 0 ? this.rerollButtonContainer.visible : index === 1 ? this.transferButtonContainer.visible : true));
+            if (next !== undefined) success = this.setCursor(next);
+          } else if (!this.rowCursor)
             success = this.transferButtonContainer.visible && this.setCursor(1);
           else if (this.cursor < this.getRowItems(this.rowCursor) - 1)
             success = this.setCursor(this.cursor + 1);
@@ -295,6 +325,10 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     } else if (!cursor) {
       this.cursorObj.setPosition(6, -60);
       ui.showText('Spend money to reroll your item options');
+    } else if (this.cursor === 2 && this.inputPresentation.preparation) {
+      this.cursorObj.setPosition((this.scene.game.canvas.width / 6) - 120, -34);
+      ui.showText(this.inputPresentation.preparation.ready ? '本人已完成，等待伙伴；确认可取消准备'
+        : this.inputPresentation.preparation.rewardResolved ? '购物结束后确认本轮整备完成' : '请先领取或跳过本人奖励');
     } else {
       this.cursorObj.setPosition((this.scene.game.canvas.width / 6) - 50, -60);
       ui.showText('Transfer a held item from one Pokémon to another');
@@ -306,11 +340,12 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
   setRowCursor(rowCursor: integer): boolean {
     const lastRowCursor = this.rowCursor;
 
-    if (rowCursor !== lastRowCursor && (rowCursor || this.rerollButtonContainer.visible || this.transferButtonContainer.visible)) {
+    if (rowCursor !== lastRowCursor && (rowCursor || this.rerollButtonContainer.visible || this.transferButtonContainer.visible || this.inputPresentation.preparation)) {
       this.rowCursor = rowCursor;
       let newCursor = Math.round(this.cursor / Math.max(this.getRowItems(lastRowCursor) - 1, 1) * (this.getRowItems(rowCursor) - 1));
       if (!rowCursor) {
-        if (!newCursor && !this.rerollButtonContainer.visible)
+        if (this.inputPresentation.preparation && !this.rerollButtonContainer.visible && !this.transferButtonContainer.visible) newCursor = 2;
+        else if (!newCursor && !this.rerollButtonContainer.visible)
           newCursor = 1;
         else if (newCursor && !this.transferButtonContainer.visible)
           newCursor = 0;
@@ -326,7 +361,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
   private getRowItems(rowCursor: integer): integer {
     switch (rowCursor) {
       case 0:
-        return 2;
+        return this.inputPresentation.preparation ? 3 : 2;
       case 1:
         return this.options.length;
       default:
@@ -356,6 +391,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
 
     this.awaitingActionInput = false;
     this.onActionInput = null;
+    this.completeButtonContainer?.setVisible(false);
     this.getUi().clearText();
     this.eraseCursor();
 

@@ -13,12 +13,12 @@ import { createPlayStorage } from './play-storage.mjs';
 import { pauseAutoResume, autoResumePaused, allowAutoResume } from './exit-recovery.mjs';
 import { GameModes } from '../game-mode';
 import { Command } from '../ui/command-ui-handler';
-import { ModifierTypeOption, PokemonHpRestoreModifierType, PokemonReviveModifierType, restoreModifierTypeState } from '../modifier/modifier-type';
-import { AddPokeballModifier } from '../modifier/modifier';
+import { ModifierTypeOption, restoreModifierTypeState } from '../modifier/modifier-type';
 import { PartyUiMode, PartyOption } from '../ui/party-ui-handler';
 import { getPokeballName } from '../data/pokeball';
 import { SummaryUiMode } from '../ui/summary-ui-handler';
 import { allMoves } from '../data/move';
+import { preparationItemTarget } from './preparation-item';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -59,6 +59,7 @@ export default class CoopPlayPhase extends Phase {
   private battleInputActive = false;
   private presentation: CoopBattlePresentation | null = null;
   private preparationSignature = '';
+  private preparationMenuEpoch = 0;
   private switchSignature = '';
   private submitted = false;
   private profileDirty = false;
@@ -418,6 +419,10 @@ export default class CoopPlayPhase extends Phase {
 
   private async enterBattle(snapshot: any) {
     if (this.seat === null) return;
+    if (Number.isFinite(snapshot.personal.resources?.money)) {
+      this.scene.money = snapshot.personal.resources.money;
+      this.scene.updateMoneyText?.();
+    }
     const signature = `${snapshot.connectionEpoch}:${snapshot.decisionId}:${snapshot.revision}`;
     if (this.battleSignature === signature) return;
     this.clearPreparationParty();
@@ -471,60 +476,91 @@ export default class CoopPlayPhase extends Phase {
     const signature = `${epoch}:${decision.id}:${snapshot.revision}`;
     if (this.preparationSignature === signature) return;
     const player = decision.players;
+    const menuEpoch = ++this.preparationMenuEpoch;
+    const current = () => menuEpoch === this.preparationMenuEpoch && this.isPersonalInputCurrent(snapshot, epoch);
+    const submit = (operation: () => Promise<any>) => {
+      this.preparationMenuEpoch++;
+      void operation().catch(async error => {
+        if (this.disposed || this.latest !== snapshot || this.epoch !== epoch) return;
+        if (!this.actionId) {
+          this.clearTeamParty(); this.preparationSignature = '';
+          try { await this.openPreparationMenu(); } catch { /* Report the original error; retry stays available. */ }
+        }
+        this.setStatus(`整备操作失败：${error?.message ?? error}`, true);
+      });
+    };
     if (!player || !Number.isFinite(snapshot.personal.resources?.money)) throw new Error('PERSONAL_PREPARATION_DATA_MISSING');
     this.scene.money = snapshot.personal.resources.money;
-    this.renderPreparationControls(player, snapshot, epoch);
-    if (player.rewardResolved) {
-      await this.scene.ui.setMode(Mode.MESSAGE);
-      this.setStatus(player.ready ? '已准备，等待队友；仍可取消准备' : '奖励已处理，可准备进入下一战');
-    } else {
+    this.scene.updateMoneyText?.();
+    this.controls.replaceChildren();
+    {
       const rewards = player.rewards.map((option: any) =>
         new ModifierTypeOption(restoreModifierTypeState(option.type), 0, 0));
       if (!rewards.length) throw new Error('PERSONAL_REWARD_MENU_EMPTY');
-      this.setStatus('原奖励菜单已同步；支持精灵球补给与治疗，也可跳过奖励');
+      const shop = (player.shop ?? []).map((option: any) => new ModifierTypeOption(restoreModifierTypeState(option.type), 0, option.cost));
+      this.setStatus(player.ready ? '本人已完成整备，等待伙伴；可在原页取消准备或继续购物'
+        : player.rewardResolved ? '奖励已处理，可继续购物或在原页完成整备' : '请选择原奖励、购买道具或重抽；取消键可跳过奖励');
       await this.scene.ui.setMode(Mode.MODIFIER_SELECT, true, rewards, (rowCursor: number, cursor: number) => {
-        if (!this.isPersonalInputCurrent(snapshot, epoch)) return false;
-        if (rowCursor === -1) { void this.sendPreparation('skip-reward', snapshot, epoch); return false; }
-        if (rowCursor !== 1 || !player.rewards?.[cursor]) {
-          this.setStatus('当前只接普通奖励行；商店／重抽尚未接入', true);
+        if (!current()) return false;
+        if (player.selection || player.subdecision) { this.setStatus('请先处理本人必要选择，再继续整备', true); return false; }
+        if (rowCursor === -1) { submit(() => this.sendPreparation(player.rewardResolved ? player.ready ? 'unready' : 'ready' : 'skip-reward', snapshot, epoch)); return false; }
+        if (rowCursor === 0 && cursor === 0 && !player.rewardResolved) {
+          submit(() => this.sendAction({ kind: 'preparation', operation: 'reroll' }, '重抽已提交，等待服务器裁定…')); return false;
+        }
+        const index = rowCursor > 2 || shop.length <= 6 ? cursor : cursor + 6;
+        const option = rowCursor === 1 ? player.rewards?.[cursor] : rowCursor >= 2 ? player.shop?.[index] : null;
+        if (!option || rowCursor === 1 && player.rewardResolved) {
+          this.setStatus('该选项当前不可领取；已处理的奖励不能重复领取', true);
           return false;
         }
-        void this.choosePreparationReward(player.rewards[cursor], snapshot, epoch)
-          .catch(error => this.setStatus(`奖励选择失败：${error?.message ?? error}`, true));
+        if (preparationItemTarget(restoreModifierTypeState(option.type)) === null) {
+          this.setStatus('该道具机制尚未接入，可返回改选；免费奖励也可跳过', true); return false;
+        }
+        submit(() => this.choosePreparationReward(option, snapshot, epoch, rowCursor === 1 ? 'reward' : 'buy'));
         return false;
-      }, player.rerollCost, { shopOptions: [], allowReroll: false, allowTransfer: false });
+      }, player.rerollCost, { shopOptions: shop, allowReroll: !player.rewardResolved, allowTransfer: false,
+        preparation: { ready: player.ready, rewardResolved: player.rewardResolved, onComplete: () => {
+          if (!current()) return;
+          if (!player.rewardResolved || player.selection || player.subdecision) { this.setStatus('请先处理本人必要选择并领取或跳过奖励，再完成整备', true); return; }
+          submit(() => this.sendPreparation(player.ready ? 'unready' : 'ready', snapshot, epoch));
+        } } });
     }
     if (this.isPersonalInputCurrent(snapshot, epoch)) this.preparationSignature = signature;
   }
 
-  private async choosePreparationReward(option: any, snapshot: any, epoch: string | null) {
+  private async choosePreparationReward(option: any, snapshot: any, epoch: string | null, operation = 'reward') {
     if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-    const type = restoreModifierTypeState(option.type);
-    const action = { kind: 'preparation', operation: 'reward', optionId: option.id,
+    const type: any = restoreModifierTypeState(option.type);
+    const action = { kind: 'preparation', operation, optionId: option.id,
       pokemonId: null, moveIndex: null, fusionId: null };
-    if (['POKEBALL', 'GREAT_BALL', 'ULTRA_BALL', 'ROGUE_BALL', 'MASTER_BALL'].includes(option.type.catalogId)
-      && type.newModifier() instanceof AddPokeballModifier) {
+    const targetKind = preparationItemTarget(type);
+    if (targetKind === 'none') {
       await this.scene.ui.setMode(Mode.MESSAGE);
       if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-      await this.sendAction(action, '已提交精灵球补给领取…');
+      await this.sendAction(action, '道具选择已提交，等待服务器裁定…');
       return;
     }
-    if (type instanceof PokemonHpRestoreModifierType && !(type instanceof PokemonReviveModifierType)) {
+    if (targetKind === 'party' || targetKind === 'move') {
       const personal = this.model.applied?.personal;
       if (!personal?.party?.length) throw new Error('PERSONAL_PARTY_MISSING');
-      await this.showTeamParty(personal.party, PartyUiMode.MODIFIER, async (slotIndex, option) => {
+      await this.showTeamParty(personal.party, targetKind === 'move' ? PartyUiMode.MOVE_MODIFIER : PartyUiMode.MODIFIER, async (slotIndex, option) => {
         const entry = personal.party[slotIndex];
         this.preparationSignature = '';
         const menuEpoch = this.teamMenuEpoch;
         await this.scene.ui.setMode(Mode.MESSAGE);
         if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return;
-        if (!entry || option !== PartyOption.APPLY) { await this.openPreparationMenu(); return; }
+        const move = Number(option) - PartyOption.MOVE_1;
+        const selected = targetKind === 'move' ? move >= 0 && move < 4 && entry?.pokemon.getMoveset()[move]
+          && type.moveSelectFilter(entry.pokemon.getMoveset()[move]) === null : option === PartyOption.APPLY;
+        if (!entry || !selected) { await this.openPreparationMenu(); return; }
         action.pokemonId = entry.id;
-        await this.sendAction(action, '已提交治疗领取…');
-      }, type.selectFilter, [PartyOption.APPLY, PartyOption.SUMMARY]);
+        if (targetKind === 'move') action.moveIndex = move;
+        await this.sendAction(action, '本人道具目标已提交…');
+      }, type.selectFilter, targetKind === 'move' ? [PartyOption.MOVE_1, PartyOption.MOVE_2, PartyOption.MOVE_3, PartyOption.MOVE_4, PartyOption.SUMMARY]
+        : [PartyOption.APPLY, PartyOption.SUMMARY], targetKind === 'move' ? type.moveSelectFilter : undefined);
       return;
     }
-    this.setStatus('该普通奖励尚不支持；请跳过奖励', true);
+    this.setStatus('该道具机制尚未接入，可返回改选；免费奖励也可跳过', true);
   }
 
   private clearPreparationParty() {
@@ -548,7 +584,7 @@ export default class CoopPlayPhase extends Phase {
 
   /** Original Party/Summary on loaded display copies; the verified model stays detached. */
   private async showTeamParty(entries: any[], mode: PartyUiMode, select: (slot: number, option: PartyOption) => any,
-    filter: (pokemon: any) => string | null, allowedOptions: PartyOption[]) {
+    filter: (pokemon: any) => string | null, allowedOptions: PartyOption[], moveFilter?: (move: any) => string | null) {
     const snapshot = this.latest, epoch = this.epoch;
     if (!this.isPersonalInputCurrent(snapshot, epoch)) return false;
     this.clearPreparationParty(); this.clearActiveSwitchParty();
@@ -603,7 +639,7 @@ export default class CoopPlayPhase extends Phase {
         if (current) return Promise.resolve(select(slot, option)).catch(error => {
           if (this.isPersonalInputCurrent(snapshot, epoch)) this.setStatus(`队伍选择失败：${error?.message ?? error}`, true);
         });
-      }, filter, undefined, undefined, { allowedOptions, readOnlySummary: true, ...(mode === PartyUiMode.RELEASE ? { submitReleaseOnly:true } : {}) });
+      }, filter, moveFilter, undefined, { allowedOptions, readOnlySummary: true, ...(mode === PartyUiMode.RELEASE ? { submitReleaseOnly:true } : {}) });
       if (!active || !this.isPersonalInputCurrent(snapshot, epoch)) {
         release();
         if (!this.releaseTeamParty && this.scene.ui.getMode?.() === Mode.PARTY) await this.scene.ui.setMode(Mode.MESSAGE);
@@ -710,23 +746,10 @@ export default class CoopPlayPhase extends Phase {
     }, (pokemon: any) => allowed.has(pokemon.id) ? null : '不能更换为该宝可梦', [PartyOption.SEND_OUT, PartyOption.SUMMARY]);
   }
 
-  private renderPreparationControls(player: any, snapshot: any, epoch: string | null) {
-    this.controls.replaceChildren();
-    const row = document.createElement('div'); row.className = 'row';
-    const send = (operation: 'skip-reward' | 'ready' | 'unready') => this.sendPreparation(operation, snapshot, epoch);
-    if (!player.rewardResolved) row.append(this.button('跳过奖励', () => send('skip-reward'), true));
-    if (player.ready) row.append(this.button('取消准备', () => send('unready')));
-    else row.append(this.button('准备', () => {
-      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
-      if (!player.rewardResolved) { this.setStatus('请先处理奖励或跳过奖励', true); return; }
-      return send('ready');
-    }, true));
-    this.controls.append(row);
-  }
-
   private async sendPreparation(operation: 'skip-reward' | 'ready' | 'unready', snapshot = this.latest, epoch = this.epoch) {
     if (!this.isPersonalInputCurrent(snapshot, epoch) || snapshot?.personal.decision.kind !== 'preparation') return false;
     const player = snapshot.personal.decision.players;
+    if (player.selection || player.subdecision) return false;
     if (operation === 'ready' && !player.rewardResolved || operation === 'skip-reward' && player.rewardResolved) return false;
     return this.sendAction({ kind: 'preparation', operation },
       operation === 'ready' ? '准备已提交，等待服务器确认…' : operation === 'unready' ? '取消准备已提交…' : '跳过奖励已提交…');

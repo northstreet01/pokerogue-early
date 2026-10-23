@@ -168,6 +168,107 @@ const attack = snapshot => {
   return options.find(option => [52, 55, 22, 670].includes(moves[option.cursor]?.fields.moveId))
     ?? options.find(option => [33, 10].includes(moves[option.cursor]?.fields.moveId)) ?? options[0];
 };
+
+for (const seat of [0, 1]) test(`VS17 natural preparation seat ${seat}: original menu/Party, IDB/WS money, completion and next FIGHT`, { timeout: 90000 }, async t => {
+  const env = await openUiRoom(seat, t);
+  try {
+    const { phase, modes, ui } = env;
+    // Only rendering/asset ports are replaced; production callbacks, store,
+    // original rule Worker and both verified model ACKs remain real.
+    phase.scene.currentBattle = { double: true };
+    let moneyUpdates = 0;
+    phase.scene.updateMoneyText = () => moneyUpdates++;
+    phase.makeTeamPokemon = entry => {
+      const copy = api.restorePokemonState(api.capturePokemonState(entry.pokemon));
+      copy.scene = phase.scene; copy.init = () => {}; copy.loadAssets = async () => {}; copy.destroy = () => {};
+      return copy;
+    };
+    for (let n = 0; n < 12 && phase.latest.personal.decision.kind === 'wait-actions'; n++) {
+      const revision = phase.latest.revision;
+      await phase.sendAction(attack(phase.latest), 'natural preparation setup');
+      await until(() => phase.submitted || env.errors.length, 'natural setup receipt');
+      env.submitPeer(attack(env.peerSnapshot()));
+      await until(() => phase.latest.revision > revision && phase.inputReady || env.errors.length, 'natural setup next input');
+      assert.deepEqual(env.errors, []);
+    }
+    assert.equal(phase.latest.personal.decision.kind, 'preparation');
+    await until(() => env.peerSnapshot().revision === phase.latest.revision, 'peer preparation');
+    const originalMenu = () => {
+      const mode = modes.at(-1); assert.equal(mode[0], api.Mode.MODIFIER_SELECT);
+      return Object.assign(Object.create(api.ModifierSelectUiHandler.prototype), {
+        getUi: () => ui, awaitingActionInput: true, inputPresentation: mode[5],
+        rowCursor: 0, cursor: 0, player: true, onActionInput: mode[3],
+      });
+    };
+    let menu = originalMenu(), before = phase.latest;
+    const startingMoney = api.createOriginalRuntime('check', profiles[seat].trainer).scene.gameMode.getStartingMoney();
+    assert.equal(before.personal.resources.money, startingMoney);
+    assert.equal(phase.scene.money, startingMoney); assert.ok(moneyUpdates > 0);
+    const rerollCost = before.personal.decision.players.rerollCost;
+    menu.processInput(api.Button.ACTION);
+    await until(() => phase.latest.revision > before.revision && phase.inputReady, 'original reroll result');
+    assert.equal(phase.latest.personal.resources.money, startingMoney - rerollCost);
+    await until(() => env.peerSnapshot().revision === phase.latest.revision, 'peer reroll');
+    assert.equal(env.peerSnapshot().personal.resources.money, startingMoney);
+    before = phase.latest;
+    const shop = before.personal.decision.players.shop;
+    let chosen;
+    for (const [index, option] of shop.entries()) {
+      if (option.cost > before.personal.resources.money) continue;
+      const type = api.modifierTypes[option.type.catalogId]?.(); if (!type?.selectFilter) continue;
+      for (const [slot, entry] of phase.model.applied.personal.party.entries()) {
+        if (type.selectFilter(entry.pokemon) !== null) continue;
+        const move = type.moveSelectFilter ? entry.pokemon.getMoveset().findIndex(m => type.moveSelectFilter(m) === null) : null;
+        if (move === -1) continue;
+        chosen = { index, option, slot, move }; break;
+      }
+      if (chosen) break;
+    }
+    assert.ok(chosen, 'natural affordable effective original consumable');
+    menu = originalMenu();
+    menu.rowCursor = shop.length > 6 && chosen.index < 6 ? 3 : 2;
+    menu.cursor = shop.length > 6 && chosen.index >= 6 ? chosen.index - 6 : chosen.index;
+    menu.processInput(api.Button.ACTION);
+    await until(() => ui.mode === api.Mode.PARTY || env.errors.length, 'original consumable Party');
+    assert.deepEqual(env.errors, []);
+    await modes.at(-1)[3](chosen.slot, chosen.move === null ? api.PartyOption.APPLY : api.PartyOption.MOVE_1 + chosen.move);
+    await until(() => phase.latest.revision > before.revision && phase.inputReady, 'original buy result');
+    assert.equal(phase.scene.money, before.personal.resources.money - chosen.option.cost);
+    assert.equal(phase.latest.personal.decision.players.rewardResolved, false);
+    before = phase.latest; menu = originalMenu(); menu.processInput(api.Button.CANCEL);
+    await until(() => phase.latest.revision > before.revision && phase.inputReady, 'original skip');
+    before = phase.latest; originalMenu().processInput(api.Button.SUBMIT);
+    await until(() => phase.latest.revision > before.revision && phase.inputReady, 'original completion');
+    assert.equal(phase.latest.personal.decision.players.ready, true);
+    await until(() => env.peerSnapshot().revision === phase.latest.revision, 'peer completion ACK');
+    env.submitPeer({ kind: 'preparation', operation: 'skip-reward' });
+    await until(() => phase.inputReady && !phase.actionId && env.peerSnapshot().personal.decision.players.rewardResolved, 'peer skip');
+    await until(() => env.peerSnapshot().revision === phase.latest.revision, 'peer skip ACK');
+    env.submitPeer({ kind: 'preparation', operation: 'ready' });
+    await until(() => phase.inputReady && phase.latest.personal.decision.kind !== 'preparation'
+      && env.peerSnapshot().revision === phase.latest.revision, 'natural next encounter');
+    for (let n = 0; n < 20 && phase.latest.personal.decision.kind !== 'wait-actions'; n++) {
+      const current = phase.latest, decision = current.personal.decision;
+      if (decision.requiredSeats.includes(seat)) {
+        assert.equal(decision.kind, 'switch-confirm'); assert.equal(modes.at(-1)[0], api.Mode.CONFIRM);
+        await modes.at(-1)[2]();
+      } else {
+        const option = env.peerSnapshot().personal.decision.options.find(option => option.accept === false || option.pokemonId === null);
+        assert.ok(option); env.submitPeer(option);
+      }
+      await until(() => phase.inputReady && phase.latest.revision > current.revision
+        && env.peerSnapshot().revision === phase.latest.revision, 'original next encounter keep');
+    }
+    assert.equal(phase.latest.personal.decision.kind, 'wait-actions');
+    const revision = phase.latest.revision;
+    await phase.sendAction(attack(phase.latest), 'next FIGHT');
+    await until(() => phase.submitted, 'next owned FIGHT'); env.submitPeer(attack(env.peerSnapshot()));
+    await until(() => phase.inputReady && phase.latest.revision > revision, 'next FIGHT result');
+    assert.deepEqual(env.errors, []);
+    assert.deepEqual(await phase.storage.pendingActions(location.origin, phase.roomId, seat), []);
+  } finally { await env.close(); }
+});
+
 for (const seat of [0, 1]) test(`original Command/Ball seat ${seat} reaches real selected Worker capture and next input`, { timeout: 90000 }, async t => {
   const env = await openUiRoom(seat, t);
   try {

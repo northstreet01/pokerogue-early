@@ -771,15 +771,17 @@ function preparationPhase() {
   return { p, sent, errors, modes, controls };
 }
 
-test('original preparation UI receives drawn types without changing gameMode or enabling local shop/reroll', async () => {
+test('original preparation UI receives authoritative shop/rewards and reroll without changing gameMode', async () => {
   const { p, modes, controls, sent } = preparationPhase(); const mode = p.scene.gameMode;
   await p.openPreparationMenu(); await p.openPreparationMenu();
   assert.equal(modes.length, 1); assert.equal(modes[0][0], api.Mode.MODIFIER_SELECT);
   assert.equal(modes[0][2][0].type.id, 'POTION');
-  assert.deepEqual(modes[0][5], { shopOptions: [], allowReroll: false, allowTransfer: false });
+  assert.deepEqual(modes[0][5].shopOptions, []);
+  assert.equal(modes[0][5].allowReroll, true); assert.equal(modes[0][5].allowTransfer, false);
+  assert.equal(modes[0][5].preparation.rewardResolved, false);
   assert.equal(p.scene.gameMode, mode); assert.equal(p.scene.money, 300);
   assert.equal(modes[0][3](1, 0), false); assert.equal(sent.length, 0);
-  assert.equal(controls.length, 1);
+  assert.equal(controls.length, 0, 'completion stays inside the original reward page');
 });
 
 test('blocked preparation can reopen the same decision after ACK; stale original callbacks cannot send', async () => {
@@ -793,13 +795,13 @@ test('blocked preparation can reopen the same decision after ACK; stale original
   assert.equal(sent.length, 0);
 });
 
-test('preparation write failure preserves actionable controls and original menu without a false skip', async () => {
-  const { p, sent, controls } = preparationPhase(); await p.openPreparationMenu();
+test('preparation write failure preserves the original menu without a false skip', async () => {
+  const { p, sent, modes } = preparationPhase(); await p.openPreparationMenu();
   p.storage = { ...p.storage, saveAction: async () => { throw new Error('TEST_WRITE_FAILURE'); } };
   assert.equal(await p.sendPreparation('skip-reward'), false);
   assert.equal(sent.length, 0); assert.equal(p.actionId, null);
   assert.equal(p.latest.personal.decision.players.rewardResolved, false);
-  assert.equal(controls.length, 2);
+  assert.equal(modes.filter(mode => mode[0] === api.Mode.MODIFIER_SELECT).length, 2);
 });
 
 test('old personal buttons cannot rebase a skip/ready operation onto a newer decision', async () => {
@@ -811,11 +813,15 @@ test('old personal buttons cannot rebase a skip/ready operation onto a newer dec
   assert.equal(sent.length, 0);
 });
 
-test('resolved preparation never redraws reward menu; ready seat retains unready controls', async () => {
-  const { p, modes, controls } = preparationPhase();
+test('resolved preparation keeps the original shop page and exposes in-page unready without allowing a second reward', async () => {
+  const { p, modes, sent, errors } = preparationPhase();
   Object.assign(p.latest.personal.decision.players, { rewardResolved: true, ready: true });
   await p.openPreparationMenu();
-  assert.deepEqual(modes, [[api.Mode.MESSAGE]]); assert.equal(controls[0].ready, true);
+  assert.equal(modes[0][0], api.Mode.MODIFIER_SELECT);
+  assert.equal(modes[0][5].preparation.ready, true); assert.equal(modes[0][5].allowReroll, false);
+  modes[0][3](1, 0); assert.ok(errors.some(error => error.includes('不能重复领取')));
+  modes[0][5].preparation.onComplete();
+  await waitUntil(() => sent.length === 1); assert.equal(sent[0].action.operation, 'unready');
 });
 
 test('original ModifierSelect cancel remains usable when a coop callback declines to close', () => {
@@ -823,11 +829,78 @@ test('original ModifierSelect cancel remains usable when a coop callback decline
   const handler = Object.create(api.ModifierSelectUiHandler.prototype);
   handler.scene = { ui: { playSelect() {} } };
   handler.player = true; handler.awaitingActionInput = true;
+  handler.inputPresentation = {};
   handler.onActionInput = row => { assert.equal(row, -1); calls++; return false; };
   assert.equal(handler.processInput(api.Button.CANCEL), true);
   assert.equal(handler.awaitingActionInput, true);
   assert.equal(handler.processInput(api.Button.CANCEL), true);
   assert.equal(calls, 2);
+});
+
+test('original ModifierSelect completion supports keyboard navigation and does not replace solo actions', () => {
+  let completed = 0, selected = 0;
+  const handler = Object.assign(Object.create(api.ModifierSelectUiHandler.prototype), {
+    getUi: () => ({ playSelect() {} }), awaitingActionInput: true, rowCursor: 0, cursor: 0,
+    inputPresentation: { preparation: { onComplete: () => completed++ } },
+    rerollButtonContainer: { visible: true }, transferButtonContainer: { visible: false },
+    setCursor(cursor) { this.cursor = cursor; return true; },
+    onActionInput: () => { selected++; return false; },
+  });
+  assert.equal(handler.processInput(api.Button.RIGHT), true); assert.equal(handler.cursor, 2);
+  assert.equal(handler.processInput(api.Button.ACTION), true); assert.equal(completed, 1);
+  handler.rowCursor = 1; handler.cursor = 0;
+  assert.equal(handler.processInput(api.Button.SUBMIT), true); assert.equal(completed, 2);
+  assert.equal(handler.processInput(api.Button.ACTION), true); assert.equal(selected, 1);
+  handler.inputPresentation = {};
+  assert.equal(handler.processInput(api.Button.SUBMIT), false);
+  assert.equal(handler.processInput(api.Button.ACTION), true); assert.equal(selected, 2);
+});
+
+test('in-page completion blocks unresolved reward or pending choice and ignores stale callbacks', async () => {
+  for (const pending of ['reward', 'selection', 'subdecision']) {
+    const { p, modes, sent, errors } = preparationPhase();
+    if (pending !== 'reward') {
+      p.latest.personal.decision.players.rewardResolved = true;
+      p.latest.personal.decision.players[pending] = { pending: true };
+    }
+    await p.openPreparationMenu(); modes.at(-1)[5].preparation.onComplete();
+    assert.deepEqual(sent, []); assert.ok(errors.some(message => message.includes('必要选择')));
+  }
+  const { p, modes, sent } = preparationPhase();
+  p.latest.personal.decision.players.rewardResolved = true;
+  await p.openPreparationMenu(); const old = modes.at(-1)[5].preparation.onComplete;
+  p.preparationSignature = ''; await p.openPreparationMenu();
+  old(); assert.deepEqual(sent, []);
+  modes.at(-1)[5].preparation.onComplete(); modes.at(-1)[5].preparation.onComplete();
+  await waitUntil(() => sent.length === 1); assert.equal(sent[0].action.operation, 'ready');
+});
+
+test('authoritative shop rows map both original shop lines to durable buy IDs without local money changes', async () => {
+  for (const [row, cursor, index] of [[3, 5, 5], [2, 1, 7], [2, 0, 0]]) {
+    const { p, modes, sent } = preparationPhase(); let updates = 0;
+    p.scene.updateMoneyText = () => updates++;
+    p.latest.personal.decision.players.shop = Array.from({ length: row === 2 && index === 0 ? 3 : 8 }, (_, i) =>
+      ({ ...rewardOption('POKEBALL'), id: `shop-${i}`, cost: 125 + i }));
+    p.latest.personal.decision.players.rewardResolved = true;
+    await p.openPreparationMenu(); const original = modes.at(-1);
+    assert.equal(original[5].shopOptions[index].cost, 125 + index);
+    assert.equal(original[5].allowReroll, false); assert.equal(updates, 1);
+    original[3](row, cursor); original[3](row, cursor);
+    await waitUntil(() => sent.length === 1);
+    assert.deepEqual(sent[0].action, { kind: 'preparation', operation: 'buy', optionId: `shop-${index}`,
+      pokemonId: null, moveIndex: null, fusionId: null });
+    assert.equal(p.scene.money, 300); assert.equal(p.latest.personal.resources.money, 300);
+  }
+});
+
+test('preparation reroll submits once and a mode failure is reported without losing the persisted action', async () => {
+  const { p, modes, sent, errors } = preparationPhase();
+  await p.openPreparationMenu(); const select = modes.at(-1)[3];
+  p.scene.ui.setMode = async () => { throw Error('TEST_SHOP_MODE_FAILED'); };
+  select(0, 0); select(0, 0);
+  await waitUntil(() => errors.some(message => message.includes('TEST_SHOP_MODE_FAILED')));
+  assert.equal(sent.length, 1); assert.equal(sent[0].action.operation, 'reroll');
+  assert.ok(p.actionId); assert.equal(p.latest.personal.resources.money, 300);
 });
 
 
@@ -848,7 +921,7 @@ test('a rejected personal receipt restores the same preparation decision control
   await p.onMessage({ type: 'actionReceipt', roomId: p.roomId, actionId, revision: 4,
     decisionId: 'prep-4', accepted: false, code: 'TEST_REJECTION' });
   assert.equal(p.actionId, null);
-  assert.equal(controls.length, 2);
+  assert.equal(controls.length, 0);
   assert.equal(modes.filter(m => m[0] === api.Mode.MODIFIER_SELECT).length, 2);
   assert.equal(p.latest.personal.decision.players.rewardResolved, false);
 });
@@ -1090,11 +1163,56 @@ test('Potion target submits stable personal id and failed outbox can reopen sele
   }
 });
 
-test('REVIVE remains explicitly unsupported rather than inheriting Potion UI support', async () => {
-  const { p, sent, modes, errors } = preparationPhase();
+test('original Revive selector accepts only a fainted owned target and submits no local effect', async () => {
+  const { p, sent, modes, entry } = personalPotionPhase(); entry.pokemon.hp = 0;
   await p.choosePreparationReward(rewardOption('REVIVE'), p.latest, p.epoch);
-  assert.equal(modes.length, 0); assert.equal(sent.length, 0);
-  assert.ok(errors.some(error => error.includes('尚不支持')));
+  assert.equal(modes.at(-1)[0], api.Mode.PARTY);
+  assert.equal(modes.at(-1)[4](p.scene.party[0]), null);
+  await modes.at(-1)[3](0, api.PartyOption.APPLY);
+  assert.equal(sent[0].action.pokemonId, entry.id);
+  assert.equal(entry.pokemon.hp, 0);
+});
+
+test('original PP Party passes original move filters, stable target and move index without restoring locally', async () => {
+  for (const id of ['ETHER', 'PP_UP']) {
+    const { p, modes, sent, entry } = personalPotionPhase();
+    entry.pokemon.getMoveset()[0].ppUsed = 2;
+    const before = api.capturePokemonState(entry.pokemon), option = rewardOption(id);
+    await p.choosePreparationReward(option, p.latest, p.epoch, 'buy');
+    const party = modes.at(-1);
+    assert.equal(party[1], api.PartyUiMode.MOVE_MODIFIER);
+    assert.equal(typeof party[5], 'function');
+    assert.equal(party[5](p.scene.party[0].getMoveset()[0]), null);
+    assert.ok(party[7].allowedOptions.includes(api.PartyOption.MOVE_1));
+    await party[3](0, api.PartyOption.MOVE_1);
+    assert.deepEqual(sent[0].action, { kind: 'preparation', operation: 'buy', optionId: option.id,
+      pokemonId: entry.id, moveIndex: 0, fusionId: null });
+    assert.deepEqual(api.capturePokemonState(entry.pokemon), before);
+  }
+});
+
+test('reopened preparation fences old reward and completion callbacks during a target transition', async () => {
+  const { p, modes, sent } = personalPotionPhase();
+  await p.openPreparationMenu(); const old = modes.at(-1);
+  old[3](1, 0);
+  await waitUntil(() => modes.at(-1)[0] === api.Mode.PARTY);
+  const select = modes.at(-1)[3];
+  await select(6);
+  assert.equal(modes.at(-1)[0], api.Mode.MODIFIER_SELECT);
+  old[3](-1); old[5].preparation.onComplete(); old[3](1, 0);
+  await tick(); assert.deepEqual(sent, []);
+  assert.equal(modes.at(-1)[0], api.Mode.MODIFIER_SELECT);
+  modes.at(-1)[3](-1);
+  await waitUntil(() => sent.length === 1); assert.equal(sent[0].action.operation, 'skip-reward');
+});
+
+test('late shop transition after exit cannot persist or submit to the old room', async () => {
+  const { p, modes, sent } = preparationPhase();
+  p.latest.personal.decision.players.shop = [{ ...rewardOption('POKEBALL'), id: 'shop-0', cost: 200 }];
+  await p.openPreparationMenu(); const select = modes.at(-1)[3], transition = deferred();
+  p.scene.ui.setMode = () => transition.promise;
+  select(2, 0); p.stopSession(); transition.resolve();
+  await tick(); assert.deepEqual(sent, []); assert.equal(p.actionId, null);
 });
 
 test('personal DOM skip while Potion Party is open releases the temporary view before outbox work', async () => {

@@ -15,7 +15,7 @@ import { RandomDataGenerator } from '../battle-core/random.mjs';
 import { createModifierPoolState } from '../battle-core/modifier-pool-state.mjs';
 import { withOriginalRules } from '../../server/original-random-context.mjs';
 import { captureStarterSelection, restoreStarterSelection, starterFormIndex, starterGender } from '../coop/original-starter-selection';
-import { validateProfile, priceProfile } from '../coop/original-profile-entry';
+import { validateProfile, priceProfile, validateProfileDraft, priceProfileDraft, projectProfileSelection } from '../coop/original-profile-entry';
 import { openNativeBattle, openNativeSelectedBattle, stepNativeEntry, openNativeBattleToInput,
   openNativeSelectedBattleToInput, validateNativeAction, submitNativeActions,
   openNativePreparation, chooseNativePreparation, nextNativeBattle, chooseNativeSwitch, runNativeUntilBoundary,
@@ -32,6 +32,7 @@ export { speciesEggMoves } from '../data/egg-moves';
 export { gameModes, GameModes } from '../game-mode';
 export { captureStarterSelection, restoreStarterSelection, validateStarterSelection, starterDexAttrProps } from '../coop/original-starter-selection';
 export { PROFILE_VERSION, captureProfile, validateProfile, restoreProfile, priceProfile } from '../coop/original-profile-entry';
+export { captureProfileDraft, validateProfileDraft, priceProfileDraft } from '../coop/original-profile-entry';
 export { Egg } from '../data/egg';
 
 // Test/diagnostic entry: run an independent original construction under the
@@ -167,6 +168,8 @@ export async function executeRuntimeOperation(runtime: ReturnType<typeof createO
   if (operation === 'construct-starter') return constructOriginalSelectedStarter(runtime, payload);
   if (operation === 'validate-profile') return priceProfile(payload);
   if (operation === 'normalize-profile') return { profile: validateProfile(payload), priced: priceProfile(payload) };
+  if (operation === 'normalize-profile-draft') return { profile: validateProfileDraft(payload), priced: priceProfileDraft(payload) };
+  if (operation === 'project-profile-selection') return projectProfileSelection(payload);
   if (operation === 'construct') {
     if (!payload || Object.keys(payload).sort().join(',') !== 'enemy,level,speciesId' || typeof payload.enemy !== 'boolean')
       throw new Error('INVALID_POKEMON_SELECTION');

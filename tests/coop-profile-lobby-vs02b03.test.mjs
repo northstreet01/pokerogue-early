@@ -206,6 +206,109 @@ const profile0 = () => profile([1, 4, 7], { 1: {}, 4: {}, 7: {} }, fixture.ident
   [new original.Egg(28123456, 0, 3, 1000)]);
 const profile1 = () => profile([1, 4, 7], { 1: {}, 4: {}, 7: {} }, fixture.identities[1]);
 
+test('draft replaces one budget entry, exposes selected forms/prices only, restores old format3 and locks ready', async () => {
+  const adapter = createOriginalCoopAdapter({ fixture });
+  try {
+    let ctx = await adapter.createInitialContext({ runId: 'vs16-draft-scope' });
+    const legacy = await adapter.captureCheckpoint(ctx);
+    ctx = await adapter.restoreCheckpoint(legacy); // No draft marker is required on old format3.
+    const value = profile([1, 10], { 1: { caught: 25 }, 10: { caught: 25 } }, fixture.identities[0],
+      [new original.Egg(28123456, 0, 3, 1000)]);
+    const draft = { kind: 'profile-draft', profile: value, ready: false };
+    const before = canonical(await adapter.captureCheckpoint(ctx));
+    await adapter.validateAction(ctx, 0, draft);
+    assert.equal(canonical(await adapter.captureCheckpoint(ctx)), before);
+    ctx = (await adapter.advanceToDecision(ctx, { 0: draft })).context;
+    let other = await adapter.projectSnapshot(ctx, 1);
+    assert.equal(other.shared.budget.used, 2.5);
+    assert.deepEqual(other.shared.selections[0], { seat: 0, state: 'draft', ready: false, total: 2.5,
+      starters: [{ speciesId: 1, cost: 2, formIndex: 0 }, { speciesId: 10, cost: 0.5, formIndex: 0 }] });
+    assert.equal(other.personal.profile, null);
+    assert.doesNotMatch(JSON.stringify(other.shared), /trainerId|secretId|ivs|unlocks|eggs|nature|moveset|seed/);
+    const changed = profile([7], {}, value.trainer);
+    await assert.rejects(adapter.validateAction(ctx, 0, { kind: 'profile-ready', profile: changed, ready: true }), /PROFILE_DRAFT_NOT_ACCEPTED/);
+    const empty = { ...value, starters: [], unlocks: [], costs: [] };
+    ctx = (await adapter.advanceToDecision(ctx, { 0: { ...draft, profile: empty } })).context;
+    assert.equal((await adapter.projectSnapshot(ctx, 0)).shared.budget.used, 0);
+    await assert.rejects(adapter.validateAction(ctx, 0, { kind: 'profile-ready', profile: empty, ready: true }));
+    ctx = await adapter.restoreCheckpoint(await adapter.captureCheckpoint(ctx));
+    assert.deepEqual((await adapter.projectSnapshot(ctx, 0)).personal.profile.eggs, empty.eggs);
+    ctx = (await adapter.advanceToDecision(ctx, { 0: draft })).context;
+    ctx = (await adapter.advanceToDecision(ctx, { 0: { kind: 'profile-ready', profile: value, ready: true } })).context;
+    assert.equal((await adapter.projectSnapshot(ctx, 0)).shared.budget.used, 2.5);
+    await assert.rejects(adapter.validateAction(ctx, 0, draft), /PROFILE_READY_SELECTION_LOCKED/);
+    await assert.rejects(adapter.validateAction(ctx, 0, { kind: 'profile-ready', profile: changed, ready: false }), /PROFILE_READY_SELECTION_LOCKED/);
+    ctx = (await adapter.advanceToDecision(ctx, { 0: { kind: 'profile-ready', profile: value, ready: false } })).context;
+    await adapter.validateAction(ctx, 0, { ...draft, profile: changed });
+  } finally { await adapter.closeAll(); }
+});
+
+test('simultaneous real WS drafts serialize remaining budget; durable receipts, old ACK and rooms stay isolated', async () => {
+  const env = await startEnv();
+  try {
+    const room = await createRoom(env);
+    let state = await syncBoth(env, room.a, room.b, room.sa, room.sb);
+    const actions = [profile0(), profile1()].map(value => ({ kind: 'profile-draft', profile: value, ready: false }));
+    const results = await Promise.all([submit(room.a, state.sa, actions[0]), submit(room.b, state.sb, actions[1])]);
+    assert.equal(results.filter(result => result.receipt.accepted).length, 1);
+    const loser = results[0].receipt.accepted ? 1 : 0, winner = 1 - loser;
+    state = await syncBoth(env, room.a, room.b, await after(room.a, state.sa), await after(room.b, state.sb));
+    assert.equal(state.sa.shared.budget.used, 9);
+    const rejected = await submit([room.a, room.b][loser], [state.sa, state.sb][loser], actions[loser]);
+    assert.equal(rejected.receipt.code, 'SHARED_BUDGET_EXCEEDED');
+    const client = [room.a, room.b][winner], originalAction = results[winner].message;
+    const repeated = client.next(message => message.type === 'actionReceipt' && message.actionId === originalAction.actionId);
+    client.send(originalAction); assert.equal((await repeated).accepted, true);
+    client.send({ ...originalAction, action: { ...originalAction.action, ready: true } });
+    await client.next(message => message.type === 'error' && message.code === 'ACTION_ID_CONFLICT');
+    assert.equal(client.latestSnapshot().revision, state.sa.revision);
+    assert.equal(await room.a.consumer(room.sa), false); // The original consumer refuses an old revision.
+    room.a.send({ type: 'stateAck', roomId: room.sa.roomId, runId: room.sa.runId,
+      revision: room.sa.revision, decisionId: room.sa.decisionId, connectionEpoch: room.sa.connectionEpoch,
+      sharedHash: room.sa.sharedHash, personalHash: room.sa.personalHash });
+    const fresh = await hello(env, 'isolated'); fresh.send({ type: 'createRoom', name: 'isolated' });
+    await fresh.wait(message => message.type === 'snapshot');
+    assert.equal(fresh.latestSnapshot().shared.budget.used, 0);
+    assert.deepEqual(fresh.latestSnapshot().shared.selections.map(player => player.starters), [[], []]);
+  } finally { await env.close(); }
+});
+
+test('draft candidate disk failure publishes no preview; exact input resumes once with both real models after restart', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'vs16-draft-disk-'));
+  class FailingDraftStore extends FormalRoomStore {
+    failDraft = true;
+    async save(room) {
+      if (this.failDraft && room.checkpoint.lobby?.players.some(player => player.selectionState === 'draft')) {
+        this.failDraft = false; throw Error('TEST_DRAFT_DISK_FAILED');
+      }
+      return super.save(room);
+    }
+  }
+  let env = await startEnv(new FailingDraftStore(directory));
+  try {
+    const room = await createRoom(env);
+    let state = await syncBoth(env, room.a, room.b, room.sa, room.sb);
+    const sent = await submit(room.a, state.sa, { kind: 'profile-draft', profile: profile0(), ready: false });
+    assert.equal(sent.receipt.accepted, true);
+    await room.a.wait(message => message.type === 'error' && message.code === 'STORAGE_FAILED');
+    assert.equal(room.b.latestSnapshot().shared.budget.used, 0);
+    const disk = (await env.store.load())[0];
+    assert.equal(disk.checkpoint.lobby.players[0].profile, null);
+    assert.equal(disk.inputs[0].kind, 'profile-draft');
+    await env.close(); env = await startEnv(new FormalRoomStore(directory));
+    const a = await resume(env, room.a, room.a.resumeToken), b = await resume(env, room.b, room.b.resumeToken);
+    await Promise.all([applyAndAck(env, a, a.latestSnapshot()), applyAndAck(env, b, b.latestSnapshot())]);
+    state = await syncBoth(env, a, b, await a.waitRevisionAfter(disk.revision), await b.waitRevisionAfter(disk.revision));
+    assert.equal(state.sa.shared.budget.used, 9);
+    assert.deepEqual(state.sb.shared.ready, [false, false]);
+    assert.equal(state.sb.personal.profile, null);
+    const replay = a.next(message => message.type === 'actionReceipt' && message.actionId === sent.message.actionId);
+    a.send(sent.message); assert.equal((await replay).accepted, true);
+    assert.equal((await env.store.load())[0].revision, state.sa.revision);
+    assert.equal((await env.store.load())[0].checkpoint.lobby.step, 1);
+  } finally { await env.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('two real WS clients import original profiles, respect 14/10 budgets and reach a first real FIGHT', async () => {
   const env = await startEnv();
   try {
@@ -308,7 +411,9 @@ test('ready selection is locked until unready; real failed entry can restore and
     const changed = profile([7], {}, a.trainer);
     await assert.rejects(adapter.validateAction(context, 0, { kind: 'profile-ready', profile: changed, ready: true }),
       /PROFILE_READY_SELECTION_LOCKED/);
-    await adapter.validateAction(context, 0, { kind: 'profile-ready', profile: changed, ready: false });
+    await assert.rejects(adapter.validateAction(context, 0, { kind: 'profile-ready', profile: changed, ready: false }),
+      /PROFILE_READY_SELECTION_LOCKED/);
+    await adapter.validateAction(context, 0, { kind: 'profile-ready', profile: a, ready: false });
     const before = await adapter.captureCheckpoint(context);
     const action = { kind: 'profile-ready', profile: b, ready: true };
     await assert.rejects(adapter.advanceToDecision(context, { 1: action }), /TEST_ENTRY_FAILED/);

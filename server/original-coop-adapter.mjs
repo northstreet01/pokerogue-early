@@ -182,12 +182,15 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
     await request(room, 'native-validate-eggs', { players: [clone(action.eggs), []] });
   }
   async function normalizeProfileAction(room, action) {
+    const draft = action?.kind === 'profile-draft';
     check(action && typeof action === 'object' && Object.keys(action).sort().join(',') === PROFILE_KEYS.join(',')
-      && action.kind === 'profile-ready' && typeof action.ready === 'boolean', 'INVALID_PROFILE_ACTION');
-    const normalized = await request(room, 'normalize-profile', action.profile);
+      && (draft || action.kind === 'profile-ready') && typeof action.ready === 'boolean'
+      && (!draft || action.ready === false), 'INVALID_PROFILE_ACTION');
+    const normalized = await request(room, draft ? 'normalize-profile-draft' : 'normalize-profile', action.profile);
     check(normalized && normalized.profile && normalized.priced, 'INVALID_PROFILE');
     check(normalized.priced.total <= PERSONAL_BUDGET, 'PERSONAL_BUDGET_EXCEEDED');
-    return { profile: normalized.profile, priced: normalized.priced, ready: action.ready };
+    return { profile: normalized.profile, priced: normalized.priced, ready: action.ready,
+      ...(draft ? { selectionState: 'draft' } : {}) };
   }
   function withProfilePlayers(context, seat, candidate) {
     const players = context.lobby.players.map((player, index) => index === seat ? candidate : player);
@@ -197,8 +200,10 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
   function checkProfileIdentity(context, seat, normalized) {
     const player = context.lobby.players[seat], current = player.profile;
     check(!current || canonical(current.trainer) === canonical(normalized.profile.trainer), 'PROFILE_IDENTITY_MISMATCH');
-    check(!player.ready || !normalized.ready || canonical(current) === canonical(normalized.profile),
+    check(!player.ready || (normalized.selectionState !== 'draft' && canonical(current) === canonical(normalized.profile)),
       'PROFILE_READY_SELECTION_LOCKED');
+    if (player.selectionState === 'draft' && normalized.ready)
+      check(canonical(current) === canonical(normalized.profile), 'PROFILE_DRAFT_NOT_ACCEPTED');
   }
   async function validateProfileCheckpoint(checkpoint) {
     check(checkpoint.provisioning && checkpoint.provisioning.identities
@@ -213,13 +218,15 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         && Array.isArray(lobby.players) && lobby.players.length === 2, 'INVALID_CHECKPOINT');
       const room = await roomFor(checkpoint.runId, checkpoint.provisioning, true);
       for (const player of lobby.players) {
-        check(player && Object.keys(player).sort().join(',') === 'priced,profile,ready'
+        check(player && ['priced,profile,ready', 'priced,profile,ready,selectionState'].includes(Object.keys(player).sort().join(','))
+          && (!Object.hasOwn(player, 'selectionState') || player.selectionState === 'draft')
+          && (player.selectionState !== 'draft' || player.ready === false)
           && typeof player.ready === 'boolean', 'INVALID_CHECKPOINT');
         if (player.profile === null) {
           check(player.priced === null && player.ready === false, 'INVALID_CHECKPOINT');
           continue;
         }
-        const normalized = await request(room, 'normalize-profile', player.profile);
+        const normalized = await request(room, player.selectionState === 'draft' ? 'normalize-profile-draft' : 'normalize-profile', player.profile);
         check(canonical(normalized.profile) === canonical(player.profile)
           && canonical(normalized.priced) === canonical(player.priced), 'INVALID_CHECKPOINT');
         check(player.priced.total <= PERSONAL_BUDGET, 'PERSONAL_BUDGET_EXCEEDED');
@@ -351,7 +358,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         next.profileLobby = true;
         return {
           context: next,
-          events: [{ kind: 'profile-ready', seat, ready: normalized.ready, scope: 'shared' }],
+          events: [{ kind: normalized.selectionState === 'draft' ? 'profile-draft' : 'profile-ready', seat, ready: normalized.ready, scope: 'shared' }],
           intents: context.intents, grants: [],
         };
       }
@@ -494,9 +501,15 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       if (context.profileLobby) {
         const id = lobbyId(context);
         const used = budgetOf(context.lobby.players);
+        const selections = await Promise.all(context.lobby.players.map(async (player, owner) => ({
+          seat: owner, state: player.profile ? player.selectionState ?? 'confirmed' : 'empty',
+          ready: player.ready, total: player.priced?.total ?? 0,
+          starters: player.profile ? await request(room, 'project-profile-selection', player.profile) : [],
+        })));
         return {
           shared: { format: 3, stage: 'lobby', decision: { id, kind: 'lobby', requiredSeats: [0, 1] },
             ready: context.lobby.players.map(player => player.ready),
+            selections,
             budget: { shared: SHARED_BUDGET, personal: PERSONAL_BUDGET, used, remaining: SHARED_BUDGET - used } },
           personal: { format: 3, stage: 'lobby', seat,
             profile: context.lobby.players[seat].profile ? clone(context.lobby.players[seat].profile) : null,

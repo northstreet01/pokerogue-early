@@ -34,6 +34,27 @@ before(async () => {
   api.describeOriginalCatalogs();
 });
 
+test('draft alone permits empty selection; original final profile remains nonempty and uses original fractional prices', async () => {
+  const gd = gameData([1, 10], { 1: { caught: 25 }, 10: { caught: 25 } });
+  const empty = api.captureProfileDraft(gd, []);
+  assert.deepEqual(api.priceProfileDraft(empty), { version: 2, starters: [], total: 0 });
+  assert.throws(() => api.validateProfile(empty), /INVALID_PROFILE_STARTERS/);
+  assert.throws(() => api.captureProfile(gd, []), /INVALID_PROFILE_STARTERS/);
+  const value = api.captureProfileDraft(gd, [baseStarter(1), baseStarter(10)]);
+  assert.deepEqual(api.priceProfileDraft(value), independentPrice(value));
+  const host = await createOriginalRuleHost({ seed: 'draft-no-rng', identity: value.trainer });
+  try {
+    const before = await host.request('state');
+    assert.deepEqual((await host.request('normalize-profile-draft', value)).priced, independentPrice(value));
+    assert.deepEqual(await host.request('project-profile-selection', value), [
+      { speciesId: 1, cost: 2, formIndex: 0 }, { speciesId: 10, cost: 0.5, formIndex: 0 },
+    ]);
+    const corrupt = structuredClone(value); corrupt.unlocks[0].ivs[0]--;
+    await assert.rejects(host.request('normalize-profile-draft', corrupt), /PROFILE_SELECTION_MISMATCH/);
+    assert.deepEqual((await host.request('state')).random, before.random);
+  } finally { await host.close(); }
+});
+
 test('capture/validate/restore keeps the minimal original profile and costs independently', async t => {
   const egg = new api.Egg(28123456, 0, 3, 1000);
   const gd = gameData([1, 10], { 1: { caught: 25 }, 10: { caught: 25 } }, [egg]);

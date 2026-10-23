@@ -31,12 +31,12 @@ const identity = value => {
     fail('INVALID_PROFILE_IDENTITY');
 };
 
-export function validateProfile(value) {
+function validateProfileSelection(value, allowEmpty: boolean) {
   exact(value, KEYS);
   if (value.version !== PROFILE_VERSION) fail('INVALID_PROFILE_VERSION');
   identity(value.trainer);
-  array(value.starters, 1, 6, 'INVALID_PROFILE_STARTERS');
-  array(value.costs, 1, 6, 'INVALID_PROFILE_COSTS');
+  array(value.starters, allowEmpty ? 0 : 1, 6, 'INVALID_PROFILE_STARTERS');
+  array(value.costs, allowEmpty ? 0 : 1, 6, 'INVALID_PROFILE_COSTS');
   if (value.starters.length !== value.costs.length) fail('INVALID_PROFILE_COSTS');
   const starters = value.starters.map(selection => validateStarterSelection(selection));
   if (new Set(starters.map(starter => starter.speciesId)).size !== starters.length) fail('DUPLICATE_STARTER_SPECIES');
@@ -97,8 +97,8 @@ export function validateProfile(value) {
 }
 
 /** Capture only the identity, selected starters, cost counters, and egg mirror. */
-export function captureProfile(gameData, starters) {
-  array(starters, 1, 6, 'INVALID_PROFILE_STARTERS');
+function captureProfileSelection(gameData, starters, allowEmpty: boolean) {
+  array(starters, allowEmpty ? 0 : 1, 6, 'INVALID_PROFILE_STARTERS');
   if (!gameData || !isInt(gameData.trainerId) || gameData.trainerId < 0 || gameData.trainerId >= 65536
     || !isInt(gameData.secretId) || gameData.secretId < 0 || gameData.secretId >= 65536)
     fail('INVALID_PROFILE_IDENTITY');
@@ -129,15 +129,20 @@ export function captureProfile(gameData, starters) {
   });
   if (!Array.isArray(gameData.eggs)) fail('INVALID_PROFILE_EGGS');
   const eggs = originalOwnedEggStateCodec.capture({ players: [gameData.eggs, []] }).players[0];
-  return validateProfile({
+  return validateProfileSelection({
     version: PROFILE_VERSION,
     trainer: { trainerId: gameData.trainerId, secretId: gameData.secretId },
     starters: selections.map(entry => entry.starter),
     unlocks: selections.map(entry => entry.unlock),
     costs: selections.map(entry => entry.cost),
     eggs,
-  });
+  }, allowEmpty);
 }
+
+export const validateProfile = value => validateProfileSelection(value, false);
+export const validateProfileDraft = value => validateProfileSelection(value, true);
+export const captureProfile = (gameData, starters) => captureProfileSelection(gameData, starters, false);
+export const captureProfileDraft = (gameData, starters) => captureProfileSelection(gameData, starters, true);
 
 export function restoreProfile(value) {
   const normalized = validateProfile(value);
@@ -151,8 +156,8 @@ export function restoreProfile(value) {
 }
 
 /** Original getSpeciesStarterValue over the imported counters; preserves fractions. */
-export function priceProfile(value) {
-  const normalized = validateProfile(value);
+function priceSelection(value, allowEmpty: boolean) {
+  const normalized = validateProfileSelection(value, allowEmpty);
   const view = Object.create(GameData.prototype);
   view.dexData = Object.fromEntries(normalized.costs.map(cost => [cost.speciesId,
     { caughtCount: cost.caughtCount, hatchedCount: cost.hatchedCount }]));
@@ -164,4 +169,14 @@ export function priceProfile(value) {
     return { speciesId: starter.speciesId, cost };
   });
   return { version: PROFILE_VERSION, starters, total };
+}
+
+export const priceProfile = value => priceSelection(value, false);
+export const priceProfileDraft = value => priceSelection(value, true);
+
+// Only selected species, form and original price are public in the lobby.
+export function projectProfileSelection(value) {
+  const normalized = validateProfileDraft(value), priced = priceProfileDraft(normalized);
+  return priced.starters.map((entry, index) => ({ ...entry,
+    formIndex: restoreStarterSelection(normalized.starters[index]).props.formIndex }));
 }

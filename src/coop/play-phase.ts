@@ -315,6 +315,7 @@ export default class CoopPlayPhase extends Phase {
     await this.scene.ui.setMode(Mode.MESSAGE);
     if (this.epoch !== snapshot.connectionEpoch || this.disposed) return;
     this.presentation ??= new CoopBattlePresentation(this.scene);
+    let presented = false;
     try {
       await this.presentation.apply(snapshot, this.model.applied);
       if (this.epoch !== snapshot.connectionEpoch || this.disposed) return;
@@ -322,6 +323,7 @@ export default class CoopPlayPhase extends Phase {
         revision: snapshot.revision, decisionId: snapshot.decisionId,
         isCurrent: () => this.epoch === snapshot.connectionEpoch && !this.disposed,
       });
+      presented = true;
     } catch (error: any) {
       // Presentation is never allowed to hold the authoritative ACK forever.
       this.setStatus(`战斗展示回放失败：${error?.message ?? error}`, true);
@@ -330,7 +332,7 @@ export default class CoopPlayPhase extends Phase {
     this.renderReserve();
     (this.scene as any).standbyPhase = this;
     (this.scene as any).waveCountText?.setText(String(snapshot.shared.waveIndex));
-    this.battleSignature = signature;
+    this.battleSignature = presented ? signature : '';
     // Keep a presentation error visible instead of immediately overwriting it.
   }
 

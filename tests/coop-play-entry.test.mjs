@@ -393,6 +393,21 @@ test('authoritative snapshot events are replayed once in order and never mutate 
   assert.deepEqual(calls, ['first', 'trainer'], 'a replayed snapshot event id is not displayed twice');
 });
 
+test('failed presentation can retry the same snapshot instead of caching a successful signature', async () => {
+  const { p, errors } = phase();
+  p.seat=0;p.epoch='retry-epoch';p.model={applied:{}};
+  p.scene={ui:{setMode:async()=>{} }};
+  p.renderReserve=()=>{};
+  p.clearPreparationParty=p.clearActiveSwitchParty=()=>{};
+  let attempts=0;
+  p.presentation={apply:async()=>{if(++attempts===1)throw new Error('synthetic asset failure');},playEvents:async()=>{}};
+  const value={connectionEpoch:'retry-epoch',decisionId:'retry',revision:1,shared:{waveIndex:1},personal:{decision:{kind:'wait-actions'}}};
+  await p.enterBattle(value);
+  assert.equal(p.battleSignature,'');assert.ok(errors.some(error=>error.includes('synthetic asset failure')));
+  await p.enterBattle(value);assert.equal(attempts,2);assert.notEqual(p.battleSignature,'');
+  await p.enterBattle(value);assert.equal(attempts,2,'a successful duplicate does not rebuild the menu');
+});
+
 test('cancel during message display prevents later text and leaves unfinished events replayable', async () => {
   let entered;
   const pending = new Promise(resolve => { entered = resolve; });

@@ -62,7 +62,8 @@ test('VS-02B-12R equal trainer prize: durable winning-turn retry, owned messages
     assert.equal(state.sa.shared.waveIndex,6);assert.equal(state.sa.personal.decision.kind,'wait-actions');
     state=await submitBoth(env,active,state.sa,state.sb,[fightAction(state.sa),fightAction(state.sb)]);
     assert.ok(state.sa.events.some(e=>e.kind==='phase-start'&&e.phase==='MoveEffectPhase'));
-    assert.equal(state.sa.personal.resources.money,55);assert.equal(state.sb.personal.resources.money,55);
+    assert.equal(state.sa.personal.resources.money,initial[0].personal.resources.money+55);
+    assert.equal(state.sb.personal.resources.money,initial[1].personal.resources.money+55);
   }finally{if(env)await env.close();await disk.cleanup();}
  });
 

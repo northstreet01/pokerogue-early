@@ -1,6 +1,9 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createOriginalRuleHost } from '../server/original-rule-host.mjs';
+import { buildCoopRuntime } from '../scripts/build-coop-runtime.mjs';
+
+before(async () => { await buildCoopRuntime(); });
 
 const parties = [[1, 4, 7], [906, 909, 912]];
 const eggState = { players: [[], []] };
@@ -119,6 +122,9 @@ test('ordinary failed seat-1 capture preserves the ally FIGHT and spends only it
     assert.deepEqual(after.players[0].pokeballCounts, c.players[0].pokeballCounts);
     assert.equal(pp(after, 0)[action.cursor].fields.ppUsed, before[action.cursor].fields.ppUsed + 1);
     assert.equal(result.intents.some(i => i.kind === 'capture-pending'), false);
+    assert.deepEqual(result.events.filter(event => event.kind === 'capture-result'), [
+      { kind: 'capture-result', seat: 1, targetId: ball.targetId, pokeballType: 0, outcome: 'failed' },
+    ]);
   } finally { await h.close(); }
 });
 
@@ -129,6 +135,9 @@ test('ordinary successful seat-1 capture retains original score and linked durab
     const submitted = (await h.request('native-submit', { checkpoint: c, inputs: { 0: offensive(c, 0), 1: ball } })).checkpoint;
     const result = await h.request('native-run-to-boundary', submitted);
     const [caught] = captures(result.checkpoint);
+    assert.deepEqual(result.events.filter(event => event.kind === 'capture-result'), [
+      { kind: 'capture-result', seat: 1, targetId: ball.targetId, pokeballType: 0, outcome: 'caught' },
+    ]);
     assert.equal(caught.owner, 1);
     assert.equal(captures(result.checkpoint).length, 1);
     assert.equal(reserves(result.checkpoint).length, 0);
@@ -192,6 +201,9 @@ test('a queued capture cannot retarget a replacement instance or spend a ball af
     const before = structuredClone(state);
     const result = await h.request('native-step', state);
     assert.ok(result.events.some(e => e.kind === 'capture-cancelled' && e.reason === 'target-left'));
+    assert.deepEqual(result.events.filter(event => event.kind === 'capture-result'), [
+      { kind: 'capture-result', seat: 0, targetId: 4294967295, pokeballType: ball.pokeballType, outcome: 'cancelled' },
+    ]);
     assert.deepEqual(result.checkpoint.players, before.players);
     assert.deepEqual(result.checkpoint.roster, before.roster);
     assert.deepEqual(result.checkpoint.battle.random, before.battle.random);

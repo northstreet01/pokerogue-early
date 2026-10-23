@@ -140,7 +140,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
   }
   function scopeEvent(event, checkpoint) {
     if (event.kind === 'message' && [0,1].includes(event.scope)) return { ...event };
-    if (['preparation-open', 'legacy-capture-choice'].includes(event.kind) && (event.seat === 0 || event.seat === 1))
+    if (['preparation-open', 'legacy-capture-choice', 'capture-result'].includes(event.kind) && (event.seat === 0 || event.seat === 1))
       return { ...event, scope: event.seat };
     if (event.pokemonId !== undefined) {
       const entry = checkpoint.roster.entries.find(item => (item.pokemon?.fields?.id ?? item.pokemon?.id) === event.pokemonId);

@@ -390,6 +390,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       const completed = new Promise<void>(resolve => { completePhase = resolve; });
       let captureSeat: number | null = null, captureParty: Pokemon[] | null = null;
       let captureTarget: any = null, captureTargetScene: any = null;
+      let captureBallCount: number | null = null;
       let priorParty: Set<Pokemon> | null = null;
       let cancelCapture = false;
       if (p instanceof AttemptCapturePhase) {
@@ -410,6 +411,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         captureTargetScene = captureTarget?.scene;
         if (captureTarget) captureTarget.scene = views[captureSeat];
         root.pokeballCounts = c.players[captureSeat].pokeballCounts;
+        captureBallCount = root.pokeballCounts[(p as any).pokeballType];
       }
       const scope = bindPhase(p); root.currentPhase = p;
       if (p instanceof MoneyRewardPhase) check((scope === 0 || scope === 1)
@@ -574,6 +576,15 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         for (const queue of [root.phaseQueue, root.phaseQueuePrepend])
           for (let index = queue.length - 1; index >= 0; index--)
             if (queue[index] instanceof MovePhase) queue.splice(index, 1);
+      }
+      if (p instanceof AttemptCapturePhase && !resume && captureSeat !== null) {
+        // Report what the original phase actually did. This port never rolls
+        // capture RNG, changes inventory, or grants an additional individual.
+        const spent = captureBallCount! - c.players[captureSeat].pokeballCounts[(p as any).pokeballType];
+        check(spent === 0 || spent === 1, 'INVALID_CAPTURE_CONSUMPTION');
+        events.push({ kind: 'capture-result', seat: captureSeat,
+          targetId: (p as any).coopTargetId, pokeballType: (p as any).pokeballType,
+          outcome: spent === 0 ? 'cancelled' : waiting === 'capture-select' || captureTarget?.hp === 0 ? 'caught' : 'failed' });
       }
       check(ended === 1 || ended === 0 && waiting, 'INCOMPLETE_NATIVE_PHASE'); root.currentPhase = null; sync();
       if (waiting) return { completed: false, suspended: true, pendingTasks: 0, events: [...events], grants: [] };

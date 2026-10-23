@@ -136,3 +136,24 @@ test('switched-out participants receive original experience and reach preparatio
     }
   } finally { await h.close(); }
 });
+
+test('native switch exports entry HP before an incoming creature takes same-turn original damage', async () => {
+  let witnessed = false;
+  for (let index = 0; index < 8 && !witnessed; index++) {
+    const {h,c} = await open(`vs20-incoming-${index}`);
+    try {
+      const action = switchOption(c,0), incoming = c.roster.entries.find(entry=>entry.pokemon.fields.id===action.pokemonId).pokemon.fields;
+      let next = (await h.request('native-submit',{checkpoint:c,inputs:{0:action,1:fightOption(c,1)}})).checkpoint;
+      const result = await h.request('native-run-to-boundary',next);
+      const entryIndex = result.events.findIndex(event=>event.kind==='pokemon-enter'&&event.pokemonId===incoming.id);
+      assert.ok(entryIndex>=0,'original switch emits the public entry event');
+      assert.equal(result.events[entryIndex].view.hp,incoming.hp);
+      const damageIndex = result.events.findIndex(event=>event.kind==='damage-display'&&event.pokemonId===incoming.id&&event.remainingHp<incoming.hp);
+      if(damageIndex<0)continue; // The original seeded AI can target the companion instead.
+      assert.ok(damageIndex>entryIndex);
+      const final=result.checkpoint.roster.entries.find(entry=>entry.pokemon.fields.id===incoming.id).pokemon.fields;
+      assert.ok(final.hp<incoming.hp);witnessed=true;
+    } finally {await h.close();}
+  }
+  assert.equal(witnessed,true,'a real seeded original turn must damage the new arrival');
+});

@@ -270,6 +270,18 @@ export class CoopBattlePresentation {
     this.displayedById.set(display.id, display); this.attachField(field, batch.snapshot.shared);
     void display.setFieldPosition(slot % 2 ? FieldPosition.RIGHT : FieldPosition.LEFT);
     if (event.kind === 'pokemon-enter') {
+      if (event.view) {
+        // A switch and the incoming Pokemon's damage can share one committed
+        // snapshot. Release starts from the original entry event, not final HP.
+        display.hp = event.view.hp;
+        if (event.view.maxHp !== display.getMaxHp()) {
+          if (Object.prototype.hasOwnProperty.call(display, 'getMaxHp')) display.getMaxHp = () => event.view.maxHp;
+          else display.stats[0] = event.view.maxHp;
+        }
+        this.modelKeys.delete(display.id);
+        await within(Promise.resolve(display.updateInfo(true)), 1200, signal);
+        if (signal.aborted) return;
+      }
       await visual((local, done) => animatePokemonSummon(display, slot < 2, { complete: done }, local), 3000, signal);
     } else if (!display.visible) {
       display.showInfo(); display.setVisible(display.hp > 0);

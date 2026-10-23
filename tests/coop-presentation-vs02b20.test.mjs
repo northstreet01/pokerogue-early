@@ -146,3 +146,19 @@ test('several original move/HP effects have a bounded batch budget without the o
     assert.equal(played,10);
   } finally {Date.now=clock;}
 });
+
+test('an incoming original display starts with its entry HP before a same-turn attack, then converges to the verified final model',async()=>{
+  for(const slot of [0,2]){
+    const {p,snapshot,applied,model,scene}=fixture();await p.apply(snapshot,applied);
+    const initial=model.hp, incoming={...snapshot.shared.pokemon[0],id:model.id+1,owner:slot===0?0:null,index:0,fieldIndex:slot,hp:initial-5};
+    const field=[...snapshot.shared.field];field[slot]=incoming.id;
+    const next={...snapshot,revision:1,shared:{...snapshot.shared,field,pokemon:[...snapshot.shared.pokemon.filter(v=>field.includes(v.id)),incoming]},events:[
+      {kind:'pokemon-enter',eventId:`incoming-${slot}`,pokemonId:incoming.id,view:{...incoming,hp:initial}},
+      {kind:'battle-animation',eventId:`incoming-hit-${slot}`,sourceId:incoming.id,targetId:incoming.id,moveId:33},
+      {kind:'damage-display',eventId:`incoming-damage-${slot}`,pokemonId:incoming.id,remainingHp:incoming.hp},
+    ]};
+    p.playAnimation=async()=>assert.equal(p.displayedById.get(incoming.id).hp,initial,'incoming HP must precede the same-turn hit');
+    await p.apply(next,applied,{replay:true});await p.playEvents(next.events);
+    assert.equal(scene.getField()[slot].hp,incoming.hp);assert.equal(model.hp,initial);
+  }
+});

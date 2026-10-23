@@ -21,10 +21,12 @@ export class HomePhase extends Phase {
   private transitions: Promise<void> = Promise.resolve();
   private returnButton?: HTMLButtonElement;
   private originalData?: GameData;
+  private music = new AbortController();
 
   start(): void {
     super.start();
     this.scene.fadeOutBgm(0, false);
+    this.scene.playBgm?.('menu', false, this.music.signal);
     this.scene.ui.fadeIn(250);
     const button = document.createElement('button');
     button.type = 'button'; button.textContent = '返回初始界面';
@@ -42,6 +44,7 @@ export class HomePhase extends Phase {
 
   private dispose(): void {
     this.disposed = true; this.epoch++;
+    this.music.abort(); this.scene.fadeOutBgm?.(150, true);
     this.returnButton?.remove();
     this.releaseView();
   }

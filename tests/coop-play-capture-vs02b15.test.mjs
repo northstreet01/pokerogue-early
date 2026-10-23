@@ -14,6 +14,7 @@ import { FormalRoomStore } from '../server/formal-coop-service.mjs';
 import { formalFixture } from './helpers/formal-ws.mjs';
 import { defaultTrainerRoute, progressDefault } from './helpers/native-default-trainer.mjs';
 import { createSnapshotConsumer } from '../src/battle-core/coop-client.mjs';
+import { presentationFixture } from './helpers/coop-presentation-fixture.mjs';
 
 let api, profiles, firstPreparation;
 before(async () => {
@@ -44,7 +45,7 @@ const until = async (predicate, description) => {
 
 // Original phase + original Command/Ball handlers + real IDB/WS/service/Worker.
 // Rendering/asset ports are headless: this is not a browser visual acceptance.
-async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry = false) {
+async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry = false, render = false) {
   const directory = await mkdtemp(join(tmpdir(), 'vs02b15-ui-'));
   const original = createOriginalCoopAdapter({ fixture: { profileLobby: true,
     seed: 'learning-natural-2', identities: profiles.map(profile => profile.trainer) } });
@@ -93,6 +94,15 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry
   if (prepared) {
     phase.presentation = { apply: async () => {}, playEvents: async () => {} };
     phase.enterBattle = api.CoopPlayPhase.prototype.enterBattle.bind(phase);
+  }
+  let visual;
+  if (render) {
+    visual = presentationFixture(api, scene);
+    // Actual reconciliation and replay; only Phaser allocation/assets are ports.
+    scene.ui = ui;
+    phase.presentation = visual.p;
+    phase.enterBattle = api.CoopPlayPhase.prototype.enterBattle.bind(phase);
+    phase.scene.gameMode = api.createOriginalRuntime('render-mode', profiles[seat].trainer).scene.gameMode;
   }
   const ball = Object.assign(Object.create(api.BallUiHandler.prototype), { scene, cursor: 0,
     countsText: { setText() {} }, pokeballSelectContainer: { setVisible() {} },
@@ -145,7 +155,7 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry
   const submitPeer = action => peer.send({ type: 'submitAction', roomId: peerLatest.roomId, runId: peerLatest.runId,
     decisionId: peerLatest.decisionId, expectedRevision: peerLatest.revision, actionId: crypto.randomUUID(), action });
   const environment = { phase, command, ball, ui, peer, errors, modes, server, directory, adapter,
-    peerSnapshot: () => peerLatest, submitPeer, close };
+    peerSnapshot: () => peerLatest, submitPeer, close, visual };
   if (lobbyOnly || prepared) return environment;
   await phase.sendProfile(true, profiles[seat]);
   await until(() => !phase.actionId && phase.latest.shared.ready[seat] && phase.inputReady
@@ -220,6 +230,53 @@ const attack = snapshot => {
   return options.find(option => [52, 55, 22, 670].includes(moves[option.cursor]?.fields.moveId))
     ?? options.find(option => [33, 10].includes(moves[option.cursor]?.fields.moveId)) ?? options[0];
 };
+
+for (const seat of [0, 1]) test(`VS20 seat ${seat}: real IDB/dual WS/Worker preparation keeps original displays and peer menu callbacks`, { timeout: 120000 }, async t => {
+  // firstPreparation was reached through the unmodified natural Worker route.
+  const env = await openUiRoom(seat, t, false, firstPreparation, false, true);
+  try {
+    const {phase,visual,modes}=env;
+    await until(()=>phase.inputReady && modes.at(-1)?.[0]===api.Mode.MODIFIER_SELECT,'original shop');
+    const objects=[...phase.presentation.field], allocations={...visual.counts};
+    const menu=modes.at(-1), baseline=phase.latest, revision=phase.latest.revision;
+    await until(()=>env.peerSnapshot().revision===revision,'peer shop ACK');
+    env.submitPeer({kind:'preparation',operation:'skip-reward'});
+    await until(()=>phase.latest.revision>revision && phase.inputReady,'peer reward snapshot');
+    assert.deepEqual(visual.counts,allocations);
+    assert.deepEqual(phase.presentation.field,objects);
+    const changed=(a,b,path='')=>JSON.stringify(a)===JSON.stringify(b)?[]:
+      a&&b&&typeof a==='object'&&typeof b==='object'?[...new Set([...Object.keys(a),...Object.keys(b)])].flatMap(k=>changed(a[k],b[k],`${path}.${k}`)):[path];
+    assert.equal(modes.at(-1),menu,`peer update preserves the open original shop; changed ${changed({decisionId:baseline.decisionId,personal:baseline.personal,shared:baseline.shared},{decisionId:phase.latest.decisionId,personal:phase.latest.personal,shared:phase.latest.shared}).join(',')}`);
+    // A callback captured before that peer update must still submit legally.
+    const previous=phase.latest;
+    menu[3](-1,0);
+    await until(()=>phase.latest.revision>previous.revision && phase.inputReady,'retained original skip callback');
+    assert.equal(phase.latest.personal.decision.players.rewardResolved,true);
+    assert.deepEqual(phase.presentation.field,objects);
+    assert.deepEqual(visual.counts,allocations);
+    const beforeBuy=phase.latest;
+    const purchases=beforeBuy.personal.decision.players.shop.flatMap(option=>{
+      const type=api.modifierTypes[option.type.catalogId]?.();
+      if(option.cost>beforeBuy.personal.resources.money || !type?.selectFilter)return [];
+      return phase.model.applied.personal.party.flatMap(entry=>{
+        if(type.selectFilter(entry.pokemon)!==null)return [];
+        const moveIndex=type.moveSelectFilter?entry.pokemon.getMoveset().findIndex(move=>type.moveSelectFilter(move)===null):null;
+        return moveIndex===-1?[]:[{option,pokemonId:entry.id,moveIndex}];
+      });
+    });
+    assert.ok(purchases.length,'naturally generated affordable effective consumable');
+    const purchase=purchases[0];
+    await phase.sendAction({kind:'preparation',operation:'buy',optionId:purchase.option.id,pokemonId:purchase.pokemonId,
+      moveIndex:purchase.moveIndex,fusionId:null},'VS20 purchase verification');
+    await until(()=>phase.latest.revision>beforeBuy.revision && phase.inputReady,'incremental purchase');
+    assert.equal(phase.latest.personal.resources.money,beforeBuy.personal.resources.money-purchase.option.cost);
+    assert.deepEqual(phase.presentation.field,objects);
+    assert.deepEqual(visual.counts,allocations);
+    assert.equal(modes.at(-1)[0],api.Mode.MODIFIER_SELECT);
+    assert.deepEqual(await phase.storage.pendingActions(location.origin,phase.roomId,seat),[]);
+    assert.deepEqual(env.errors,[]);
+  } finally {await env.close();}
+});
 
 for (const seat of [0, 1]) test(`VS17 natural preparation seat ${seat}: original menu/Party, IDB/WS money, completion and next FIGHT`, { timeout: 90000 }, async t => {
   const env = await openUiRoom(seat, t);

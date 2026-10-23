@@ -76,11 +76,16 @@ export default class CoopPlayPhase extends Phase {
   private exitTask: Promise<void> | null = null;
   private joining = false;
   private recoveryVersion = 0;
+  private presentedSnapshot: any = null;
+  private preparationViewKey = '';
+  private preparationCarryRevision: number | null = null;
+  private lobbyMusic = new AbortController();
 
   constructor(scene: BattleScene) { super(scene); }
 
   start() {
     super.start();
+    this.scene.playBgm?.('menu', false, this.lobbyMusic.signal);
     this.scene.enableTutorials = false; // Cooperative entry does not write solo tutorial flags.
     this.createOverlay();
     this.model = createOriginalClientModel({ restorePokemonState, capturePokemonState, restoreModifierState, captureModifierState });
@@ -107,6 +112,7 @@ export default class CoopPlayPhase extends Phase {
 
   private stopSession() {
     if (this.disposed) return;
+    this.lobbyMusic.abort(); this.scene.fadeOutBgm?.(150, true);
     this.disposed = true; this.lifecycle++;
     this.epoch = null; this.consumer = null;
     this.inputReady = false; this.battleInputActive = false; this.starterOpen = false;
@@ -281,7 +287,8 @@ export default class CoopPlayPhase extends Phase {
           && message.revision === this.latest.revision) {
           this.inputReady = !message.blocked;
           this.submitted = !!message.submitted?.[this.seat!];
-          if (this.submitted || !this.inputReady) {
+          if ((this.submitted || !this.inputReady) && !(this.latest.personal.decision.kind === 'preparation'
+            && this.preparationCarryRevision === message.revision && message.reason === 'WAITING_ACK')) {
             this.clearPreparationParty();
             this.clearActiveSwitchParty();
             this.battleInputActive = false;
@@ -423,24 +430,29 @@ export default class CoopPlayPhase extends Phase {
 
   private async enterBattle(snapshot: any) {
     if (this.seat === null) return;
+    this.lobbyMusic.abort();
     if (Number.isFinite(snapshot.personal.resources?.money)) {
       this.scene.money = snapshot.personal.resources.money;
       this.scene.updateMoneyText?.();
     }
     const signature = `${snapshot.connectionEpoch}:${snapshot.decisionId}:${snapshot.revision}`;
     if (this.battleSignature === signature) return;
-    this.clearPreparationParty();
-    this.clearActiveSwitchParty();
+    const preparing = this.presentedSnapshot?.personal.decision.kind === 'preparation'
+      && snapshot.personal.decision.kind === 'preparation'
+      && this.presentedSnapshot.shared.waveIndex === snapshot.shared.waveIndex
+      && this.presentedSnapshot.connectionEpoch === snapshot.connectionEpoch;
+    const unchanged = preparing && this.preparationKey(this.presentedSnapshot) === this.preparationKey(snapshot);
+    if (!unchanged) { this.clearPreparationParty(); this.clearActiveSwitchParty(); }
     this.battleInputActive = false;
     this.submitted = false;
-    this.preparationSignature = '';
+    if (!unchanged) this.preparationSignature = '';
     this.switchSignature = '';
-    await this.scene.ui.setMode(Mode.MESSAGE);
+    if (!preparing) await this.scene.ui.setMode(Mode.MESSAGE);
     if (this.epoch !== snapshot.connectionEpoch || this.disposed) return;
     this.presentation ??= new CoopBattlePresentation(this.scene);
     let presented = false;
     try {
-      await this.presentation.apply(snapshot, this.model.applied);
+      await this.presentation.apply(snapshot, this.model.applied, { replay: true, preserveFieldBinding: unchanged && !!this.releaseTeamParty });
       if (this.epoch !== snapshot.connectionEpoch || this.disposed) return;
       await this.presentation.playEvents(snapshot.events ?? [], {
         revision: snapshot.revision, decisionId: snapshot.decisionId,
@@ -457,6 +469,7 @@ export default class CoopPlayPhase extends Phase {
     (this.scene as any).standbyPhase = this;
     (this.scene as any).waveCountText?.setText(String(snapshot.shared.waveIndex));
     this.battleSignature = presented ? signature : '';
+    if (presented) { this.presentedSnapshot = snapshot; this.preparationCarryRevision = preparing ? snapshot.revision : null; }
     // Keep a presentation error visible instead of immediately overwriting it.
   }
 
@@ -471,7 +484,19 @@ export default class CoopPlayPhase extends Phase {
   }
 
   private isPersonalInputCurrent(snapshot: any, epoch: string | null) {
-    return !this.disposed && this.latest === snapshot && this.epoch === epoch && this.inputReady && !this.actionId && !this.submitted;
+    const same = this.latest === snapshot || snapshot?.personal.decision.kind === 'preparation'
+      && this.latest?.personal.decision.kind === 'preparation'
+      && this.presentedSnapshot?.decisionId === this.latest.decisionId
+      && this.preparationCarryRevision === this.latest.revision && this.preparationKey(snapshot) === this.preparationKey(this.latest);
+    return !this.disposed && same && this.epoch === epoch && this.inputReady && !this.actionId && !this.submitted;
+  }
+
+  private preparationKey(snapshot: any): string {
+    // A partner operation advances the shared decision id without changing our
+    // choices. Only a successfully presented/verified revision may carry input.
+    return canonical({ runId: snapshot.runId ?? null, decision: { ...snapshot.personal.decision, id: null }, resources: snapshot.personal.resources ?? null,
+      party: snapshot.personal.party ?? null, field: snapshot.shared?.field ?? null,
+      wave: snapshot.shared?.waveIndex ?? null, biome: snapshot.shared?.biome ?? null });
   }
 
   private async openPreparationMenu() {
@@ -480,6 +505,8 @@ export default class CoopPlayPhase extends Phase {
       || !decision.requiredSeats.includes(this.seat) || !this.isPersonalInputCurrent(snapshot, epoch)) return;
     const signature = `${epoch}:${decision.id}:${snapshot.revision}`;
     if (this.preparationSignature === signature) return;
+    const viewKey = this.preparationKey(snapshot);
+    if (this.preparationSignature && this.preparationViewKey === viewKey) { this.preparationSignature = signature; return; }
     const player = decision.players;
     const menuEpoch = ++this.preparationMenuEpoch;
     const current = () => menuEpoch === this.preparationMenuEpoch && this.isPersonalInputCurrent(snapshot, epoch);
@@ -530,7 +557,7 @@ export default class CoopPlayPhase extends Phase {
           submit(() => this.sendPreparation(player.ready ? 'unready' : 'ready', snapshot, epoch));
         } } });
     }
-    if (this.isPersonalInputCurrent(snapshot, epoch)) this.preparationSignature = signature;
+    if (this.isPersonalInputCurrent(snapshot, epoch)) { this.preparationSignature = signature; this.preparationViewKey = viewKey; }
   }
 
   private async choosePreparationReward(option: any, snapshot: any, epoch: string | null, operation = 'reward') {
@@ -540,7 +567,7 @@ export default class CoopPlayPhase extends Phase {
       pokemonId: null, moveIndex: null, fusionId: null };
     const targetKind = preparationItemTarget(type);
     if (targetKind === 'none') {
-      await this.scene.ui.setMode(Mode.MESSAGE);
+      await Promise.resolve(); // A same-turn leave can invalidate this gesture without fading the shop.
       if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
       await this.sendAction(action, '道具选择已提交，等待服务器裁定…');
       return;
@@ -1209,7 +1236,7 @@ export default class CoopPlayPhase extends Phase {
     if (this.latest?.personal.decision.kind === 'lobby') this.renderLobbyControls();
     else if (persisted) {
       this.controls.replaceChildren();
-      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (action.kind !== 'preparation' || action.operation === 'reroll') await this.scene.ui.setMode(Mode.MESSAGE);
     } else {
       this.preparationSignature = ''; this.switchSignature = '';
       await this.openDecisionInput();

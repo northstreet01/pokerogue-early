@@ -137,6 +137,15 @@ export default class CoopPlayPhase extends Phase {
     this.controls = document.createElement('div');
     this.reserveLine = document.createElement('div'); this.reserveLine.className = 'status'; this.reserveLine.hidden = true;
     this.panel.append(title, this.status, this.roomLine, this.budget, this.reserveLine, this.controls);
+    // Keep this outside the decision controls: no sync/menu state may hide it.
+    const exit = this.button('退出本局／返回首页', () => this.leaveSession());
+    exit.id = 'coop-exit-session'; exit.type = 'button';
+    exit.title = '仅本人离开，房间与已提交行动保留；服务器不可达时也可退出';
+    exit.setAttribute('aria-describedby', 'coop-exit-note');
+    for (const type of ['keydown', 'keyup']) exit.addEventListener(type, event => event.stopPropagation());
+    const note = document.createElement('span'); note.id = 'coop-exit-note'; note.className = 'status';
+    note.textContent = '仅本人离开，房间保留';
+    this.panel.append(exit, note);
     this.overlay.append(this.panel);
     document.body.append(this.overlay);
     this.renderLobbyControls();

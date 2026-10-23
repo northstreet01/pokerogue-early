@@ -4,6 +4,8 @@ import { createRequire, isBuiltin } from 'node:module';
 import { resolve } from 'node:path';
 import { build } from 'vite';
 import { IDBFactory } from 'fake-indexeddb';
+import { JSDOM } from 'jsdom';
+import { showCoopExitReturn } from '../src/coop/exit-home.mjs';
 import { createPlayStorage } from '../src/coop/play-storage.mjs';
 import { pauseAutoResume, autoResumePaused, allowAutoResume } from '../src/coop/exit-recovery.mjs';
 import { digestProjection } from '../src/battle-core/coop-client.mjs';
@@ -243,6 +245,60 @@ test('old socket callbacks cannot reconnect after exit or feed a newer connectio
   assert.equal(p.reconnectTimer, null);
   assert.equal(sockets.length, 2);
   assert.deepEqual(sent.map(m => m.type), ['hello']);
+});
+
+test('DOM exit remains outside replaced controls with input blocked and hung menu/message queues', async t => {
+  const oldDocument = globalThis.document;
+  const dom = new JSDOM('<body><div id="app"></div></body>');
+  globalThis.document = dom.window.document;
+  t.after(() => { globalThis.document = oldDocument; dom.window.close(); });
+  const { p } = phase(), env = exitEnvironment(p);
+  p.createOverlay();
+  const button = document.getElementById('coop-exit-session');
+  assert.equal(button.disabled, false);
+  assert.ok(!p.controls.contains(button));
+  p.controls.replaceChildren();
+  assert.equal(document.getElementById('coop-exit-session'), button);
+  assert.match(document.getElementById('coop-exit-note').textContent, /仅本人离开/);
+  p.inputReady = false; p.messageChain = new Promise(() => {});
+  p.scene.ui.setMode = () => new Promise(() => {});
+  await p.storage.beginSession(origin, p.session());
+  button.click(); await new Promise(resolve => setImmediate(resolve)); await p.exitTask;
+  assert.deepEqual(env.navigations, ['/?coopExit=saved']);
+  assert.equal(document.getElementById('coop-play-overlay'), null);
+});
+
+test('return notice offers explicit fresh cooperative entry, explains failed persistence and preserves the solo page', () => {
+  for (const result of ['saved', 'limited', 'unknown', '']) {
+    const dom = new JSDOM('<body><div id="app">original solo</div></body>', { url: `${origin}/?coopExit=${result}` });
+    try {
+      const notice = showCoopExitReturn(dom.window.document, dom.window.location);
+      assert.equal(dom.window.document.getElementById('app').textContent, 'original solo');
+      if (!['saved', 'limited'].includes(result)) { assert.equal(notice, null); continue; }
+      assert.equal(showCoopExitReturn(dom.window.document, dom.window.location), notice);
+      assert.equal(notice.querySelector('a').getAttribute('href'), '/coop-play.html?fresh=1');
+      assert.match(notice.textContent, result === 'limited' ? /未确认保存/ : /未清除/);
+      notice.querySelector('button').click();
+      assert.equal(dom.window.document.getElementById('coop-exit-return'), null);
+    } finally { dom.window.close(); }
+  }
+});
+
+test('explicit activation clears fallback pause only after its IDB commit and failed activation preserves it', async () => {
+  const { p, sent } = phase(); exitEnvironment(p);
+  pauseAutoResume(); assert.equal(autoResumePaused(), true);
+  const commit = deferred(), started = deferred(), store = p.storage;
+  p.storage = { ...store, beginSession: async (...args) => { started.resolve(); await commit.promise; return store.beginSession(...args); } };
+  const task = p.joinRoom('FEDCBA'); await started.promise;
+  assert.equal(autoResumePaused(), true); assert.deepEqual(sent, []);
+  commit.resolve(); await task;
+  assert.equal(autoResumePaused(), false);
+  assert.deepEqual(sent.map(m => m.type), ['joinRoom']);
+  const next = phase(); exitEnvironment(next.p); pauseAutoResume();
+  next.p.storage = { beginSession: async () => { throw Error('TEST_IDB_DENIED'); } };
+  await assert.rejects(next.p.createRoom(), /TEST_IDB_DENIED/);
+  assert.equal(autoResumePaused(), true); assert.deepEqual(next.sent, []);
+  allowAutoResume();
 });
 const welcome = { type: 'welcome', ...versions, roomId: 'ABCDEF', seat: 0,
   connectionEpoch: 'epoch-1', resumeToken: 'synthetic-test-token' };

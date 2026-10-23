@@ -81,8 +81,10 @@ test('production reward validation rejects unsupported rewards and foreign targe
   const { h, c } = await prep('potion-d');
   try {
     const p = c.decision.players[0];
-    const unsupported = p.rewards.find(r => r.type.catalogId === 'TEMP_STAT_BOOSTER');
-    if (unsupported) await assert.rejects(h.request('native-validate-preparation', { checkpoint: c, seat: 0,
+    const unsupported = structuredClone(p.rewards[0]);
+    unsupported.type = api.captureModifierTypeState(api.modifierTypes.EXP_BALANCE().withIdFromFunc(api.modifierTypes.EXP_BALANCE));
+    const unsupportedCheckpoint = structuredClone(c); unsupportedCheckpoint.decision.players[0].rewards[0] = unsupported;
+    await assert.rejects(h.request('native-validate-preparation', { checkpoint: unsupportedCheckpoint, seat: 0,
       action: { kind: 'preparation', operation: 'reward', optionId: unsupported.id,
         pokemonId: null, moveIndex: null, fusionId: null } }), error => error.code === 'PREPARATION_EFFECT_UNAVAILABLE');
     const potion = p.rewards.find(r => r.type.catalogId === 'POTION');

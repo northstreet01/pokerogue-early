@@ -36,6 +36,8 @@ export { captureProfileDraft, validateProfileDraft, priceProfileDraft } from '..
 export { Egg } from '../data/egg';
 export { modifierTypes, captureModifierTypeState, getPlayerShopModifierTypeOptionsForWave } from '../modifier/modifier-type';
 export { Status, StatusEffect } from '../data/status-effect';
+export { captureModifierState, restoreModifierState } from '../modifier/modifier';
+export { default as BattleScene } from '../battle-scene';
 
 // Test/diagnostic entry: run an independent original construction under the
 // same committed random context without exposing a general rules RPC.

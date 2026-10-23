@@ -4,10 +4,10 @@ import Pokemon, { FieldPosition, HitResult } from '../field/pokemon';
 import { NewBattlePhase, EncounterPhase, ShowTrainerPhase, SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase,
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
-  MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase } from '../phases';
+  MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase, BerryPhase, PokemonHealPhase } from '../phases';
 import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase, TrainerVictoryPhase, MoneyRewardPhase } from '../phases';
 import { SelectModifierPhase } from '../phases';
-import { preparationItemTarget, isPreparationConsumable } from '../coop/preparation-item';
+import { preparationItemTarget, isPreparationModifier, isPreparationPersistent } from '../coop/preparation-item';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase } from '../phases';
 import { Mode } from '../ui/ui';
 import { GameData } from '../system/game-data';
@@ -47,7 +47,7 @@ import PartyUiHandler, { PartyOption, PartyUiMode } from '../ui/party-ui-handler
 import { createCaptureChoice, validateCaptureChoice } from '../battle-core/capture-choice.mjs';
 import { hasLegacyCaptures, legacyCaptureOptions, validateLegacyCapture } from '../battle-core/legacy-capture.mjs';
 import { nextSafeDecisionId } from '../battle-core/safe-decisions.mjs';
-import { PokemonHeldItemModifier } from '../modifier/modifier';
+import { PokemonHeldItemModifier, captureModifierState } from '../modifier/modifier';
 import { EncoreTag, TrappedTag } from '../data/battler-tags';
 import { CheckTrappedAbAttr, applyCheckTrappedAbAttrs } from '../data/ability';
 import * as Utils from '../utils';
@@ -89,7 +89,7 @@ class DisplayTarget {
 
 const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, AttemptCapturePhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
@@ -301,9 +301,21 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     scene.time.delayedCall(0, callback);
   };
   const update = BattleScene.prototype.updateModifiers;
-  for (const scene of [root, ...views]) scene.updateModifiers = function (...args) {
-    return observeRulePromise(this, update.apply(this, args));
+  const pokemonUpdates = new Map<Pokemon, PropertyDescriptor | undefined>();
+  const observePokemon = (pokemon: Pokemon) => {
+    if (pokemonUpdates.has(pokemon)) return;
+    pokemonUpdates.set(pokemon, Object.getOwnPropertyDescriptor(pokemon, 'updateInfo'));
+    const updateInfo = pokemon.updateInfo;
+    pokemon.updateInfo = (...args) => observeRulePromise(pokemon.scene, updateInfo.apply(pokemon, args));
   };
+  c.roster.entries.forEach(entry => observePokemon(entry.pokemon));
+  for (const scene of [root, ...views]) {
+    scene.updateModifiers = function (...args) { return observeRulePromise(this, update.apply(this, args)); };
+    scene.updatePartyForModifiers = function (party, ...args) {
+      party.forEach(observePokemon);
+      return observeRulePromise(this, BattleScene.prototype.updatePartyForModifiers.call(this, party, ...args));
+    };
+  }
   const generate = BattleScene.prototype.generateEnemyModifiers;
   root.generateEnemyModifiers = () => observeRulePromise(root, generate.call(root));
   root.newBattle = (...args) => {
@@ -385,7 +397,11 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     c.continuation.phaseQueuePrependSpliceIndex = root.phaseQueuePrependSpliceIndex;
   }
   return { root, views, events, intents, bindPhase, sync,
-    drainTasks: () => Promise.all(trackers.map(tracker => tracker.drain())),
+    async drainTasks() {
+      const results = await Promise.allSettled(trackers.map(tracker => tracker.drain()));
+      const failure = results.find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
+    },
     async execute(p, resume?) {
       ended = 0; waiting = null;
       const completed = new Promise<void>(resolve => { completePhase = resolve; });
@@ -444,7 +460,9 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         });
       }
       const creating = p instanceof NewBattlePhase || p instanceof EncounterPhase;
-      if (creating) check(c.players.every(player => player.modifiers.length === 0), 'UNSUPPORTED_NATIVE_ENCOUNTER_PLAYER_MODIFIERS');
+      if (creating) check(c.players.every(player => player.modifiers.every(isPreparationPersistent)), 'UNSUPPORTED_NATIVE_ENCOUNTER_PLAYER_MODIFIERS');
+      // Encounter constructs a new enemy list before sync. Original Pokemon
+      // methods still use their personal scenes; enemy generation uses root.
       const disposeModifiers = creating ? () => {} : bindCoopModifierScope(c, root, views, p);
       const disposeFaint = p instanceof FaintPhase ? bindCoopFaint(p, c) : () => {};
       const oldExperience = p.queueExperience;
@@ -591,7 +609,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       if (waiting) return { completed: false, suspended: true, pendingTasks: 0, events: [...events], grants: [] };
       return { completed: true, pendingTasks: 0, events: [...events], grants: [] };
     },
-    dispose() { disposePorts.forEach(fn => fn()); trackers.forEach(t => t.close()); }
+    dispose() {
+      for (const [pokemon, descriptor] of pokemonUpdates) {
+        if (descriptor) Object.defineProperty(pokemon, 'updateInfo', descriptor); else delete (pokemon as any).updateInfo;
+      }
+      disposePorts.forEach(fn => fn()); trackers.forEach(t => t.close());
+    }
   };
 }
 
@@ -1032,10 +1055,16 @@ function preparationEffectDriver(runtime, intents = []) {
         const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
           && e.pokemon.id === action.pokemonId);
         check(entry, 'INVALID_PREPARATION_OWNER');
-        check(type.selectFilter(entry.pokemon) === null, 'INVALID_PREPARATION_TARGET');
-        if (targetKind === 'move') check(action.moveIndex !== null && entry.pokemon.getMoveset()[action.moveIndex]
-          && type.moveSelectFilter(entry.pokemon.getMoveset()[action.moveIndex]) === null, 'INVALID_PREPARATION_MOVE');
-        else check(action.moveIndex === null, 'INVALID_PREPARATION_MOVE');
+        // Held-item filters read Pokemon.scene and the owner's current stacks.
+        // Bind only a detached codec copy so validation cannot mutate the input.
+        const candidate = codec.restore(codec.capture(c)), binding = bindNativeScene(candidate, runtime.scene.gameData);
+        try {
+          const target = candidate.roster.entries.find(e => e.owner === seat && e.pokemon.id === action.pokemonId).pokemon;
+          check(type.selectFilter(target) === null, 'INVALID_PREPARATION_TARGET');
+          if (targetKind === 'move') check(action.moveIndex !== null && target.getMoveset()[action.moveIndex]
+            && type.moveSelectFilter(target.getMoveset()[action.moveIndex]) === null, 'INVALID_PREPARATION_MOVE');
+          else check(action.moveIndex === null, 'INVALID_PREPARATION_MOVE');
+        } finally { binding.dispose(); }
         return;
       }
       check(action.pokemonId === null && action.moveIndex === null && action.fusionId === null, 'INVALID_PREPARATION_TARGET');
@@ -1061,6 +1090,9 @@ function preparationEffectDriver(runtime, intents = []) {
       });
       view.unshiftPhase = phase => { check(!next && phase instanceof SelectModifierPhase, 'UNEXPECTED_PREPARATION_PHASE'); next = phase; };
       view.validateAchvs = BattleScene.prototype.validateAchvs; // validateAchv is the existing deferred owned port.
+      // The original max-stack fallback queues a prompt. Preparation has no
+      // battle queue to consume it; publish that display text privately instead.
+      view.queueMessage = text => binding.events.push({kind:'message',scope:seat,text});
       view.shiftPhase = () => { ended = true; };
       view.ui = {
         clearText() {}, playError() { throw new Error('ORIGINAL_MENU_REJECTED'); },
@@ -1077,7 +1109,7 @@ function preparationEffectDriver(runtime, intents = []) {
       };
       view.addModifier = (...args) => {
         const modifier = args[0];
-        check(isPreparationConsumable(modifier), 'PREPARATION_EFFECT_UNAVAILABLE');
+        check(isPreparationModifier(modifier), 'PREPARATION_EFFECT_UNAVAILABLE');
         return observeRulePromise(view, BattleScene.prototype.addModifier.apply(view, args));
       };
       try {
@@ -1101,7 +1133,7 @@ function preparationEffectDriver(runtime, intents = []) {
         });
         check(ended === (action.operation !== 'buy'), 'INCOMPLETE_PREPARATION_EFFECT');
         intents.push(...binding.intents);
-        const events = [{ kind: 'preparation-effect', seat, operation: action.operation }];
+        const events = [...binding.events, { kind: 'preparation-effect', seat, operation: action.operation }];
         if (c.players[seat].money !== beforeMoney) events.push({ kind: 'message', scope: seat,
           text: `资金${c.players[seat].money > beforeMoney ? '增加' : '支出'} ₽${Math.abs(c.players[seat].money - beforeMoney)}，余额 ₽${c.players[seat].money}` } as any);
         if (action.operation === 'reroll') {
@@ -1178,7 +1210,7 @@ export async function nextNativeBattle(runtime, checkpoint) {
         check(candidate.battle.battleType === 0 || candidate.battle.battleType === BattleType.TRAINER,
           'UNSUPPORTED_NATIVE_NEXT_BATTLE');
         check(candidate.battle.battleSpec === 0, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
-        check(candidate.players.every(player => player.modifiers.length === 0), 'UNSUPPORTED_NATIVE_ENCOUNTER_PLAYER_MODIFIERS');
+        check(candidate.players.every(player => player.modifiers.every(isPreparationPersistent)), 'UNSUPPORTED_NATIVE_ENCOUNTER_PLAYER_MODIFIERS');
       },
       async execute(candidate, p) {
         const binding = bindNativeScene(candidate, runtime.scene.gameData);
@@ -1349,7 +1381,7 @@ export function projectNativeSnapshot(runtime, payload) {
     decision: { id: c.decision.id, kind: c.decision.kind, requiredSeats: [...c.decision.requiredSeats] },
   };
   const player = c.players[payload.seat];
-  check(Array.isArray(player.modifiers) && player.modifiers.length === 0, 'UNSUPPORTED_PERSONAL_MODIFIERS');
+  check(Array.isArray(player.modifiers), 'INVALID_PERSONAL_MODIFIERS');
   const party = c.roster.entries
     .filter(entry => entry.owner === payload.seat && entry.group === 'party')
     .sort((a, b) => a.index - b.index)
@@ -1380,7 +1412,7 @@ export function projectNativeSnapshot(runtime, payload) {
     resources: {
       money: player.money,
       pokeballs: JSON.parse(JSON.stringify(player.pokeballCounts)),
-      modifiers: [],
+      modifiers: player.modifiers.map(captureModifierState),
     },
     decision: {
       id: c.decision.id,

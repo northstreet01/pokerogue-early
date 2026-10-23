@@ -1112,6 +1112,48 @@ function personalPotionPhase() {
   return { ...state, entry };
 }
 
+for(const id of ['LUCKY_EGG','BASE_STAT_BOOSTER','BERRY','SOUL_DEW'])
+test(`original Party receives owned modifier inventory for ${id}, submits once and keeps verified models detached`,async()=>{
+  const {p,sent,modes,entry}=personalPotionPhase();
+  let type=api.modifierTypes[id]().withIdFromFunc(api.modifierTypes[id]);
+  if(type.generateType)type=type.generateType([entry.pokemon],[0]);
+  const modifier=type.newModifier(entry.pokemon);modifier.stackCount=1;
+  p.model.applied.personal.resources={modifiers:[modifier]};
+  const oldScene=entry.pokemon.scene,before=api.capturePokemonState(entry.pokemon),beforeModifier=api.captureModifierState(modifier);
+  await p.choosePreparationReward({id:`persistent-${id}`,type:api.captureModifierTypeState(type)},p.latest,p.epoch);
+  const mode=modes.at(-1),display=p.scene.party[0];
+  assert.equal(mode[0],api.Mode.PARTY);assert.equal(mode[4](display),null);
+  assert.equal(display.scene.modifiers.length,1);assert.notEqual(display.scene.modifiers[0],modifier);
+  assert.equal(display.scene.findModifier(m=>m.pokemonId===entry.id).stackCount,1);
+  const callback=mode[3];await callback(0,api.PartyOption.APPLY);await callback(0,api.PartyOption.APPLY);await tick();
+  assert.equal(sent.length,1);assert.equal(sent[0].action.pokemonId,entry.id);
+  assert.equal(entry.pokemon.scene,oldScene);assert.deepEqual(api.capturePokemonState(entry.pokemon),before);
+  assert.deepEqual(api.captureModifierState(modifier),beforeModifier);
+});
+
+test('original held filter rejects a full stack on the display copy; cancellation never grants a reward',async()=>{
+  const {p,sent,modes,entry}=personalPotionPhase();
+  const type=api.modifierTypes.LUCKY_EGG().withIdFromFunc(api.modifierTypes.LUCKY_EGG),modifier=type.newModifier(entry.pokemon);
+  modifier.stackCount=modifier.getMaxHeldItemCount(entry.pokemon);p.model.applied.personal.resources={modifiers:[modifier]};
+  await p.choosePreparationReward(rewardOption('LUCKY_EGG'),p.latest,p.epoch);
+  assert.match(modes.at(-1)[4](p.scene.party[0]),/too many/);
+  await modes.at(-1)[3](6,api.PartyOption.CANCEL);await tick();assert.deepEqual(sent,[]);
+});
+
+test('committed personal modifiers render original names and stacks and are re-read for ACK verification',async()=>{
+  const {p,entry}=personalPotionPhase();
+  const modifier=api.modifierTypes.LUCKY_EGG().withIdFromFunc(api.modifierTypes.LUCKY_EGG).newModifier(entry.pokemon);
+  modifier.stackCount=2;const state=api.captureModifierState(modifier);
+  const model=api.createOriginalClientModel(api),s=await snapshot();
+  s.shared.pokemon=[];s.personal.party=[{id:entry.id,owner:0,index:0,group:'party',pokemon:api.capturePokemonState(entry.pokemon)}];
+  s.personal.resources={money:100,pokeballs:{0:5,1:0,2:0,3:0,4:0},modifiers:[state]};model.applySnapshot(s);
+  assert.deepEqual(model.captureAppliedState().personal.resources.modifiers,[state]);
+  p.model=model;p.modifierLine={hidden:true,textContent:''};p.renderPersonalModifiers();
+  assert.equal(p.modifierLine.hidden,false);assert.match(p.modifierLine.textContent,/Lucky Egg ×2/);
+  model.applied.personal.resources.modifiers[0].stackCount=3;
+  assert.notDeepEqual(model.captureAppliedState().personal.resources.modifiers,[state]);
+});
+
 test('production-minified reward type identity is not needed for original ball submission', async () => {
   const { p, sent } = preparationPhase();
   const option = rewardOption('GREAT_BALL');

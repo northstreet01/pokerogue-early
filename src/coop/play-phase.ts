@@ -1,4 +1,4 @@
-import type BattleScene from '../battle-scene';
+import BattleScene from '../battle-scene';
 import { Phase } from '../phase';
 import { Mode } from '../ui/ui';
 import { capturePokemonState, restorePokemonState } from '../field/pokemon';
@@ -19,6 +19,7 @@ import { getPokeballName } from '../data/pokeball';
 import { SummaryUiMode } from '../ui/summary-ui-handler';
 import { allMoves } from '../data/move';
 import { preparationItemTarget } from './preparation-item';
+import { captureModifierState, restoreModifierState } from '../modifier/modifier';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -31,6 +32,7 @@ export default class CoopPlayPhase extends Phase {
   private roomLine!: HTMLDivElement;
   private controls!: HTMLDivElement;
   private reserveLine!: HTMLDivElement;
+  private modifierLine: HTMLDivElement | null = null;
   private releaseTeamParty: (() => void) | null = null;
   private teamMenuEpoch = 0;
   private socket: WebSocket | null = null;
@@ -81,7 +83,7 @@ export default class CoopPlayPhase extends Phase {
     super.start();
     this.scene.enableTutorials = false; // Cooperative entry does not write solo tutorial flags.
     this.createOverlay();
-    this.model = createOriginalClientModel({ restorePokemonState, capturePokemonState });
+    this.model = createOriginalClientModel({ restorePokemonState, capturePokemonState, restoreModifierState, captureModifierState });
     this.scene.events?.once('shutdown', () => this.stopSession());
     void this.loadProfileAndConnect().catch(error =>
       this.setStatus(`本人收藏不可用：${error?.message ?? error}`, true));
@@ -148,7 +150,8 @@ export default class CoopPlayPhase extends Phase {
     this.lobbySelections = document.createElement('div'); this.lobbySelections.className = 'status';
     this.controls = document.createElement('div');
     this.reserveLine = document.createElement('div'); this.reserveLine.className = 'status'; this.reserveLine.hidden = true;
-    this.panel.append(title, this.status, this.roomLine, this.budget, this.lobbySelections, this.reserveLine, this.controls);
+    this.modifierLine = document.createElement('div'); this.modifierLine.className = 'status'; this.modifierLine.hidden = true;
+    this.panel.append(title, this.status, this.roomLine, this.budget, this.lobbySelections, this.reserveLine, this.modifierLine, this.controls);
     // Keep this outside the decision controls: no sync/menu state may hide it.
     const exit = this.button('退出本局／返回首页', () => this.leaveSession());
     exit.id = 'coop-exit-session'; exit.type = 'button';
@@ -388,6 +391,7 @@ export default class CoopPlayPhase extends Phase {
   private async updateLobbyView(snapshot: any) {
     if (this.disposed) return;
     if (snapshot.personal.decision.kind === 'lobby') {
+      if (this.modifierLine) { this.modifierLine.hidden = true; this.modifierLine.textContent = ''; }
       const shared = snapshot.shared;
       this.roomLine.textContent = `房间 ${snapshot.roomId} · 席位 ${snapshot.seat + 1}`;
       this.budget.textContent = `共享点数 ${shared.budget.used}/${shared.budget.shared}（剩余 ${shared.budget.remaining}）`
@@ -449,6 +453,7 @@ export default class CoopPlayPhase extends Phase {
     }
     if (this.epoch !== snapshot.connectionEpoch || this.disposed) return;
     this.renderReserve();
+    this.renderPersonalModifiers();
     (this.scene as any).standbyPhase = this;
     (this.scene as any).waveCountText?.setText(String(snapshot.shared.waveIndex));
     this.battleSignature = presented ? signature : '';
@@ -593,6 +598,16 @@ export default class CoopPlayPhase extends Phase {
     if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return false;
     const savedParty = (this.scene as any).party, savedBattle = this.scene.currentBattle;
     const party = entries.map(entry => this.makeTeamPokemon(entry));
+      // Original held-item filters consult Pokemon.scene and the current cap.
+      // Give display copies their own read-only personal inventory/party view.
+      // The verified model and public presentation scene remain detached.
+      const personalScene = Object.create(this.scene);
+      Object.assign(personalScene, { party, modifiers: (this.model.applied.personal.resources?.modifiers ?? [])
+        .map(modifier => restoreModifierState(captureModifierState(modifier))),
+        getParty: () => party, getPokemonById: id => party.find(pokemon => pokemon.id === id),
+        findModifier: BattleScene.prototype.findModifier, findModifiers: BattleScene.prototype.findModifiers,
+        getModifiers: BattleScene.prototype.getModifiers });
+      for (const pokemon of party) pokemon.scene = personalScene;
     const battle = Object.create(savedBattle);
     battle.double = false; battle.getBattlerCount = () => 1;
     (this.scene as any).party = party; this.scene.currentBattle = battle;
@@ -959,6 +974,18 @@ export default class CoopPlayPhase extends Phase {
     const count = this.model?.applied?.personal?.reserve?.length ?? 0;
     this.reserveLine.hidden = count === 0;
     this.reserveLine.textContent = count ? `有 ${count} 只旧版捕获待处理，请在整备时逐只取舍。队伍最多6只。` : '';
+  }
+
+  private renderPersonalModifiers() {
+    if (!this.modifierLine) return;
+    const personal = this.model.applied?.personal;
+    const modifiers = personal?.resources?.modifiers ?? [];
+    this.modifierLine.hidden = modifiers.length === 0;
+    this.modifierLine.textContent = modifiers.length ? '本人持久道具：' + modifiers.map(modifier => {
+      const target = personal.party.find(entry => entry.id === modifier.pokemonId);
+      return `${modifier.type.name} ×${modifier.stackCount}${target ? `（${getPokemonSpecies(target.pokemon.species.speciesId).name}）` : ''}`
+        + (Number.isInteger(modifier.battlesLeft) ? ` 剩余${modifier.battlesLeft}战` : '');
+    }).join('、') : '';
   }
 
   private openBattleCommand() {

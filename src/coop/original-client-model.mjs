@@ -1,10 +1,10 @@
 // Client-side application boundary for VS-01. The caller supplies the original
 // Pokemon codec functions; this module never executes rules, damage or RNG.
 // The public shared model is a read-only observation view; only the personal
-// party is restored as real original PlayerPokemon instances.
+// party and private modifier inventory are restored as original instances.
 const COPY = value => JSON.parse(JSON.stringify(value));
 
-export function createOriginalClientModel({ restorePokemonState, capturePokemonState }) {
+export function createOriginalClientModel({ restorePokemonState, capturePokemonState, restoreModifierState, captureModifierState }) {
   if (typeof restorePokemonState !== 'function' || typeof capturePokemonState !== 'function')
     throw new Error('ORIGINAL_POKEMON_CODEC_REQUIRED');
   let applied = null;
@@ -12,6 +12,11 @@ export function createOriginalClientModel({ restorePokemonState, capturePokemonS
     applySnapshot(snapshot) {
       const shared = COPY(snapshot.shared);
       const personal = COPY(snapshot.personal);
+      const modifiers = personal.resources?.modifiers ?? [];
+      if (modifiers.length && (typeof restoreModifierState !== 'function' || typeof captureModifierState !== 'function'))
+        throw new Error('ORIGINAL_MODIFIER_CODEC_REQUIRED');
+      if (personal.resources && Object.hasOwn(personal.resources, 'modifiers'))
+        personal.resources.modifiers = modifiers.map(state => restoreModifierState(state));
       const hasReserve = Object.hasOwn(personal, 'reserve');
       const party = Array.isArray(personal.party)
         ? personal.party.map(entry => ({ ...entry, pokemon: restorePokemonState(COPY(entry.pokemon)) })) : [];
@@ -49,7 +54,9 @@ export function createOriginalClientModel({ restorePokemonState, capturePokemonS
           pokemon: capturePokemonState(entry.pokemon),
         })) } : {}),
         eggs: COPY(applied.personal.eggs ?? null),
-        resources: COPY(applied.personal.resources),
+        resources: applied.personal.resources === null ? null : { ...COPY(applied.personal.resources),
+          ...(Object.hasOwn(applied.personal.resources, 'modifiers') ? {
+            modifiers: applied.personal.resources.modifiers.map(modifier => captureModifierState(modifier)) } : {}) },
         decision: COPY(applied.personal.decision),
       };
       if (Object.hasOwn(applied.personal, 'selection')) personal.selection = COPY(applied.personal.selection);

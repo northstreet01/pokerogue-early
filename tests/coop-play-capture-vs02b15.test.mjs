@@ -12,10 +12,10 @@ import { buildCoopRuntime } from '../scripts/build-coop-runtime.mjs';
 import { createOriginalCoopAdapter } from '../server/original-coop-adapter.mjs';
 import { FormalRoomStore } from '../server/formal-coop-service.mjs';
 import { formalFixture } from './helpers/formal-ws.mjs';
-import { defaultTrainerRoute } from './helpers/native-default-trainer.mjs';
+import { defaultTrainerRoute, progressDefault } from './helpers/native-default-trainer.mjs';
 import { createSnapshotConsumer } from '../src/battle-core/coop-client.mjs';
 
-let api, profiles;
+let api, profiles, firstPreparation;
 before(async () => {
   await buildCoopRuntime();
   await build({ configFile: false, publicDir: false, logLevel: 'error',
@@ -27,7 +27,12 @@ before(async () => {
       rollupOptions: { external: isBuiltin, output: { format: 'cjs', entryFileNames: 'entry.cjs' } } } });
   api = createRequire(import.meta.url)('../build/coop-capture-ui-test/entry.cjs');
   api.describeOriginalCatalogs();
-  const route = await defaultTrainerRoute(); profiles = route.profiles; await route.h.close();
+  const route = await defaultTrainerRoute(); profiles = route.profiles;
+  try {
+    let c = route.initial;
+    for (let n = 0; n < 70 && c.decision.kind !== 'preparation'; n++) c = (await progressDefault(route.h, c)).checkpoint;
+    assert.equal(c.decision.kind, 'preparation'); firstPreparation = c;
+  } finally { await route.h.close(); }
 });
 const until = async (predicate, description) => {
   for (let n = 0; n < 1500; n++) {
@@ -39,10 +44,16 @@ const until = async (predicate, description) => {
 
 // Original phase + original Command/Ball handlers + real IDB/WS/service/Worker.
 // Rendering/asset ports are headless: this is not a browser visual acceptance.
-async function openUiRoom(seat, t, lobbyOnly = false) {
+async function openUiRoom(seat, t, lobbyOnly = false, prepared = null) {
   const directory = await mkdtemp(join(tmpdir(), 'vs02b15-ui-'));
-  const adapter = createOriginalCoopAdapter({ fixture: { profileLobby: true,
+  const original = createOriginalCoopAdapter({ fixture: { profileLobby: true,
     seed: 'learning-natural-2', identities: profiles.map(profile => profile.trainer) } });
+  // Optional synthetic original-factory preparation, explicitly distinct from
+  // the normal selected-profile lobby used by the preceding VS15–17 cases.
+  const adapter = prepared ? { ...original, createInitialContext: ({ runId }) => original.restoreCheckpoint({
+    formatVersion: 2, runId, stage: 'preparation', provisioning: { seed: 'learning-natural-2', identities: profiles.map(profile => profile.trainer) },
+    lobby: null, nativeCheckpoint: structuredClone(prepared), intents: [],
+  }) } : original;
   const server = await formalFixture(adapter, new FormalRoomStore(directory));
   const peer = await server.client();
   const address = new URL(peer.socket.url), origin = `http://${address.host}`;
@@ -54,7 +65,7 @@ async function openUiRoom(seat, t, lobbyOnly = false) {
     localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage });
   const errors = [], modes = [];
   let peerLatest, peerChain = Promise.resolve();
-  const peerModel = api.createOriginalClientModel({ restorePokemonState: api.restorePokemonState, capturePokemonState: api.capturePokemonState });
+  const peerModel = api.createOriginalClientModel(api);
   const consumer = createSnapshotConsumer({ versions: server.versions, adapter: peerModel,
     isCurrent: () => true, send: message => peer.send(message) });
   peer.socket.on('message', data => {
@@ -72,12 +83,16 @@ async function openUiRoom(seat, t, lobbyOnly = false) {
   const scene = { ui, getCurrentPhase: () => phase, getStandbyPhase: () => phase,
     getPlayerField: () => [0, 1].map(index => index === phase.seat ? phase.model.applied?.personal.party[0]?.pokemon : null) };
   const phase = new api.CoopPlayPhase(scene);
-  phase.model = api.createOriginalClientModel({ restorePokemonState: api.restorePokemonState, capturePokemonState: api.capturePokemonState });
+  phase.model = api.createOriginalClientModel(api);
   phase.lastProfile = profiles[seat]; phase.profileDirty = true;
-  for (const key of ['status', 'budget', 'roomLine', 'reserveLine', 'controls']) phase[key] = document.createElement('div');
+  for (const key of ['status', 'budget', 'roomLine', 'reserveLine', 'controls', 'modifierLine']) phase[key] = document.createElement('div');
   const originalStatus = phase.setStatus.bind(phase);
   phase.setStatus = (text, error) => { originalStatus(text, error); if (error) errors.push(Error(text)); };
   phase.enterBattle = async () => {}; // Display only; verified real model apply/capture remains intact.
+  if (prepared) {
+    phase.presentation = { apply: async () => {}, playEvents: async () => {} };
+    phase.enterBattle = api.CoopPlayPhase.prototype.enterBattle.bind(phase);
+  }
   const ball = Object.assign(Object.create(api.BallUiHandler.prototype), { scene, cursor: 0,
     countsText: { setText() {} }, pokeballSelectContainer: { setVisible() {} },
     pokeballSelectBg: {}, cursorObj: { setPositionRelative() {}, destroy() {} } });
@@ -103,12 +118,12 @@ async function openUiRoom(seat, t, lobbyOnly = false) {
     peer.send({ type: 'createRoom', name: 'synthetic-peer' });
     await until(() => peerLatest, 'peer room'); await phase.joinRoom(peerLatest.roomId);
   }
-  await until(() => phase.inputReady && peerLatest && phase.latest?.personal.decision.kind === 'lobby', 'lobby ACK');
+  await until(() => phase.inputReady && peerLatest && phase.latest?.personal.decision.kind === (prepared ? 'preparation' : 'lobby'), 'initial model ACK');
   const submitPeer = action => peer.send({ type: 'submitAction', roomId: peerLatest.roomId, runId: peerLatest.runId,
     decisionId: peerLatest.decisionId, expectedRevision: peerLatest.revision, actionId: crypto.randomUUID(), action });
   const environment = { phase, command, ball, ui, peer, errors, modes, server, directory, adapter,
     peerSnapshot: () => peerLatest, submitPeer, close };
-  if (lobbyOnly) return environment;
+  if (lobbyOnly || prepared) return environment;
   await phase.sendProfile(true, profiles[seat]);
   await until(() => !phase.actionId && phase.latest.shared.ready[seat] && phase.inputReady
     && peerLatest.revision === phase.latest.revision, 'primary profile');
@@ -267,6 +282,49 @@ for (const seat of [0, 1]) test(`VS17 natural preparation seat ${seat}: original
     assert.deepEqual(env.errors, []);
     assert.deepEqual(await phase.storage.pendingActions(location.origin, phase.roomId, seat), []);
   } finally { await env.close(); }
+});
+
+for (const seat of [0,1]) test(`VS18 original persistent Party seat ${seat}: synthetic factory, real IDB/WS/model ACK, private display and later FIGHT`,{timeout:90000},async t=>{
+  const checkpoint=structuredClone(firstPreparation);
+  checkpoint.decision.players[seat].rewards[0].type=api.captureModifierTypeState(api.modifierTypes.LUCKY_EGG().withIdFromFunc(api.modifierTypes.LUCKY_EGG));
+  const env=await openUiRoom(seat,t,false,checkpoint);
+  try{
+    const {phase,modes,ui}=env;phase.scene.currentBattle={double:true};
+    phase.makeTeamPokemon=entry=>{
+      const p=api.restorePokemonState(api.capturePokemonState(entry.pokemon));p.scene=phase.scene;
+      p.init=()=>{};p.loadAssets=async()=>{};p.destroy=()=>{};return p;
+    };
+    const mode=modes.at(-1);assert.equal(mode[0],api.Mode.MODIFIER_SELECT);
+    const handler=Object.assign(Object.create(api.ModifierSelectUiHandler.prototype),{getUi:()=>ui,awaitingActionInput:true,inputPresentation:mode[5],rowCursor:1,cursor:0,player:true,onActionInput:mode[3]});
+    const before=phase.latest;handler.processInput(api.Button.ACTION);
+    await until(()=>ui.mode===api.Mode.PARTY||env.errors.length,'original persistent Party');assert.deepEqual(env.errors,[]);
+    assert.equal(modes.at(-1)[4](phase.scene.party[0]),null);
+    const choose=modes.at(-1)[3];await choose(0,api.PartyOption.APPLY);await choose(0,api.PartyOption.APPLY);
+    await until(()=>phase.latest.revision>before.revision&&phase.inputReady,'persisted original held item');
+    assert.equal(phase.model.applied.personal.resources.modifiers[0].stackCount,1);
+    assert.match(phase.modifierLine.textContent,/Lucky Egg ×1/);
+    await until(()=>env.peerSnapshot().revision===phase.latest.revision,'peer ACK');
+    assert.deepEqual(env.peerSnapshot().personal.resources.modifiers,[]);
+    assert.deepEqual(await phase.storage.pendingActions(location.origin,phase.roomId,seat),[]);
+    let revision=phase.latest.revision;
+    const ready=modes.at(-1);ready[5].preparation.onComplete();
+    await until(()=>phase.latest.revision>revision&&phase.inputReady,'owner original completion');
+    env.submitPeer({kind:'preparation',operation:'skip-reward'});
+    await until(()=>phase.inputReady&&env.peerSnapshot().personal.decision.players.rewardResolved,'peer skip');
+    env.submitPeer({kind:'preparation',operation:'ready'});
+    await until(()=>phase.inputReady&&phase.latest.personal.decision.kind!=='preparation','next encounter');
+    for(let n=0;n<20&&phase.latest.personal.decision.kind!=='wait-actions';n++){
+      const current=phase.latest,d=current.personal.decision;
+      if(d.requiredSeats.includes(seat))await modes.at(-1)[2]();
+      else env.submitPeer(env.peerSnapshot().personal.decision.options.find(o=>o.accept===false||o.pokemonId===null));
+      await until(()=>phase.inputReady&&phase.latest.revision>current.revision&&env.peerSnapshot().revision===phase.latest.revision,'original next keep');
+    }
+    revision=phase.latest.revision;await phase.sendAction(attack(phase.latest),'next held FIGHT');
+    await until(()=>phase.submitted,'held fight receipt');env.submitPeer(attack(env.peerSnapshot()));
+    await until(()=>phase.inputReady&&phase.latest.revision>revision,'held fight result');
+    assert.ok(phase.latest.events.some(e=>e.phase==='MoveEffectPhase'));
+    assert.deepEqual(env.errors,[]);assert.deepEqual(await phase.storage.pendingActions(location.origin,phase.roomId,seat),[]);
+  }finally{await env.close();}
 });
 
 for (const seat of [0, 1]) test(`original Command/Ball seat ${seat} reaches real selected Worker capture and next input`, { timeout: 90000 }, async t => {

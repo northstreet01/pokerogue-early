@@ -284,3 +284,21 @@ test('native original persistent async update failures reject the candidate and 
     }finally{api.BattleScene.prototype[method]=original;}
   }
 });
+
+test('native observes original Pokemon updateInfo rejection even inside original updatePartyForModifiers allSettled',async()=>{
+  const {h,c:initial}=await preparation();await h.close();
+  const input=reward(initial,1,'BASE_STAT_BOOSTER'),before=canonical(input.c);
+  const descriptor=Object.getOwnPropertyDescriptor(api.PlayerPokemon.prototype,'updateInfo');
+  try{
+    // PlayerPokemon inherits the original display port from Pokemon. Shadowing
+    // only this subclass injects a failing original async update, while the
+    // production addModifier/updateModifiers/updateParty bodies stay intact.
+    Object.defineProperty(api.PlayerPokemon.prototype,'updateInfo',{configurable:true,writable:true,
+      value(){return new Promise((resolve,reject)=>setTimeout(()=>reject(Error('TEST_ORIGINAL_UPDATE_INFO')),10));}});
+    const runtime=api.createOriginalRuntime(base.config.seed,base.config.identity);
+    await assert.rejects(api.executeRuntimeOperation(runtime,'native-prepare-action',{checkpoint:input.c,seat:1,action:input.action}),/TEST_ORIGINAL_UPDATE_INFO/);
+    assert.equal(canonical(input.c),before);
+  }finally{
+    if(descriptor)Object.defineProperty(api.PlayerPokemon.prototype,'updateInfo',descriptor);else delete api.PlayerPokemon.prototype.updateInfo;
+  }
+});

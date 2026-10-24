@@ -7,6 +7,7 @@ import {modifiers} from './modifier-model.mjs';
 import {advanceQueuedMoveAction} from '../../src/battle-core/move-action-runner.mjs';
 import {prependPhase,pushPhase} from '../../src/battle-core/phase-queue.mjs';
 import {observeRulePromise} from '../../src/battle-core/rule-task-tracker.mjs';
+import {originalI18n,originalLocalizedPokemonMessage} from './localization-model.mjs';
 
 const enums=file=>evaluate(parse(file).statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n'));
 const dependencyMap=file=>Object.fromEntries(parse(file).statements.filter(ts.isImportDeclaration).map(n=>[n.moduleSpecifier.text,{}]));
@@ -14,6 +15,7 @@ class Holder{constructor(value){this.value=value;}}
 export const utils={IntegerHolder:Holder,NumberHolder:Holder,BooleanHolder:Holder};
 const moveReference={};
 export const common={
+  '../i18n':{default:originalI18n},
   '../battle-core/rule-task-tracker.mjs':{observeRulePromise},
   '../field/pokemon':pokemon,'../phases':originalPhases,'./enums/moves':moves,'./status-effect':status,'./battler-tags':battler,
   './type':enums('data/type.ts'),'../utils':utils,'./battle-stat':enums('data/battle-stat.ts'),
@@ -23,6 +25,7 @@ export const common={
   '../system/localized-catalog':{catalogName:(_kind,_key,fallback)=>fallback,catalogDescription:(_kind,_key,fallback)=>fallback},
   '../messages':{getPokemonMessage:(p,s)=>`${p.id}${s}`,getPokemonNameWithAffix:p=>String(p.id)}
 };
+common['../messages'].getLocalizedPokemonMessage=originalLocalizedPokemonMessage(common['../messages'].getPokemonMessage,common['../messages'].getPokemonNameWithAffix);
 export const abilityRules=evaluate(read('data/ability.ts'),{...dependencyMap('data/ability.ts'),...common,'./move':moveReference});
 export const moveRules=evaluate(read('data/move.ts'),{...dependencyMap('data/move.ts'),...common,'./ability':abilityRules});
 Object.assign(moveReference,moveRules);moveRules.initMoves();abilityRules.initAbilities();

@@ -2,7 +2,8 @@ import { Arena } from "../field/arena";
 import { Type } from "./type";
 import * as Utils from "../utils";
 import { allMoves } from "./move";
-import { getPokemonMessage } from "../messages";
+import { getPokemonMessage, getLocalizedPokemonMessage } from "../messages";
+import i18next from '../i18n';
 import Pokemon, { HitResult, PokemonMove } from "../field/pokemon";
 import { MoveEffectPhase } from "../phases";
 import { StatusEffect } from "./status-effect";
@@ -16,6 +17,10 @@ export enum ArenaTagSide {
   PLAYER,
   ENEMY
 }
+
+const arenaText=(key:string,legacy:string,values:Record<string,any>={}) =>
+  (i18next.resolvedLanguage??i18next.language)==='zh-Hans'?String(i18next.t(key,values)):legacy;
+const sideSuffix=(side:ArenaTagSide)=>side===ArenaTagSide.PLAYER?'Player':side===ArenaTagSide.ENEMY?'Enemy':'';
 
 export abstract class ArenaTag {
   public tagType: ArenaTagType;
@@ -39,7 +44,7 @@ export abstract class ArenaTag {
   onAdd(arena: Arena): void { }
 
   onRemove(arena: Arena): void {
-    arena.scene.queueMessage(`${this.getMoveName()}\'s effect wore off${this.side === ArenaTagSide.PLAYER ? '\non your side' : this.side === ArenaTagSide.ENEMY ? '\non the foe\'s side' : ''}.`);
+    arena.scene.queueMessage(arenaText(`earlyBattle:arenaExpired${sideSuffix(this.side)}`,`${this.getMoveName()}\'s effect wore off${this.side === ArenaTagSide.PLAYER ? '\non your side' : this.side === ArenaTagSide.ENEMY ? '\non the foe\'s side' : ''}.`,{moveName:this.getMoveName()}));
   }
 
   onOverlap(arena: Arena): void { }
@@ -64,13 +69,13 @@ export class MistTag extends ArenaTag {
     super.onAdd(arena);
 
     const source = arena.scene.getPokemonById(this.sourceId);
-    arena.scene.queueMessage(getPokemonMessage(source, `'s team became\nshrowded in mist!`));
+    arena.scene.queueMessage(arenaText(`arenaTag:mistOnAdd${sideSuffix(this.side)}`,getPokemonMessage(source, `'s team became\nshrowded in mist!`)));
   }
 
   apply(arena: Arena, args: any[]): boolean {
     (args[0] as Utils.BooleanHolder).value = true;
 
-    arena.scene.queueMessage('The mist prevented\nthe lowering of stats!');
+    arena.scene.queueMessage(arenaText('earlyBattle:mistPrevented','The mist prevented\nthe lowering of stats!'));
     
     return true;
   }
@@ -101,11 +106,11 @@ class MudSportTag extends WeakenMoveTypeTag {
   }
 
   onAdd(arena: Arena): void {
-    arena.scene.queueMessage('Electricity\'s power was weakened!');
+    arena.scene.queueMessage(arenaText('arenaTag:mudSportOnAdd','Electricity\'s power was weakened!'));
   }
 
   onRemove(arena: Arena): void {
-    arena.scene.queueMessage('The effects of MUD SPORT\nhave faded.');
+    arena.scene.queueMessage(arenaText('arenaTag:mudSportOnRemove','The effects of MUD SPORT\nhave faded.'));
   }
 }
 
@@ -115,11 +120,11 @@ class WaterSportTag extends WeakenMoveTypeTag {
   }
 
   onAdd(arena: Arena): void {
-    arena.scene.queueMessage('Fire\'s power was weakened!');
+    arena.scene.queueMessage(arenaText('arenaTag:waterSportOnAdd','Fire\'s power was weakened!'));
   }
 
   onRemove(arena: Arena): void {
-    arena.scene.queueMessage('The effects of WATER SPORT\nhave faded.');
+    arena.scene.queueMessage(arenaText('arenaTag:waterSportOnRemove','The effects of WATER SPORT\nhave faded.'));
   }
 }
 
@@ -168,7 +173,7 @@ class SpikesTag extends ArenaTrapTag {
     super.onAdd(arena);
 
     const source = arena.scene.getPokemonById(this.sourceId);
-    arena.scene.queueMessage(`${this.getMoveName()} were scattered\nall around ${source.getOpponentDescriptor()}'s feet!`);
+    arena.scene.queueMessage(arenaText(`arenaTag:spikesOnAdd${sideSuffix(this.side)}`,`${this.getMoveName()} were scattered\nall around ${source.getOpponentDescriptor()}'s feet!`));
   }
 
   activateTrap(pokemon: Pokemon): boolean {
@@ -176,7 +181,7 @@ class SpikesTag extends ArenaTrapTag {
       const damageHpRatio = 1 / (10 - 2 * this.layers);
       const damage = Math.ceil(pokemon.getMaxHp() * damageHpRatio);
 
-      pokemon.scene.queueMessage(getPokemonMessage(pokemon, ' is hurt\nby the spikes!'));
+      pokemon.scene.queueMessage(getLocalizedPokemonMessage(pokemon,'arenaTag:spikesActivateTrap',()=>({}),()=> ' is hurt\nby the spikes!'));
       pokemon.damageAndUpdate(damage, HitResult.OTHER);
       return true;
     }
@@ -197,7 +202,7 @@ class ToxicSpikesTag extends ArenaTrapTag {
     super.onAdd(arena);
     
     const source = arena.scene.getPokemonById(this.sourceId);
-    arena.scene.queueMessage(`${this.getMoveName()} were scattered\nall around ${source.getOpponentDescriptor()}'s feet!`);
+    arena.scene.queueMessage(arenaText(`arenaTag:toxicSpikesOnAdd${sideSuffix(this.side)}`,`${this.getMoveName()} were scattered\nall around ${source.getOpponentDescriptor()}'s feet!`));
   }
 
   onRemove(arena: Arena): void {
@@ -213,7 +218,7 @@ class ToxicSpikesTag extends ArenaTrapTag {
       else if (pokemon.isOfType(Type.POISON)) {
         this.neutralized = true;
         if (pokemon.scene.arena.removeTag(this.tagType)) {
-          pokemon.scene.queueMessage(getPokemonMessage(pokemon, ` absorbed the ${this.getMoveName()}!`));
+          pokemon.scene.queueMessage(getLocalizedPokemonMessage(pokemon,'earlyBattle:absorbedHazard',()=>({moveName:this.getMoveName()}),()=> ` absorbed the ${this.getMoveName()}!`));
           return true;
         }
       }
@@ -261,7 +266,7 @@ class StealthRockTag extends ArenaTrapTag {
     super.onAdd(arena);
 
     const source = arena.scene.getPokemonById(this.sourceId);
-    arena.scene.queueMessage(`Pointed stones float in the air\naround ${source.getOpponentDescriptor()}!`);
+    arena.scene.queueMessage(arenaText(`arenaTag:stealthRockOnAdd${sideSuffix(this.side)}`,`Pointed stones float in the air\naround ${source.getOpponentDescriptor()}!`));
   }
 
   getDamageHpRatio(pokemon: Pokemon): number {
@@ -298,7 +303,7 @@ class StealthRockTag extends ArenaTrapTag {
 
     if (damageHpRatio) {
       const damage = Math.ceil(pokemon.getMaxHp() * damageHpRatio);
-      pokemon.scene.queueMessage(`Pointed stones dug into\n${pokemon.name}!`);
+      pokemon.scene.queueMessage(arenaText('arenaTag:stealthRockActivateTrap',`Pointed stones dug into\n${pokemon.name}!`,{pokemonNameWithAffix:pokemon.name}));
       pokemon.damageAndUpdate(damage, HitResult.OTHER);
     }
 
@@ -323,11 +328,11 @@ export class TrickRoomTag extends ArenaTag {
   }
 
   onAdd(arena: Arena): void {
-    arena.scene.queueMessage(getPokemonMessage(arena.scene.getPokemonById(this.sourceId), ' twisted\nthe dimensions!'));
+    arena.scene.queueMessage(getLocalizedPokemonMessage(arena.scene.getPokemonById(this.sourceId),'arenaTag:trickRoomOnAdd',()=>({}),()=> ' twisted\nthe dimensions!'));
   }
 
   onRemove(arena: Arena): void {
-    arena.scene.queueMessage('The twisted dimensions\nreturned to normal!');
+    arena.scene.queueMessage(arenaText('arenaTag:trickRoomOnRemove','The twisted dimensions\nreturned to normal!'));
   }
 }
 
@@ -337,11 +342,11 @@ export class GravityTag extends ArenaTag {
   }
 
   onAdd(arena: Arena): void {
-    arena.scene.queueMessage('Gravity intensified!');
+    arena.scene.queueMessage(arenaText('arenaTag:gravityOnAdd','Gravity intensified!'));
   }
 
   onRemove(arena: Arena): void {
-    arena.scene.queueMessage('Gravity returned to normal!');
+    arena.scene.queueMessage(arenaText('arenaTag:gravityOnRemove','Gravity returned to normal!'));
   }
 }
 

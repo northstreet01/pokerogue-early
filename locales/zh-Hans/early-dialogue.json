@@ -1,0 +1,36 @@
+{
+ "YOUNGSTER":{
+  "0":{"encounter":["嘿，要对战吗？","你也是新手训练家吗？","以前没见过你呢，来对战吧！"],"victory":["哇！你好强！","我完全不是对手呢。","等我长大后，一定会再来挑战你的！"]},
+  "1":{"encounter":["我们来对战，好吗？","你看起来像新手训练家，来对战吧！","我没见过你呢，要来对战吗？"],"victory":["真厉害！我还有很多要学的。","没想到会输得这么惨……","希望以后还能再打一场。"]}
+ },
+ "RIVAL":{
+  "0":{
+   "encounter":["@c{smile}嘿，我一直在找你！我知道你急着出发，但至少也该道个别吧……$@c{smile_eclosed}你真的决定追逐自己的梦想了？\n我还有点不敢相信呢。$@c{serious_smile_fists}既然见到了，来对战一场吧！\n我想确认你是否已经准备好了。$@c{serious_mopen_fists}不要留手，使出你的全部实力！"],
+   "victory":["@c{shock}哇……你把我彻底打败了。\n你真的是新手吗？$@c{smile}或许有点运气的成分，不过……\n说不定你真的能走到最后。$对了，博士让我把这些道具交给你，看起来挺不错的。$@c{serious_smile_fists}祝你旅途顺利！"]
+  },
+  "1":{
+   "encounter":["@c{smile_wave}终于找到你了！我到处都在找你呢！\n@c{angry_mopen}你忘了和最好的朋友道别吗？$@c{smile_ehalf}你要去追逐梦想了啊？\n没想到这一天真的到了……$@c{smile}忘记我的事就原谅你吧，不过有一个条件。@c{smile_wave_wink}和我对战一场！$@c{angry_mopen}全力以赴！你也不想冒险还没开始就结束吧？"],
+   "victory":["@c{shock}才刚出发就已经这么强了吗？！@d{96}\n@c{angry}你一定作弊了吧？$@c{smile_wave_wink}开玩笑的！@d{64} @c{smile_eclosed}我输得心服口服……感觉你一定会有出色的表现。$@c{smile}对了，博士托我给你带些道具，希望能帮上忙！$@c{smile_wave}像平时一样加油吧！我相信你！"]
+  }
+ },
+ "RIVAL_2":{
+  "0":{
+   "encounter":["@c{smile}嘿，你也在这里啊？\n@c{smile_eclosed}看来还是一场没输呢……$@c{serious_mopen_fists}我知道看起来像是一路跟着你，但事情大部分不是那样。$@c{serious_smile_fists}不过说实话，自从在家乡输给你之后，我就一直想再打一场。$我也做了很多训练，这次一定能好好较量一番。$@c{serious_mopen_fists}和上次一样，别留手！\n开始吧！"],
+   "victory":["@c{neutral_eclosed}啊，看来我太自信了。$@c{smile}没关系，我也想过会这样。\n@c{serious_mopen_fists}这说明下次还得更加努力！\n$@c{smile}虽然你看起来不怎么需要帮忙，但我多了一件这个，觉得你也许用得上。\n$@c{serious_smile_fists}不过下次可别再指望我送了！\n总不能一直给对手增加优势吧。$@c{smile}那么，保重！"]
+  },
+  "1":{
+   "encounter":["@c{smile_wave}哎呀，真巧，居然在这里碰到你。看来还是没输过呢。@c{angry_mopen}哼……还不错嘛！$@c{angry_mopen}我知道你在想什么，才没有偷偷跟踪你。@c{smile_eclosed}我只是碰巧来到附近。$@c{smile_ehalf}我为你高兴，不过也想告诉你，偶尔输一场也没关系。$@c{smile}我们能从错误中学到东西，往往比一直成功收获更多。$@c{angry_mopen}总之，为了再战，我可是努力训练了，你也得全力以赴！"],
+   "victory":["@c{neutral}我……这次本来不该输的……$@c{smile}算了，这说明下次要练得更努力才行！$@c{smile_wave}我还给你带了一个这个！\n@c{smile_wave_wink}不用谢我啦～$@c{angry_mopen}不过这是最后一次！以后可不会再免费送你东西了！$@c{smile_wave}继续加油！"]
+  }
+ },
+ "RIVAL_3":{
+  "0":{
+   "encounter":["@c{smile}嘿，看看是谁来了！好久不见。\n@c{neutral}你……还是没输过吗？这样啊。$@c{neutral_eclosed}最近有些……奇怪。\n你不在，家乡也和以前不一样了。$@c{serious}我知道这样有点自私，但还是得说出来。\n@c{neutral_eclosed}我觉得你可能把事情想得太简单了。$@c{serious}一次都不输，是不现实的。\n有时候，我们需要经历失败才能成长。$@c{neutral_eclosed}你已经走了很远，但前面还有很长的路，而且只会越来越难。@c{neutral}你真的准备好了吗？$@c{serious_mopen_fists}如果准备好了，就证明给我看。"],
+   "victory":["@c{angry_mhalf}太离谱了……我几乎没停止过训练……\n为什么我们之间还是差这么远？"]
+  },
+  "1":{
+   "encounter":["@c{smile_wave}好久不见！还是一场没输啊。\n@c{angry}你开始让我有点恼火了。@c{smile_wave_wink}开玩笑的！$@c{smile_ehalf}不过说真的，你到现在还不想家吗？或者……不想我吗？\n我……我是说，大家都很想你。$@c{smile_eclosed}我支持你的梦想，但现实是，迟早会输掉一场。$@c{smile}到时候，我会像平时一样陪着你。\n@c{angry_mopen}现在，让你看看我变得有多强了！"],
+   "victory":["@c{shock}付出了这么多……还是不够吗……？\n这样下去，你永远都不会回来了……"]
+  }
+ }
+}

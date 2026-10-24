@@ -1,0 +1,10 @@
+{
+  "evolving": "What?\n{{pokemonName}} is evolving!",
+  "stopped": "{{pokemonName}} stopped evolving.",
+  "pausePrompt": "Would you like to pause evolutions for {{pokemonName}}?\nEvolutions can be re-enabled from the party screen.",
+  "coopPausePrompt": "Pause future evolutions for {{pokemonName}}?\nRe-enabling evolutions in the cooperative party screen is not available yet. Choose No to cancel only this evolution.",
+  "paused": "Evolutions have been paused for {{pokemonName}}.",
+  "evolved": "Congratulations!\nYour {{pokemonName}} evolved into {{evolvedName}}!",
+  "confirm": "{{pokemonName}} is about to evolve. Continue?",
+  "submitted": "Evolution choice submitted. Waiting for the server…"
+}

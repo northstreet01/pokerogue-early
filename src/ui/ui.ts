@@ -201,7 +201,7 @@ export default class UI extends Phaser.GameObjects.Container {
     return (this.scene as BattleScene).processUiPointer(button, select);
   }
 
-  showText(text: string, delay?: integer, callback?: Function, callbackDelay?: integer, prompt?: boolean, promptDelay?: integer): void {
+  showText(text: string, delay?: integer, callback?: Function, callbackDelay?: integer, prompt?: boolean, promptDelay?: integer, _presentation?: any): void {
     if (prompt && text.indexOf('$') > -1) {
       const messagePages = text.split(/\$/g).map(m => m.trim());
       let showMessageAndCallback = () => callback();
@@ -329,13 +329,15 @@ export default class UI extends Phaser.GameObjects.Container {
     });
   }
 
-  private setModeInternal(mode: Mode, clear: boolean, forceTransition: boolean, chainMode: boolean, args: any[]): Promise<void> {
+  private setModeInternal(mode: Mode, clear: boolean, forceTransition: boolean, chainMode: boolean, args: any[], signal?: AbortSignal): Promise<void> {
     return new Promise(resolve => {
+      if (signal?.aborted) return resolve();
       if (this.mode === mode && !forceTransition) {
         resolve();
         return;
       }
       const doSetMode = () => {
+        if (signal?.aborted) { this.cancelFade(); resolve(); return; }
         if (this.mode !== mode) {
           if (clear)
             this.getHandler().clear();
@@ -355,7 +357,7 @@ export default class UI extends Phaser.GameObjects.Container {
         this.fadeOut(250).then(() => {
           this.scene.time.delayedCall(100, () => {
             doSetMode();
-            this.fadeIn(250);
+            if (!signal?.aborted) this.fadeIn(250);
           });
         })
       } else
@@ -373,6 +375,10 @@ export default class UI extends Phaser.GameObjects.Container {
 
   setModeForceTransition(mode: Mode, ...args: any[]): Promise<void> {
     return this.setModeInternal(mode, true, true, false, args);
+  }
+
+  setModeCancellable(mode: Mode, signal: AbortSignal, ...args: any[]): Promise<void> {
+    return this.setModeInternal(mode, true, true, false, args, signal);
   }
 
   setModeWithoutClear(mode: Mode, ...args: any[]): Promise<void> {

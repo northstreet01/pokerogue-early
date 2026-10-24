@@ -11,11 +11,13 @@ import {queueFaintContinuation} from '../../src/battle-core/faint-queue.mjs';
 import {queueVictoryExperience} from '../../src/battle-core/victory-experience.mjs';
 import {presentOnHost} from '../../src/battle-core/presentation-port.mjs';
 import {eggs} from './egg-model.mjs';
+import {originalLocalizedPokemonMessage} from './localization-model.mjs';
 
 const declarations=file=>parse(file).statements.filter(n=>ts.isClassDeclaration(n)||ts.isEnumDeclaration(n)||ts.isImportDeclaration(n)).map(n=>n.getText()).join('\n');
 const dependencies=file=>Object.fromEntries(parse(file).statements.filter(ts.isImportDeclaration).map(n=>[n.moduleSpecifier.text,{}]));
 class Phase{constructor(scene){this.scene=scene;}start(){}end(){this.scene.shiftPhase();}}
 const deps=dependencies('phases.ts');
+deps['./messages'].getLocalizedPokemonMessage=originalLocalizedPokemonMessage((...args)=>deps['./messages'].getPokemonMessage(...args),p=>p.name);
 // Keep the legacy isolated rule tests wired to the actual extracted visual
 // helpers. Rendering ports stay in their existing scenes; no replacement rules.
 Object.assign(deps['./data/pokeball'],evaluate(parse('data/pokeball.ts').statements.filter(ts.isEnumDeclaration).map(n=>n.getText()).join('\n')));
@@ -33,7 +35,10 @@ Object.assign(deps,{'./phase':{Phase},'./battle-core/switch-command.mjs':{select
 export const phaseRenderGlobals={Phaser:{Display:{Masks:{BitmapMask:class{}}},Math:{Linear:(a,b,t)=>(b-a)*t+a}},
   setTimeout:callback=>Promise.resolve().then(callback)};
 export const originalPhases=evaluate(declarations('phases.ts'),deps,phaseRenderGlobals);
-export function installPhaseTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(deps[path],value);}
+export function installPhaseTestDependencies(values){for(const [path,value]of Object.entries(values)){
+ Object.assign(deps[path],value);
+ if(path==='./messages')deps[path].getLocalizedPokemonMessage=originalLocalizedPokemonMessage((...args)=>deps[path].getPokemonMessage(...args),p=>deps[path].getPokemonNameWithAffix?.(p)??p.name);
+}}
 const evolutionPhaseDeps={...dependencies('evolution-phase.ts'),'./phase':{Phase},'./phases':originalPhases};
 export const evolutionPhases=evaluate(declarations('evolution-phase.ts'),evolutionPhaseDeps);
 export function installEvolutionTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(evolutionPhaseDeps[path],value);}

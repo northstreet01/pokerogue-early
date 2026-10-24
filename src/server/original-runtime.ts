@@ -153,6 +153,7 @@ export async function executeRuntimeOperation(runtime: ReturnType<typeof createO
   if (operation === 'native-validate') return validateNativeAction(runtime, payload);
   if (operation === 'native-submit') return submitNativeActions(runtime, payload);
   if (operation === 'native-preparation') return openNativePreparation(runtime, payload);
+  if (operation === 'native-preparation-shared') return openNativePreparation(runtime, payload, true);
   if (operation === 'native-prepare-action') return chooseNativePreparation(runtime, payload);
   if (operation === 'native-next') return nextNativeBattle(runtime, payload);
   if (operation === 'native-switch') return chooseNativeSwitch(runtime, payload);

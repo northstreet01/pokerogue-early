@@ -1,3 +1,5 @@
+import i18next from '../i18n';
+
 export enum BattleStat {
   ATK,
   DEF,
@@ -10,6 +12,8 @@ export enum BattleStat {
 }
 
 export function getBattleStatName(stat: BattleStat) {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && stat>=BattleStat.ATK && stat<=BattleStat.EVA)
+    return i18next.t(`pokemonInfo:stat.${BattleStat[stat].toLowerCase()}`);
   switch (stat) {
     case BattleStat.ATK:
       return 'Attack';

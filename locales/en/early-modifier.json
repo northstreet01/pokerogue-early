@@ -1,0 +1,22 @@
+{
+ "pokeballs":"Receive {{pokeballName}} x{{modifierCount}}\nCatch Rate: {{catchRate}}",
+ "certain":"Certain",
+ "enemyStatusChance":"Adds a {{chancePercent}}% chance to inflict {{statusEffect}} with attack moves",
+ "hp":"Restore {{restorePoints}} HP or {{restorePercent}}% HP for one Pokémon, whichever is higher",
+ "fullHp":"Fully restores HP for one Pokémon",
+ "fullHpStatus":"Fully restores HP for one Pokémon and heals any status ailment",
+ "revive":"Revive one Pokémon and restore {{restorePercent}}% HP",
+ "pp":"Restore {{restorePoints}} PP for one Pokémon move",
+ "fullPp":"Restore all PP for one Pokémon move",
+ "allPp":"Restore {{restorePoints}} PP for all of one Pokémon's moves",
+ "fullAllPp":"Restore all PP for all of one Pokémon's moves",
+ "ppUp":"Permanently increase PP for one Pokémon move by {{upPoints}} for every 5 maximum PP (maximum 3)",
+ "tempStat":"Increases the {{stat}} of all party members by 1 stage for 5 battles",
+ "critical":"critical-hit ratio",
+ "attackBooster":"Increases the power of a Pokémon's {{moveType}}-type moves by {{boostPercent}}%",
+ "baseStat":"Increases the holder's {{stat}} by 10%, with a stack limit determined by its IV",
+ "expBooster":"Increases gain of EXP. Points by {{boostPercent}}%",
+ "heldExpBooster":"Increases the holder's gain of EXP. Points by {{boostPercent}}%",
+ "money":"Grants money (₽{{moneyAmount}})",
+ "tera":"{{teraType}} Terastallizes the holder for up to 10 battles"
+}

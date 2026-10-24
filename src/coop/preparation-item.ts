@@ -1,12 +1,12 @@
 import { PokemonModifierType, PokemonHpRestoreModifierType, PokemonStatusHealModifierType,
   PokemonPpRestoreModifierType, PokemonAllMovePpRestoreModifierType, PokemonPpUpModifierType,
-  PokemonHeldItemModifierType } from '../modifier/modifier-type';
+  PokemonHeldItemModifierType, PokemonLevelIncrementModifierType } from '../modifier/modifier-type';
 import { AddPokeballModifier, MoneyRewardModifier, PokemonHpRestoreModifier, PokemonStatusHealModifier,
   PokemonPpRestoreModifier, PokemonAllMovePpRestoreModifier, PokemonPpUpModifier,
   ExpBoosterModifier, HealingBoosterModifier, ExpShareModifier, ExtraModifierModifier,
   MoneyMultiplierModifier, PokemonExpBoosterModifier, PokemonBaseStatModifier,
   AttackTypeBoosterModifier, BerryModifier, TempBattleStatBoosterModifier,
-  PokemonNatureWeightModifier, PreserveBerryModifier } from '../modifier/modifier';
+  PokemonNatureWeightModifier, PreserveBerryModifier, PokemonLevelIncrementModifier } from '../modifier/modifier';
 
 // Admission is by verified original mechanism, including generated variants.
 // Exact prototypes prevent an unverified specialised subclass entering by accident.
@@ -23,7 +23,7 @@ export function isPreparationPersistent(modifier) {
 export function preparationItemTarget(type): 'party' | 'move' | 'none' | null {
   if (type instanceof PokemonPpRestoreModifierType || type instanceof PokemonPpUpModifierType) return 'move';
   if (type instanceof PokemonHpRestoreModifierType || type instanceof PokemonStatusHealModifierType
-    || type instanceof PokemonAllMovePpRestoreModifierType) return 'party';
+    || type instanceof PokemonAllMovePpRestoreModifierType || type instanceof PokemonLevelIncrementModifierType) return 'party';
   if (type instanceof PokemonHeldItemModifierType) {
     return isPreparationPersistent(type.newModifier({ id: 0 })) ? 'party' : null;
   }
@@ -44,5 +44,5 @@ export function isPreparationConsumable(modifier) {
   return modifier instanceof AddPokeballModifier || modifier instanceof MoneyRewardModifier
     || modifier instanceof PokemonHpRestoreModifier || modifier instanceof PokemonStatusHealModifier
     || modifier instanceof PokemonPpRestoreModifier || modifier instanceof PokemonAllMovePpRestoreModifier
-    || modifier instanceof PokemonPpUpModifier;
+    || modifier instanceof PokemonPpUpModifier || modifier instanceof PokemonLevelIncrementModifier;
 }

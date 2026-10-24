@@ -15,11 +15,12 @@ import { GameModes } from '../game-mode';
 import { Command } from '../ui/command-ui-handler';
 import { ModifierTypeOption, restoreModifierTypeState } from '../modifier/modifier-type';
 import { PartyUiMode, PartyOption } from '../ui/party-ui-handler';
-import { getPokeballName } from '../data/pokeball';
+import { getPokeballDisplayName as getPokeballName } from '../data/pokeball';
 import { SummaryUiMode } from '../ui/summary-ui-handler';
 import { allMoves } from '../data/move';
 import { preparationItemTarget } from './preparation-item';
 import { captureModifierState, restoreModifierState } from '../modifier/modifier';
+import i18next from '../i18n';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -343,8 +344,8 @@ export default class CoopPlayPhase extends Phase {
           return;
         }
         if (action?.kind === 'fight') this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'capture-choice', 'switch', 'ball', 'learn-move'].includes(action?.kind)) this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball', 'learn-move'].includes(action?.kind))
+        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'capture-choice', 'switch', 'ball', 'learn-move', 'evolution'].includes(action?.kind)) this.submitted = true;
+        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball', 'learn-move', 'evolution'].includes(action?.kind))
           await this.scene.ui.setMode(Mode.MESSAGE);
         if (!current()) return;
         if (action?.kind === 'profile-ready') this.profileDirty = false;
@@ -477,8 +478,11 @@ export default class CoopPlayPhase extends Phase {
     if (this.disposed) return;
     if (this.releaseTeamParty) return;
     if (this.latest?.personal.decision.kind === 'capture-choice' || this.latest?.personal.decision.legacyCapture) await this.openCaptureChoice();
+    else if (this.latest?.personal.decision.players?.subdecision?.kind === 'learn-move') await this.openLearnMoveMenu();
+    else if (this.latest?.personal.decision.players?.subdecision?.kind === 'evolution') await this.openEvolutionMenu();
     else if (this.latest?.personal.decision.kind === 'preparation') await this.openPreparationMenu();
     else if (this.latest?.personal.decision.kind === 'learn-move') await this.openLearnMoveMenu();
+    else if (this.latest?.personal.decision.kind === 'evolution') await this.openEvolutionMenu();
     else if (['switch-confirm', 'switch-select', 'wait-switch'].includes(this.latest?.personal.decision.kind)) await this.openSwitchPrompt();
     else this.openBattleCommand();
   }
@@ -494,7 +498,8 @@ export default class CoopPlayPhase extends Phase {
   private preparationKey(snapshot: any): string {
     // A partner operation advances the shared decision id without changing our
     // choices. Only a successfully presented/verified revision may carry input.
-    return canonical({ runId: snapshot.runId ?? null, decision: { ...snapshot.personal.decision, id: null }, resources: snapshot.personal.resources ?? null,
+    const {sharedMarket: _stock, ...personalDecision} = snapshot.personal.decision;
+    return canonical({ runId: snapshot.runId ?? null, decision: { ...personalDecision, id: null }, resources: snapshot.personal.resources ?? null,
       party: snapshot.personal.party ?? null, field: snapshot.shared?.field ?? null,
       wave: snapshot.shared?.waveIndex ?? null, biome: snapshot.shared?.biome ?? null });
   }
@@ -505,9 +510,15 @@ export default class CoopPlayPhase extends Phase {
       || !decision.requiredSeats.includes(this.seat) || !this.isPersonalInputCurrent(snapshot, epoch)) return;
     const signature = `${epoch}:${decision.id}:${snapshot.revision}`;
     if (this.preparationSignature === signature) return;
-    const viewKey = this.preparationKey(snapshot);
+    const viewKey = this.preparationKey(snapshot) + canonical(decision.sharedMarket ?? null);
     if (this.preparationSignature && this.preparationViewKey === viewKey) { this.preparationSignature = signature; return; }
     const player = decision.players;
+    const shared = decision.sharedMarket;
+    if (shared && player.rewardResolved && !player.subdecision && !player.selection) {
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      this.setStatus(i18next.t('coop:shoppingFinished'));
+      this.preparationSignature=signature;this.preparationViewKey=viewKey;return;
+    }
     const menuEpoch = ++this.preparationMenuEpoch;
     const current = () => menuEpoch === this.preparationMenuEpoch && this.isPersonalInputCurrent(snapshot, epoch);
     const submit = (operation: () => Promise<any>) => {
@@ -530,12 +541,32 @@ export default class CoopPlayPhase extends Phase {
         new ModifierTypeOption(restoreModifierTypeState(option.type), 0, 0));
       if (!rewards.length) throw new Error('PERSONAL_REWARD_MENU_EMPTY');
       const shop = (player.shop ?? []).map((option: any) => new ModifierTypeOption(restoreModifierTypeState(option.type), 0, option.cost));
-      this.setStatus(player.ready ? '本人已完成整备，等待伙伴；可在原页取消准备或继续购物'
+      this.setStatus(shared ? i18next.t('coop:sharedShop')
+        : player.ready ? '本人已完成整备，等待伙伴；可在原页取消准备或继续购物'
         : player.rewardResolved ? '奖励已处理，可继续购物或在原页完成整备' : '请选择原奖励、购买道具或重抽；取消键可跳过奖励');
-      await this.scene.ui.setMode(Mode.MODIFIER_SELECT, true, rewards, (rowCursor: number, cursor: number) => {
+      await this.showOriginalPreparationMenu(true, rewards, (rowCursor: number, cursor: number) => {
         if (!current()) return false;
         if (player.selection || player.subdecision) { this.setStatus('请先处理本人必要选择，再继续整备', true); return false; }
-        if (rowCursor === -1) { submit(() => this.sendPreparation(player.rewardResolved ? player.ready ? 'unready' : 'ready' : 'skip-reward', snapshot, epoch)); return false; }
+        if (rowCursor === -1) {
+          if (shared) {
+            // Original overlay confirmation preserves the original menu and
+            // its row/cursor on cancel. Release also guards peer updates/exit.
+            let active=true;
+            const release=()=>{active=false;this.scene.ui.getHandler?.(Mode.CONFIRM)?.clear();};
+            this.releaseTeamParty=release;
+            const confirm=async(accept:boolean)=>{
+              if (!active || !current()) return;
+              this.releaseTeamParty=null;active=false;
+              await this.scene.ui.revertMode();
+              if (!current()) return;
+              if (accept) submit(()=>this.sendPreparation('skip-reward',snapshot,epoch));
+              else {this.preparationSignature='';await this.openPreparationMenu();}
+            };
+            void this.scene.ui.setOverlayMode(Mode.CONFIRM,()=>confirm(true),()=>confirm(false));
+            this.setStatus(i18next.t('coop:skipShopping'));
+          } else submit(() => this.sendPreparation(player.rewardResolved ? player.ready ? 'unready' : 'ready' : 'skip-reward', snapshot, epoch));
+          return false;
+        }
         if (rowCursor === 0 && cursor === 0 && !player.rewardResolved) {
           submit(() => this.sendAction({ kind: 'preparation', operation: 'reroll' }, '重抽已提交，等待服务器裁定…')); return false;
         }
@@ -550,14 +581,26 @@ export default class CoopPlayPhase extends Phase {
         }
         submit(() => this.choosePreparationReward(option, snapshot, epoch, rowCursor === 1 ? 'reward' : 'buy'));
         return false;
-      }, player.rerollCost, { shopOptions: shop, allowReroll: !player.rewardResolved, allowTransfer: false,
-        preparation: { ready: player.ready, rewardResolved: player.rewardResolved, onComplete: () => {
+      }, player.rerollCost, { shopOptions: shop, allowReroll: !player.rewardResolved && !shared?.rerollLocked, allowTransfer: false,
+        stock: shared ? {rewards:player.rewards.map((o:any)=>shared.rewardClaims.find((claim:any)=>claim.optionId===o.id)?.seat ?? null),
+          shop:player.shop.map((o:any)=>shared.shopClaims.find((claim:any)=>claim.optionId===o.id)?.seat ?? null)} : undefined,
+        preparation: { automatic:!!shared, ready: player.ready, rewardResolved: player.rewardResolved, onComplete: () => {
+          if (shared) return;
           if (!current()) return;
           if (!player.rewardResolved || player.selection || player.subdecision) { this.setStatus('请先处理本人必要选择并领取或跳过奖励，再完成整备', true); return; }
           submit(() => this.sendPreparation(player.ready ? 'unready' : 'ready', snapshot, epoch));
         } } });
     }
     if (this.isPersonalInputCurrent(snapshot, epoch)) { this.preparationSignature = signature; this.preparationViewKey = viewKey; }
+  }
+
+  private async showOriginalPreparationMenu(...args:any[]) {
+    const ui=this.scene.ui;
+    const handler=ui.getHandler?.(Mode.MODIFIER_SELECT);
+    // Original UI.setMode is a no-op for the current mode. Use the original
+    // handler's existing refresh branch so stock/callbacks update in place.
+    if (ui.getMode?.()===Mode.MODIFIER_SELECT && handler?.active) handler.show(args);
+    else await ui.setMode(Mode.MODIFIER_SELECT,...args);
   }
 
   private async choosePreparationReward(option: any, snapshot: any, epoch: string | null, operation = 'reward') {
@@ -804,8 +847,38 @@ export default class CoopPlayPhase extends Phase {
       operation === 'ready' ? '准备已提交，等待服务器确认…' : operation === 'unready' ? '取消准备已提交…' : '跳过奖励已提交…');
   }
 
+  private async openEvolutionMenu() {
+    const snapshot = this.latest, epoch = this.epoch;
+    const decision = snapshot?.personal.decision.players?.subdecision ?? snapshot?.personal.decision;
+    if (decision?.kind !== 'evolution' || this.seat === null || !decision.requiredSeats.includes(this.seat)
+      || !this.isPersonalInputCurrent(snapshot,epoch)) return;
+    const evolution = decision.evolution ?? decision;
+    const entry = this.model.applied?.personal?.party?.find((item:any)=>item.id===evolution?.pokemonId);
+    if (!entry) throw new Error('PERSONAL_EVOLUTION_DATA_MISSING');
+    this.clearTeamParty();
+    const menuEpoch = this.teamMenuEpoch;
+    let active = true;
+    const current = () => active && this.teamMenuEpoch === menuEpoch && this.isPersonalInputCurrent(snapshot,epoch);
+    this.releaseTeamParty = () => {active=false; this.scene.ui.getHandler?.(Mode.CONFIRM)?.clear();};
+    const submit = async (choice:string) => {
+      if (!current()) return;
+      this.clearTeamParty();
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if (this.teamMenuEpoch !== menuEpoch+1 || !this.isPersonalInputCurrent(snapshot,epoch)) return;
+      await this.sendAction({kind:'evolution',pokemonId:evolution.pokemonId,choice},i18next.t('evolutionPhase:submitted'));
+    };
+    await this.scene.ui.setMode(Mode.MESSAGE);
+    if (!current()) return;
+    const name = entry.pokemon.species.getName(entry.pokemon.formIndex);
+    this.setStatus(i18next.t(evolution.stage==='pause-confirm'?'evolutionPhase:coopPausePrompt':'evolutionPhase:confirm',{pokemonName:name}));
+    await this.scene.ui.setMode(Mode.CONFIRM,
+      ()=>submit(evolution.stage==='pause-confirm'?'pause':'evolve'),
+      ()=>submit(evolution.stage==='pause-confirm'?'continue':'cancel'));
+  }
+
   private async openLearnMoveMenu() {
-    const snapshot = this.latest, epoch = this.epoch, decision = snapshot?.personal.decision;
+    const snapshot = this.latest, epoch = this.epoch;
+    const decision = snapshot?.personal.decision.players?.subdecision ?? snapshot?.personal.decision;
     if (!decision || decision.kind !== 'learn-move' || this.seat === null
       || !decision.requiredSeats.includes(this.seat) || !this.isPersonalInputCurrent(snapshot, epoch)) return;
     const learn = decision.learn;
@@ -845,7 +918,7 @@ export default class CoopPlayPhase extends Phase {
     const guarded = (callback: (...args: any[]) => any) => (...args: any[]) => Promise.resolve().then(() => callback(...args)).catch(recover);
     const submit = async (slot: number | null) => {
       if (!current() || step !== (slot === null ? 'stop' : 'summary')
-        || !decision.options.some((option: any) => option.kind === 'learn-move'
+        || !(Array.isArray(decision.options)?decision.options:decision.options[this.seat]).some((option: any) => option.kind === 'learn-move'
         && option.pokemonId === learn.pokemonId && option.slot === slot)) return;
       this.clearTeamParty();
       this.battleInputActive = false;
@@ -1017,7 +1090,7 @@ export default class CoopPlayPhase extends Phase {
     this.modifierLine.hidden = modifiers.length === 0;
     this.modifierLine.textContent = modifiers.length ? '本人持久道具：' + modifiers.map(modifier => {
       const target = personal.party.find(entry => entry.id === modifier.pokemonId);
-      return `${modifier.type.name} ×${modifier.stackCount}${target ? `（${getPokemonSpecies(target.pokemon.species.speciesId).name}）` : ''}`
+      return `${modifier.type.getDisplayName()} ×${modifier.stackCount}${target ? `（${getPokemonSpecies(target.pokemon.species.speciesId).name}）` : ''}`
         + (Number.isInteger(modifier.battlesLeft) ? ` 剩余${modifier.battlesLeft}战` : '');
     }).join('、') : '';
   }
@@ -1214,6 +1287,16 @@ export default class CoopPlayPhase extends Phase {
     if (!this.latest || this.seat === null || !this.roomId) return false;
     if (this.actionId) { this.setStatus('操作已提交，等待回执…'); return false; }
     if (!this.inputReady) { this.setStatus('正在核对双方状态，请稍后提交'); return false; }
+    if (action.kind==='preparation' && this.latest.personal.decision.sharedMarket) {
+      const d=this.latest.personal.decision;
+      const claimed=(action.operation==='reward'?d.sharedMarket.rewardClaims:action.operation==='buy'?d.sharedMarket.shopClaims:[])
+        .some((claim:any)=>claim.optionId===action.optionId);
+      if (claimed || d.players.rewardResolved || action.operation==='reroll' && d.sharedMarket.rerollLocked) {
+        this.clearTeamParty();this.preparationSignature='';
+        await this.openPreparationMenu();this.setStatus(i18next.t(claimed?'coop:claimed':'coop:marketLocked'),true);
+        return false;
+      }
+    }
     this.clearPreparationParty();
     this.clearActiveSwitchParty();
     const actionId = crypto.randomUUID();

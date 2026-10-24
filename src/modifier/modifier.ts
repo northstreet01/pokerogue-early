@@ -11,8 +11,9 @@ import { addTextObject, TextStyle } from "../ui/text";
 import { Type } from '../data/type';
 import { EvolutionPhase } from '../evolution-phase';
 import { pokemonEvolutions } from '../data/pokemon-evolutions';
-import { getPokemonMessage } from '../messages';
+import { getPokemonMessage , getLocalizedPokemonMessage} from '../messages';
 import * as Utils from "../utils";
+import i18next from '../i18n';
 import { TempBattleStat } from '../data/temp-battle-stat';
 import { BerryType, getBerryEffectFunc, getBerryPredicate } from '../data/berry';
 import { StatusEffect, getStatusEffectHealText } from '../data/status-effect';
@@ -61,7 +62,7 @@ export class ModifierBar extends Phaser.GameObjects.Container {
       this.setModifierIconPosition(icon, visibleIconModifiers.length);
       icon.setInteractive(new Phaser.Geom.Rectangle(0, 0, 32, 24), Phaser.Geom.Rectangle.Contains);
       icon.on('pointerover', () => {
-        (this.scene as BattleScene).ui.showTooltip(modifier.type.name, modifier.type.getDescription(this.scene as BattleScene));
+        (this.scene as BattleScene).ui.showTooltip(modifier.type.getDisplayName(), modifier.type.getDescription(this.scene as BattleScene));
         if (this.modifierCache && this.modifierCache.length > iconOverflowIndex)
           thisArg.updateModifierOverflowVisibility(true);
       });
@@ -720,7 +721,7 @@ export class SurviveDamageModifier extends PokemonHeldItemModifier {
     if (!surviveDamage.value && pokemon.randSeedInt(10) < this.getStackCount()) {
       surviveDamage.value = true;
 
-      pokemon.scene.queueMessage(getPokemonMessage(pokemon, ` hung on\nusing its ${this.type.name}!`));
+      pokemon.scene.queueMessage(getLocalizedPokemonMessage(pokemon, 'modifier:surviveDamageApply', () => ({typeName:this.type.getDisplayName()}), () => ` hung on\nusing its ${this.type.name}!`));
       return true;
     }
 
@@ -785,7 +786,7 @@ export class TurnHealModifier extends PokemonHeldItemModifier {
     if (pokemon.getHpRatio() < 1) {
       const scene = pokemon.scene;
       scene.unshiftPhase(new PokemonHealPhase(scene, pokemon.getBattlerIndex(),
-        Math.max(Math.floor(pokemon.getMaxHp() / 16) * this.stackCount, 1), getPokemonMessage(pokemon, `'s ${this.type.name}\nrestored its HP a little!`), true));
+        Math.max(Math.floor(pokemon.getMaxHp() / 16) * this.stackCount, 1), getLocalizedPokemonMessage(pokemon, 'modifier:turnHealApply', () => ({typeName:this.type.getDisplayName()}), () => `'s ${this.type.name}\nrestored its HP a little!`), true));
       return true;
     }
 
@@ -816,7 +817,7 @@ export class HitHealModifier extends PokemonHeldItemModifier {
     if (pokemon.turnData.damageDealt && pokemon.getHpRatio() < 1) {
       const scene = pokemon.scene;
       scene.unshiftPhase(new PokemonHealPhase(scene, pokemon.getBattlerIndex(),
-        Math.max(Math.floor(pokemon.turnData.damageDealt / 8) * this.stackCount, 1), getPokemonMessage(pokemon, `'s ${this.type.name}\nrestored its HP a little!`), true));
+        Math.max(Math.floor(pokemon.turnData.damageDealt / 8) * this.stackCount, 1), getLocalizedPokemonMessage(pokemon, 'modifier:hitHealApply', () => ({typeName:this.type.getDisplayName()}), () => `'s ${this.type.name}\nrestored its HP a little!`), true));
     }
 
     return true;
@@ -889,7 +890,7 @@ export class BerryModifier extends PokemonHeldItemModifier {
     pokemon.getOpponents().map(opp => applyAbAttrs(PreventBerryUseAbAttr, opp, cancelled));
 
     if (cancelled.value) {
-      pokemon.scene.queueMessage(getPokemonMessage(pokemon, ' is too\nnervous to eat berries!'));
+      pokemon.scene.queueMessage(getLocalizedPokemonMessage(pokemon,'abilityTriggers:preventBerryUse',()=>({}),()=>' is too\nnervous to eat berries!'));
       return false;
     }
 
@@ -954,7 +955,7 @@ export class PokemonInstantReviveModifier extends PokemonHeldItemModifier {
     const pokemon = args[0] as Pokemon;
 
     pokemon.scene.unshiftPhase(new PokemonHealPhase(pokemon.scene, pokemon.getBattlerIndex(),
-      Math.max(Math.floor(pokemon.getMaxHp() / 2), 1), getPokemonMessage(pokemon, ` was revived\nby its ${this.type.name}!`), false, false, true));
+      Math.max(Math.floor(pokemon.getMaxHp() / 2), 1), getLocalizedPokemonMessage(pokemon, 'modifier:pokemonInstantReviveApply', () => ({typeName:this.type.getDisplayName()}), () => ` was revived\nby its ${this.type.name}!`), false, false, true));
 
     pokemon.resetStatus();
 
@@ -1572,7 +1573,8 @@ export class MoneyInterestModifier extends PersistentModifier {
     scene.updateMoneyText();
     scene.validateAchvs(MoneyAchv);
 
-    scene.queueMessage(`You received interest of ₽${interestAmount.toLocaleString('en-US')}\nfrom the ${this.type.name}!`, null, true);
+    scene.queueMessage((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('modifier:moneyInterestApply',
+      {typeName:this.type.getDisplayName(),moneyAmount:interestAmount.toLocaleString('en-US')}):`You received interest of ₽${interestAmount.toLocaleString('en-US')}\nfrom the ${this.type.name}!`, null, true);
 
     return true;
   }
@@ -1736,7 +1738,7 @@ export class TurnHeldItemTransferModifier extends HeldItemTransferModifier {
   }
 
   getTransferMessage(pokemon: Pokemon, targetPokemon: Pokemon, item: ModifierTypes.ModifierType): string {
-    return getPokemonMessage(targetPokemon, `'s ${item.name} was absorbed\nby ${pokemon.name}'s ${this.type.name}!`);
+    return getLocalizedPokemonMessage(targetPokemon, 'modifier:turnHeldItemTransferApply', () => ({itemName:item.getDisplayName(),pokemonName:pokemon.name,typeName:this.type.getDisplayName()}), () => `'s ${item.name} was absorbed\nby ${pokemon.name}'s ${this.type.name}!`);
   }
 
   getMaxHeldItemCount(pokemon: Pokemon): integer {
@@ -1770,7 +1772,7 @@ export class ContactHeldItemTransferChanceModifier extends HeldItemTransferModif
   }
 
   getTransferMessage(pokemon: Pokemon, targetPokemon: Pokemon, item: ModifierTypes.ModifierType): string {
-    return getPokemonMessage(targetPokemon, `'s ${item.name} was snatched\nby ${pokemon.name}'s ${this.type.name}!`);
+    return getLocalizedPokemonMessage(targetPokemon, 'modifier:contactHeldItemTransferApply', () => ({itemName:item.getDisplayName(),pokemonName:pokemon.name,typeName:this.type.getDisplayName()}), () => `'s ${item.name} was snatched\nby ${pokemon.name}'s ${this.type.name}!`);
   }
 
   getMaxHeldItemCount(pokemon: Pokemon): integer {
@@ -1917,7 +1919,7 @@ export class EnemyTurnHealModifier extends EnemyPersistentModifier {
     if (pokemon.getHpRatio() < 1) {
       const scene = pokemon.scene;
       scene.unshiftPhase(new PokemonHealPhase(scene, pokemon.getBattlerIndex(),
-        Math.max(Math.floor(pokemon.getMaxHp() / (100 / this.healPercent)) * this.stackCount, 1), getPokemonMessage(pokemon, `\nrestored some HP!`), true));
+        Math.max(Math.floor(pokemon.getMaxHp() / (100 / this.healPercent)) * this.stackCount, 1), getLocalizedPokemonMessage(pokemon, 'modifier:enemyTurnHealApply', () => ({}), () => `\nrestored some HP!`), true));
       return true;
     }
 
@@ -2025,7 +2027,7 @@ export class EnemyInstantReviveChanceModifier extends EnemyPersistentModifier {
     const pokemon = args[0] as Pokemon;
 
     pokemon.scene.unshiftPhase(new PokemonHealPhase(pokemon.scene, pokemon.getBattlerIndex(),
-      Math.max(Math.floor(pokemon.getMaxHp() / (this.fullHeal ? 1 : 2)), 1), getPokemonMessage(pokemon, ` was revived\nby its ${this.type.name}!`), false, false, true));
+      Math.max(Math.floor(pokemon.getMaxHp() / (this.fullHeal ? 1 : 2)), 1), getLocalizedPokemonMessage(pokemon, 'modifier:pokemonInstantReviveApply', () => ({typeName:this.type.getDisplayName()}), () => ` was revived\nby its ${this.type.name}!`), false, false, true));
 
     pokemon.resetStatus();
 

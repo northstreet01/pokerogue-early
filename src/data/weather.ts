@@ -1,5 +1,6 @@
 import { Biome } from "./enums/biome";
-import { getPokemonMessage } from "../messages";
+import { getPokemonMessage, getLocalizedPokemonMessage } from "../messages";
+import i18next from '../i18n';
 import Pokemon from "../field/pokemon";
 import { Type } from "./type";
 import Move, { AttackMove } from "./move";
@@ -125,6 +126,8 @@ export function restoreWeatherState(snapshot: unknown): Weather {
 }
 
 export function getWeatherStartMessage(weatherType: WeatherType): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && weatherType!==WeatherType.NONE)
+    return i18next.t(`weather:${WeatherType[weatherType].toLowerCase().replace(/_([a-z])/g,(_,c)=>c.toUpperCase())}StartMessage`);
   switch (weatherType) {
     case WeatherType.SUNNY:
       return 'The sunlight got bright!';
@@ -148,6 +151,8 @@ export function getWeatherStartMessage(weatherType: WeatherType): string {
 }
 
 export function getWeatherLapseMessage(weatherType: WeatherType): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && weatherType!==WeatherType.NONE)
+    return i18next.t(`weather:${WeatherType[weatherType].toLowerCase().replace(/_([a-z])/g,(_,c)=>c.toUpperCase())}LapseMessage`);
   switch (weatherType) {
     case WeatherType.SUNNY:
       return 'The sunlight is strong.';
@@ -173,15 +178,17 @@ export function getWeatherLapseMessage(weatherType: WeatherType): string {
 export function getWeatherDamageMessage(weatherType: WeatherType, pokemon: Pokemon): string {
   switch (weatherType) {
     case WeatherType.SANDSTORM:
-      return getPokemonMessage(pokemon, ' is buffeted\nby the sandstorm!');
+      return getLocalizedPokemonMessage(pokemon,'weather:sandstormDamageMessage',()=>({}),()=> ' is buffeted\nby the sandstorm!');
     case WeatherType.HAIL:
-      return getPokemonMessage(pokemon, ' is pelted\nby the hail!');
+      return getLocalizedPokemonMessage(pokemon,'weather:hailDamageMessage',()=>({}),()=> ' is pelted\nby the hail!');
   }
 
   return null;
 }
 
 export function getWeatherClearMessage(weatherType: WeatherType): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && weatherType!==WeatherType.NONE)
+    return i18next.t(`weather:${WeatherType[weatherType].toLowerCase().replace(/_([a-z])/g,(_,c)=>c.toUpperCase())}ClearMessage`);
   switch (weatherType) {
     case WeatherType.SUNNY:
       return 'The sunlight faded.';
@@ -205,6 +212,8 @@ export function getWeatherClearMessage(weatherType: WeatherType): string {
 }
 
 export function getTerrainStartMessage(terrainType: TerrainType): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && terrainType!==TerrainType.NONE)
+    return i18next.t(`terrain:${TerrainType[terrainType].toLowerCase()}StartMessage`);
   switch (terrainType) {
     case TerrainType.MISTY:
       return 'Mist swirled around the battlefield!';
@@ -218,6 +227,8 @@ export function getTerrainStartMessage(terrainType: TerrainType): string {
 }
 
 export function getTerrainClearMessage(terrainType: TerrainType): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && terrainType!==TerrainType.NONE)
+    return i18next.t(`terrain:${TerrainType[terrainType].toLowerCase()}ClearMessage`);
   switch (terrainType) {
     case TerrainType.MISTY:
       return 'The mist disappeared from the battlefield.';
@@ -232,8 +243,8 @@ export function getTerrainClearMessage(terrainType: TerrainType): string {
 
 export function getTerrainBlockMessage(pokemon: Pokemon, terrainType: TerrainType): string {
   if (terrainType === TerrainType.MISTY)
-    return getPokemonMessage(pokemon, ` surrounds itself with a protective mist!`);
-  return getPokemonMessage(pokemon, ` is protected by the ${Utils.toReadableString(TerrainType[terrainType])} Terrain!`);
+    return getLocalizedPokemonMessage(pokemon,'terrain:mistyBlockMessage',()=>({}),()=> ` surrounds itself with a protective mist!`);
+  return getLocalizedPokemonMessage(pokemon,'terrain:defaultBlockMessage',()=>({terrainName:i18next.t(`terrain:${TerrainType[terrainType].toLowerCase()}`)}),()=> ` is protected by the ${Utils.toReadableString(TerrainType[terrainType])} Terrain!`);
 }
 
 interface WeatherPoolEntry {

@@ -2,6 +2,7 @@ import BattleScene from "../battle-scene";
 import { TrainerType } from "../data/enums/trainer-type";
 import { ModifierTier } from "../modifier/modifier-tier";
 import { Achv, AchvTier, achvs } from "./achv";
+import i18next from '../i18n';
 
 export enum VoucherType {
   REGULAR,
@@ -28,7 +29,7 @@ export class Voucher {
   }
 
   getName(): string {
-    return getVoucherTypeName(this.voucherType);
+    return getVoucherDisplayName(this.voucherType);
   }
 
   getIconImage(): string {
@@ -60,6 +61,10 @@ export function getVoucherTypeName(voucherType: VoucherType): string {
     case VoucherType.GOLDEN:
       return 'Egg Voucher Gold';
   }
+}
+
+export function getVoucherDisplayName(voucherType:VoucherType):string {
+  return i18next.t(`voucher:${['eggVoucher','eggVoucherPlus','eggVoucherPremium','eggVoucherGold'][voucherType]}`,{defaultValue:getVoucherTypeName(voucherType)});
 }
 
 export function getVoucherTypeIcon(voucherType: VoucherType): string {

@@ -18,7 +18,7 @@ import { addWindow } from "./window";
 import { SpeciesFormChangeItemTrigger } from "../data/pokemon-forms";
 import { SummaryUiMode } from './summary-ui-handler';
 
-const defaultMessage = 'Choose a Pokémon.';
+const defaultMessage = () => i18next.t('partyUiHandler:choosePokemon');
 
 export enum PartyUiMode {
   SWITCH,
@@ -113,7 +113,7 @@ export default class PartyUiHandler extends MessageUiHandler {
     return null;
   };
 
-  public static NoEffectMessage = 'It won\'t have any effect.';
+  public static get NoEffectMessage() {return i18next.t('partyUiHandler:anyEffect');}
 
   constructor(scene: BattleScene) {
     super(scene, Mode.PARTY);
@@ -147,7 +147,7 @@ export default class PartyUiHandler extends MessageUiHandler {
 
     this.partyMessageBox = partyMessageBox;
 
-    const partyMessageText = addTextObject(this.scene, 8, 10, defaultMessage, TextStyle.WINDOW, { maxLines: 2 });
+    const partyMessageText = addTextObject(this.scene, 8, 10, defaultMessage(), TextStyle.WINDOW, { maxLines: 2 });
     
     partyMessageText.setOrigin(0, 0);
     partyMessageBoxContainer.add(partyMessageText);
@@ -487,7 +487,7 @@ export default class PartyUiHandler extends MessageUiHandler {
 
   showText(text: string, delay?: integer, callback?: Function, callbackDelay?: integer, prompt?: boolean, promptDelay?: integer) {
     if (text === null)
-      text = defaultMessage;
+      text = defaultMessage();
 
     if (text?.indexOf('\n') === -1) {
       this.partyMessageBox.setSize(262, 30);
@@ -655,7 +655,7 @@ export default class PartyUiHandler extends MessageUiHandler {
           default:
             if (formChangeItemModifiers && option >= PartyOption.FORM_CHANGE_ITEM) {
               const modifier = formChangeItemModifiers[option - PartyOption.FORM_CHANGE_ITEM];
-              optionName = `${i18next.t(modifier.active ? 'partyUiHandler:deactivate' : 'partyUiHandler:activate')} ${modifier.type.name}`;
+              optionName = `${i18next.t(modifier.active ? 'partyUiHandler:deactivate' : 'partyUiHandler:activate')} ${modifier.type.getDisplayName()}`;
             } else
               optionName = i18next.t(`partyUiHandler:${PartyOption[option].toLowerCase().replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())}`, { defaultValue: Utils.toReadableString(PartyOption[option]) });
             break;
@@ -670,7 +670,7 @@ export default class PartyUiHandler extends MessageUiHandler {
         altText = !pokemon.getSpeciesForm().getLevelMoves().find(plm => plm[1] === move);
       } else {
         const itemModifier = itemModifiers[option];
-        optionName = itemModifier.type.name;
+        optionName = itemModifier.type.getDisplayName();
         if (itemModifier.stackCount > 1)
           optionName += ` (${itemModifier.stackCount})`;
       }

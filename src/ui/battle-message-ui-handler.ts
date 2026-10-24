@@ -163,10 +163,14 @@ export default class BattleMessageUiHandler extends MessageUiHandler {
   }
 
   promptLevelUpStats(partyMemberIndex: integer, prevStats: integer[], showTotals: boolean): Promise<void> {
+    return this.promptLevelUpStatsValues((this.scene as BattleScene).getParty()[partyMemberIndex].stats, prevStats, showTotals);
+  }
+
+  /** The original panel can also display already committed cooperative stats. */
+  promptLevelUpStatsValues(newStats: integer[], prevStats: integer[], showTotals: boolean): Promise<void> {
     return new Promise(resolve => {
       if (!this.scene.showLevelUpStats)
         return resolve();
-      const newStats = (this.scene as BattleScene).getParty()[partyMemberIndex].stats;
       let levelUpStatsValuesText = '';
       const stats = Utils.getEnumValues(Stat);
       for (let s of stats)
@@ -177,7 +181,7 @@ export default class BattleMessageUiHandler extends MessageUiHandler {
       this.awaitingActionInput = true;
       this.onActionInput = () => {
         if (!showTotals)
-          return this.promptLevelUpStats(partyMemberIndex, null, true).then(() => resolve());
+          return this.promptLevelUpStatsValues(newStats, null, true).then(() => resolve());
         else {
           this.levelUpStatsContainer.setVisible(false);
           resolve();
@@ -217,16 +221,16 @@ export default class BattleMessageUiHandler extends MessageUiHandler {
 
   getIvDescriptor(value: integer): string {
     if (value > 30)
-      return 'Best';
+      return i18next.t('battleMessageUiHandler:ivBest');
     if (value === 30)
-      return 'Fantastic';
+      return i18next.t('battleMessageUiHandler:ivFantastic');
     if (value > 20)
-      return 'Very Good';
+      return i18next.t('battleMessageUiHandler:ivVeryGood');
     if (value > 10)
-      return 'Pretty Good';
+      return i18next.t('battleMessageUiHandler:ivPrettyGood');
     if (value)
-      return 'Decent';
-    return 'No Good';
+      return i18next.t('battleMessageUiHandler:ivDecent');
+    return i18next.t('battleMessageUiHandler:ivNoGood');
   }
 
   showNameText(name: string): void {

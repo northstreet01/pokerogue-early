@@ -28,7 +28,7 @@
   "cantBeUsed": "{{pokemonName}}无法在此挑战中使用！",
   "tooManyItems": "{{pokemonName}}拥有\n太多这个道具了！",
   "anyEffect": "即便使用也无效果哦。",
-  "unpausedEvolutions": "{{pokemonName}}的进化停止了。",
+  "unpausedEvolutions": "已重新开启{{pokemonName}}的进化。",
   "pausedEvolutions": "{{pokemonName}} 的进化停止了。",
   "unspliceConfirmation": "真的要把{{fusionName}}\n从{{pokemonName}}身上分离吗？{{fusionName}}会就此消失。",
   "wasReverted": "{{fusionName}}恢复成了{{pokemonName}}。",

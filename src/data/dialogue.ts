@@ -1,6 +1,8 @@
 import { trainerConfigs } from "./trainer-config";
 import { TrainerType } from "./enums/trainer-type";
 import { BattleSpec } from "../enums/battle-spec";
+import i18next from '../i18n';
+import { rememberPresentationText } from '../system/presentation-text.mjs';
 
 export interface TrainerTypeMessages {
   encounter?: string | string[],
@@ -10,6 +12,17 @@ export interface TrainerTypeMessages {
 
 export interface TrainerTypeDialogue {
   [key: integer]: TrainerTypeMessages | [ TrainerTypeMessages, TrainerTypeMessages ]
+}
+
+export function localizeTrainerMessages(type:TrainerType,variant:number,stage:string,messages:string[]):string[] {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map((text,index)=>{
+    const key=`earlyDialogue:${TrainerType[type]}.${variant}.${stage}.${index}`;
+    const value=i18next.t(key,{defaultValue:text});
+    const pages=value.split('$');
+    if (pages.length>1)pages.forEach((page,pageIndex)=>rememberPresentationText(page.trim(),{kind:'translation-page',key,index:pageIndex}));
+    return value;
+  });
 }
 
 export const trainerTypeDialogue = {

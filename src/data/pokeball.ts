@@ -1,4 +1,5 @@
 import BattleScene from "../battle-scene";
+import i18next from '../i18n';
 
 export enum PokeballType {
   POKEBALL,
@@ -49,6 +50,10 @@ export function getPokeballName(type: PokeballType): string {
       break;
   }
   return ret;
+}
+
+export function getPokeballDisplayName(type:PokeballType):string {
+  return i18next.t(`pokeball:${['pokeBall','greatBall','ultraBall','rogueBall','masterBall','luxuryBall'][type]}`,{defaultValue:getPokeballName(type)});
 }
 
 export function getPokeballCatchMultiplier(type: PokeballType): number {

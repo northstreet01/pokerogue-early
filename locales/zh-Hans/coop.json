@@ -1,0 +1,17 @@
+{
+ "pokemon":"宝可梦",
+ "captureCaught":"{{ball}}：捕获成功。",
+ "captureFailed":"{{ball}}：捕获失败，可继续选择行动。",
+ "captureCancelled":"捕获取消：目标已离场，未消耗精灵球。",
+ "captureUnknown":"捕获结果暂时无法显示，请查看同步状态。",
+ "moneyIncrease":"增加",
+ "moneySpend":"支出",
+ "moneyChange":"资金{{direction}} ₽{{amount}}，余额 ₽{{balance}}",
+ "sharedShop":"共享限量商店：可先购买商品，最后领取一件免费奖励或确认跳过，即结束本人购物",
+ "shoppingFinished":"本人已选择完毕，等待伙伴完成购物…",
+ "skipShopping":"跳过免费奖励并结束本人本轮购物？确认后等待伙伴。",
+ "claimed":"该道具已被领取，请选择剩余库存。",
+ "marketLocked":"本轮选择已结束或重抽已锁定。",
+ "stockReward":"玩家{{player}}已领取",
+ "stockPaid":"玩家{{player}}已购买"
+}

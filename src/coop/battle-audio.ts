@@ -33,4 +33,5 @@ export class CoopBattleAudio {
     this.scene.playBgm(key, true, this.controller.signal);
   }
   stop() { this.controller.abort(); this.key = null; this.scene.fadeOutBgm?.(150, true); }
+  invalidate() { this.controller.abort(); this.key = null; }
 }

@@ -11,6 +11,9 @@ import { trainerNamePools } from "../data/trainer-names";
 import { ArenaTagType } from "#app/data/enums/arena-tag-type";
 import { ArenaTag, ArenaTagSide, ArenaTrapTag } from "#app/data/arena-tag";
 import { createTrainerStateCodec } from '../battle-core/trainer-state.mjs';
+import { localizeTrainerMessages } from '../data/dialogue';
+import i18next from '../i18n';
+import {presentationText,rememberPresentationText} from '../system/presentation-text.mjs';
 
 export enum TrainerVariant {
   DEFAULT,
@@ -98,6 +101,7 @@ export default class Trainer extends Phaser.GameObjects.Container {
   getName(trainerSlot: TrainerSlot = TrainerSlot.NONE, includeTitle: boolean = false): string {
     let name = this.config.getTitle(trainerSlot, this.variant);
     let title = includeTitle && this.config.title ? this.config.title : null;
+    if (title) title=i18next.t(`trainerTitles:${{'Gym Leader':'gymLeader','Elite Four':'eliteFour',Champion:'champion',Rival:'rival'}[title]}`,{defaultValue:title});
     if (this.name) {
       if (includeTitle)
         title = name;
@@ -108,7 +112,7 @@ export default class Trainer extends Phaser.GameObjects.Container {
       } else
         name = trainerSlot === TrainerSlot.TRAINER ? this.name : this.partnerName || this.name;
     }
-    return title ? `${title} ${name}` : name;
+    return title ? rememberPresentationText(`${title} ${name}`,{kind:'joined',parts:[presentationText(title)??title,' ',presentationText(name)??name]}) : name;
   }
 
   isDouble(): boolean {
@@ -124,15 +128,18 @@ export default class Trainer extends Phaser.GameObjects.Container {
   }
 
   getEncounterMessages(): string[] {
-    return !this.variant ? this.config.encounterMessages : (this.variant === TrainerVariant.DOUBLE ? this.config.doubleEncounterMessages : this.config.femaleEncounterMessages) || this.config.encounterMessages;
+    const messages=!this.variant ? this.config.encounterMessages : (this.variant === TrainerVariant.DOUBLE ? this.config.doubleEncounterMessages : this.config.femaleEncounterMessages) || this.config.encounterMessages;
+    return localizeTrainerMessages(this.config.trainerType,messages===this.config.femaleEncounterMessages?1:0,'encounter',messages);
   }
 
   getVictoryMessages(): string[] {
-    return !this.variant ? this.config.victoryMessages : (this.variant === TrainerVariant.DOUBLE ? this.config.doubleVictoryMessages : this.config.femaleVictoryMessages) || this.config.victoryMessages;
+    const messages=!this.variant ? this.config.victoryMessages : (this.variant === TrainerVariant.DOUBLE ? this.config.doubleVictoryMessages : this.config.femaleVictoryMessages) || this.config.victoryMessages;
+    return localizeTrainerMessages(this.config.trainerType,messages===this.config.femaleVictoryMessages?1:0,'victory',messages);
   }
 
   getDefeatMessages(): string[] {
-    return !this.variant ? this.config.defeatMessages : (this.variant === TrainerVariant.DOUBLE ? this.config.doubleDefeatMessages : this.config.femaleDefeatMessages) || this.config.defeatMessages;
+    const messages=!this.variant ? this.config.defeatMessages : (this.variant === TrainerVariant.DOUBLE ? this.config.doubleDefeatMessages : this.config.femaleDefeatMessages) || this.config.defeatMessages;
+    return localizeTrainerMessages(this.config.trainerType,messages===this.config.femaleDefeatMessages?1:0,'defeat',messages);
   }
 
   getPartyTemplate(): TrainerPartyTemplate {

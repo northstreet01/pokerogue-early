@@ -8,14 +8,15 @@ export async function until(predicate,label){
   for(let n=0;n<2400;n++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,5));}
   throw Error(`WAIT_TIMEOUT: ${label}`);
 }
-export async function openPreparationRoom({api,checkpoint,store,old=null}){
+export async function openPreparationRoom({api,checkpoint,store,old=null,stage='preparation'}){
   const seed=checkpoint.scene.seed,identities=[{trainerId:1,secretId:2},{trainerId:3,secretId:4}];
-  const original=createOriginalCoopAdapter({fixture:{seed,identities,parties:[[909,7],[906,7]],eggState:{players:[[],[]]}}});
+  const provisioning={seed,identities,...(checkpoint.decision.shared?{sharedPreparation:true}:{})};
+  const original=createOriginalCoopAdapter({fixture:{...provisioning,parties:[[909,7],[906,7]],eggState:{players:[[],[]]}}});
   // Explicit trusted checkpoint injection. Never claim this is a natural draw
   // or an end-to-end browser lobby; all subsequent effects use the real Worker.
   const failures=[],groups=[];
   const adapter={...original,async advanceToDecision(...args){try{return await original.advanceToDecision(...args);}catch(error){failures.push(error.code??error.message);throw error;}},
-    createInitialContext:({runId})=>original.restoreCheckpoint({formatVersion:2,runId,stage:'preparation',provisioning:{seed,identities},lobby:null,nativeCheckpoint:structuredClone(checkpoint),intents:[]})};
+    createInitialContext:({runId})=>original.restoreCheckpoint({formatVersion:2,runId,stage,provisioning,lobby:null,nativeCheckpoint:structuredClone(checkpoint),intents:[]})};
   const server=await formalFixture(adapter,store);
   async function connectPair(tokens=null,holdSeat=null){
     const pair=[];groups.push(pair);

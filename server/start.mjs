@@ -22,7 +22,7 @@ const server = http.createServer(async (request, response) => {
 });
 const service = await attachCoopServer(server, { directory: process.env.COOP_DATA ?? 'server/data/rooms' });
 const profileAdapter = process.env.COOP_PROFILE_LOBBY === '1'
-  ? createOriginalCoopAdapter({ fixture: { profileLobby: true, identities: [{ trainerId: 0, secretId: 0 }, { trainerId: 0, secretId: 0 }] },
+  ? createOriginalCoopAdapter({ fixture: { profileLobby: true, sharedPreparation: true, identities: [{ trainerId: 0, secretId: 0 }, { trainerId: 0, secretId: 0 }] },
     // Optional reproducible acceptance seed, server-only. Normal rooms remain random.
     seedFactory: () => process.env.COOP_ROOM_SEED ?? randomUUID() })
   : null;

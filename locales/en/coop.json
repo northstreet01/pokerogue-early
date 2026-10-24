@@ -1,0 +1,17 @@
+{
+ "pokemon":"Pokémon",
+ "captureCaught":"{{ball}}: caught successfully.",
+ "captureFailed":"{{ball}}: capture failed. You can choose another action.",
+ "captureCancelled":"Capture cancelled: the target left the field. No ball was consumed.",
+ "captureUnknown":"Capture result unavailable. Please check the synchronization status.",
+ "moneyIncrease":"received",
+ "moneySpend":"spent",
+ "moneyChange":"Money {{direction}}: ₽{{amount}}. Balance: ₽{{balance}}",
+ "sharedShop":"Limited shared shop: buy items first, then take one free reward or confirm skip to finish your shopping.",
+ "shoppingFinished":"Your choices are complete. Waiting for your partner to finish shopping…",
+ "skipShopping":"Skip the free reward and finish shopping for this wave? You will then wait for your partner.",
+ "claimed":"This item has already been taken. Please choose remaining stock.",
+ "marketLocked":"Your choices are complete or rerolling is locked.",
+ "stockReward":"Player {{player}} claimed",
+ "stockPaid":"Player {{player}} purchased"
+}

@@ -1,6 +1,6 @@
 import i18next from '../i18n';
 import BattleScene, { Button } from "../battle-scene";
-import { Voucher, getVoucherTypeIcon, getVoucherTypeName, vouchers } from "../system/voucher";
+import { Voucher, getVoucherTypeIcon, getVoucherDisplayName as getVoucherTypeName, vouchers } from "../system/voucher";
 import MessageUiHandler from "./message-ui-handler";
 import { TextStyle, addTextObject } from "./text";
 import { Mode } from "./ui";

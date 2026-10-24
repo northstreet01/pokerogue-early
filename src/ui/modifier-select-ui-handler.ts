@@ -22,8 +22,10 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
   private player: boolean;
   private rerollCost: integer;
   private displayGeneration = 0;
+  private stockIndices = new WeakMap<ModifierOption,number>();
   private inputPresentation: { shopOptions?: ModifierTypeOption[]; allowReroll?: boolean; allowTransfer?: boolean;
-    preparation?: { ready: boolean; rewardResolved: boolean; onComplete: () => void } } = {};
+    stock?: {rewards:(number|null)[];shop:(number|null)[]};
+    preparation?: { automatic?:boolean; ready: boolean; rewardResolved: boolean; onComplete: () => void } } = {};
 
   public options: ModifierOption[];
   public shopOptionsRows: ModifierOption[][];
@@ -89,9 +91,13 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
         if (args[4]?.preparation) {
           this.inputPresentation = args[4]; this.rerollCost = args[3];
           this.options.forEach(option => option.setAlpha(this.inputPresentation.preparation.rewardResolved ? 0.35 : 1));
+          this.refreshStock();
+          this.completeButtonContainer?.setVisible(!this.inputPresentation.preparation.automatic);
           this.completeButtonText?.setText(this.inputPresentation.preparation.ready ? '已完成，等待伙伴（取消准备）'
             : this.inputPresentation.preparation.rewardResolved ? '本轮整备完成 [Enter]' : '领取／跳过奖励后完成整备');
           this.rerollButtonContainer.setVisible(this.inputPresentation.allowReroll !== false);
+          if (this.inputPresentation.preparation.automatic && this.rowCursor===0
+            && !this.rerollButtonContainer.visible && !this.transferButtonContainer.visible) this.setRowCursor(1);
           this.updateCostText();
         }
       }
@@ -104,7 +110,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     super.show(args);
     const generation = ++this.displayGeneration;
     this.inputPresentation = args[4] ?? {};
-    this.completeButtonContainer?.setVisible(!!this.inputPresentation.preparation);
+    this.completeButtonContainer?.setVisible(!!this.inputPresentation.preparation && !this.inputPresentation.preparation.automatic);
     this.completeButtonText?.setText(this.inputPresentation.preparation?.ready ? '已完成，等待伙伴（取消准备）'
       : this.inputPresentation.preparation?.rewardResolved ? '本轮整备完成 [Enter]' : '领取／跳过奖励后完成整备');
 
@@ -151,6 +157,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       const rowOptions = shopTypeOptions.slice(row ? SHOP_OPTIONS_ROW_LIMIT : 0, row ? undefined : SHOP_OPTIONS_ROW_LIMIT);
       const sliceWidth = (this.scene.game.canvas.width / SHOP_OPTIONS_ROW_LIMIT) / (rowOptions.length + 2);
       const option = new ModifierOption(this.scene, sliceWidth * (col + 1) + (sliceWidth * 0.5), ((-this.scene.game.canvas.height / 12) - (this.scene.game.canvas.height / 32) - (40 - (28 * row - 1))), shopTypeOptions[m]);
+      this.stockIndices.set(option,m);
       option.setScale(0.375);
       this.scene.add.existing(option);
       this.modifierContainer.add(option);
@@ -222,7 +229,8 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
         this.setCursor(0);
         this.awaitingActionInput = true;
         this.onActionInput = args[2];
-        if (this.inputPresentation.preparation?.rewardResolved) { this.setRowCursor(0); this.setCursor(2); }
+        this.refreshStock();
+        if (this.inputPresentation.preparation?.rewardResolved && !this.inputPresentation.preparation.automatic) { this.setRowCursor(0); this.setCursor(2); }
       });
     });
 
@@ -237,7 +245,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
 
     let success = false;
 
-    if (this.inputPresentation.preparation && (button === Button.SUBMIT
+    if (this.inputPresentation.preparation && !this.inputPresentation.preparation.automatic && (button === Button.SUBMIT
       || button === Button.ACTION && this.rowCursor === 0 && this.cursor === 2)) {
       this.inputPresentation.preparation.onComplete();
       ui.playSelect(); return true;
@@ -280,7 +288,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
         case Button.LEFT:
           if (!this.rowCursor && this.inputPresentation.preparation) {
             const previous = [0, 1, 2].filter(index => index < this.cursor
-              && (index === 0 ? this.rerollButtonContainer.visible : index === 1 ? this.transferButtonContainer.visible : true)).at(-1);
+              && (index === 0 ? this.rerollButtonContainer.visible : index === 1 ? this.transferButtonContainer.visible : !this.inputPresentation.preparation.automatic)).at(-1);
             if (previous !== undefined) success = this.setCursor(previous);
           } else if (!this.rowCursor)
             success = this.rerollButtonContainer.visible && this.setCursor(0);
@@ -292,7 +300,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
         case Button.RIGHT:
           if (!this.rowCursor && this.inputPresentation.preparation) {
             const next = [0, 1, 2].find(index => index > this.cursor
-              && (index === 0 ? this.rerollButtonContainer.visible : index === 1 ? this.transferButtonContainer.visible : true));
+              && (index === 0 ? this.rerollButtonContainer.visible : index === 1 ? this.transferButtonContainer.visible : !this.inputPresentation.preparation.automatic));
             if (next !== undefined) success = this.setCursor(next);
           } else if (!this.rowCursor)
             success = this.transferButtonContainer.visible && this.setCursor(1);
@@ -332,14 +340,14 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       ui.showText(options[this.cursor].modifierTypeOption.type.getDescription(this.scene));
     } else if (!cursor) {
       this.cursorObj.setPosition(6, -60);
-      ui.showText('Spend money to reroll your item options');
+      ui.showText(i18next.t('modifierSelectUiHandler:rerollDesc'));
     } else if (this.cursor === 2 && this.inputPresentation.preparation) {
       this.cursorObj.setPosition((this.scene.game.canvas.width / 6) - 120, -34);
       ui.showText(this.inputPresentation.preparation.ready ? '本人已完成，等待伙伴；确认可取消准备'
         : this.inputPresentation.preparation.rewardResolved ? '购物结束后确认本轮整备完成' : '请先领取或跳过本人奖励');
     } else {
       this.cursorObj.setPosition((this.scene.game.canvas.width / 6) - 50, -60);
-      ui.showText('Transfer a held item from one Pokémon to another');
+      ui.showText(i18next.t('earlyBattle:transferItemHelp'));
     }
 
     return ret;
@@ -348,7 +356,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
   setRowCursor(rowCursor: integer): boolean {
     const lastRowCursor = this.rowCursor;
 
-    if (rowCursor !== lastRowCursor && (rowCursor || this.rerollButtonContainer.visible || this.transferButtonContainer.visible || this.inputPresentation.preparation)) {
+    if (rowCursor !== lastRowCursor && (rowCursor || this.rerollButtonContainer.visible || this.transferButtonContainer.visible || this.inputPresentation.preparation && !this.inputPresentation.preparation.automatic)) {
       this.rowCursor = rowCursor;
       let newCursor = Math.round(this.cursor / Math.max(this.getRowItems(lastRowCursor) - 1, 1) * (this.getRowItems(rowCursor) - 1));
       if (!rowCursor) {
@@ -369,7 +377,7 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
   private getRowItems(rowCursor: integer): integer {
     switch (rowCursor) {
       case 0:
-        return this.inputPresentation.preparation ? 3 : 2;
+        return this.inputPresentation.preparation && !this.inputPresentation.preparation.automatic ? 3 : 2;
       case 1:
         return this.options.length;
       default:
@@ -383,6 +391,18 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
       shopOption.updateCostText();
 
     this.updateRerollCostText();
+  }
+
+  private refreshStock() {
+    const stock=this.inputPresentation.stock;
+    if (!stock) return;
+    this.options.forEach((option,index)=>option.setStockOwner(stock.rewards[index]));
+    for (const option of this.shopOptionsRows.flat()) {
+      // The original visual paid rows are reversed relative to callback rows.
+      // Match the actual original option object instead of deleting/reindexing.
+      const index=this.stockIndices.get(option);
+      option.setStockOwner(stock.shop[index]);
+    }
   }
 
   updateRerollCostText(): void {
@@ -495,7 +515,7 @@ class ModifierOption extends Phaser.GameObjects.Container {
       this.itemContainer.add(this.itemTint);
     }
 
-    this.itemText = addTextObject(this.scene, 0, 35, this.modifierTypeOption.type.name, TextStyle.PARTY, { align: 'center' });
+    this.itemText = addTextObject(this.scene, 0, 35, this.modifierTypeOption.type.getDisplayName(), TextStyle.PARTY, { align: 'center' });
     this.itemText.setOrigin(0.5, 0);
     this.itemText.setAlpha(0);
     this.itemText.setTint(getModifierTierTextTint(this.modifierTypeOption.type.tier));
@@ -636,5 +656,11 @@ class ModifierOption extends Phaser.GameObjects.Container {
     this.itemCostText.setText(`₽${this.modifierTypeOption.cost.toLocaleString('en-US')}`);
     this.itemCostText.setColor(getTextColor(textStyle));
     this.itemCostText.setShadowColor(getTextColor(textStyle, true));
+  }
+
+  setStockOwner(owner:number|null|undefined) {
+    const claimed=owner===0||owner===1;
+    this.setAlpha(claimed?0.35:1);
+    this.itemText.setText(this.modifierTypeOption.type.getDisplayName() + (claimed ? '\n'+i18next.t(this.modifierTypeOption.cost?'coop:stockPaid':'coop:stockReward',{player:owner+1}) : ''));
   }
 }

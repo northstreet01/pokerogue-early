@@ -1,0 +1,15 @@
+{
+ "arenaExpired":"{{moveName}}的效果消失了。",
+ "arenaExpiredPlayer":"我方的{{moveName}}效果消失了。",
+ "arenaExpiredEnemy":"对手的{{moveName}}效果消失了。",
+ "mistPrevented":"白雾阻止了能力降低！",
+ "absorbedHazard":"{{pokemonNameWithAffix}}吸收了{{moveName}}！",
+ "hpRestored":"{{pokemonNameWithAffix}}的HP回复了。",
+ "attackMissed":"{{pokemonNameWithAffix}}的\n攻击没有命中！",
+ "hpFull":"{{pokemonNameWithAffix}}的\nHP已满！",
+ "statusProblems":"异常状态",
+ "transferItemHelp":"将携带道具从一只宝可梦转移给另一只宝可梦。",
+ "countdownPoof":"@d{32}１，@d{15}２，@d{15}……@d{15}……@d{15}……@d{15}@s{pb_bounce_1}空！",
+ "berryHeal":"{{pokemonNameWithAffix}}的{{berryName}}\n回复了HP！",
+ "berryPp":"{{pokemonNameWithAffix}}用{{berryName}}\n回复了招式{{moveName}}的PP！"
+}

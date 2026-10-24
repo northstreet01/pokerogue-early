@@ -25,7 +25,7 @@
   "infatuatedOnAdd": "{{pokemonNameWithAffix}}\n对{{sourcePokemonName}}着迷了！",
   "infatuatedOnOverlap": "{{pokemonNameWithAffix}}\n已经着迷了！",
   "infatuatedLapse": "{{pokemonNameWithAffix}}\n对{{sourcePokemonName}}着迷中！",
-  "infatuatedLapseImmobilize": "{{pokemonNameWithAffix}}\n不会着迷！",
+  "infatuatedLapseImmobilize": "{{pokemonNameWithAffix}}\n因着迷而无法行动！",
   "infatuatedOnRemove": "{{pokemonNameWithAffix}}\n治愈了着迷状态！",
   "seededOnAdd": "将种子种植在了\n{{pokemonNameWithAffix}}的身上！",
   "seededLapse": "{{pokemonNameWithAffix}}\n被寄生种子吸取了体力！",

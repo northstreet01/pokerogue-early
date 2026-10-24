@@ -1,5 +1,6 @@
 import * as Utils from "../utils";
 import { createEffectStateCodec } from "../battle-core/effect-state.mjs";
+import i18next from '../i18n';
 
 export enum StatusEffect {
   NONE,
@@ -43,6 +44,8 @@ export function restoreStatusState(snapshot: unknown): Status {
 }
 
 export function getStatusEffectObtainText(statusEffect: StatusEffect, sourceText?: string): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && statusEffect>=StatusEffect.POISON && statusEffect<=StatusEffect.BURN)
+    return i18next.t(`statusEffect:${StatusEffect[statusEffect].toLowerCase()}.${sourceText?'obtainSource':'obtain'}`,{pokemonNameWithAffix:'',sourceText});
   const sourceClause = sourceText ? ` ${statusEffect !== StatusEffect.SLEEP ? 'by' : 'from'} ${sourceText}` : '';
   switch (statusEffect) {
     case StatusEffect.POISON:
@@ -63,6 +66,8 @@ export function getStatusEffectObtainText(statusEffect: StatusEffect, sourceText
 }
 
 export function getStatusEffectActivationText(statusEffect: StatusEffect): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && statusEffect>=StatusEffect.POISON && statusEffect<=StatusEffect.BURN)
+    return i18next.t(`statusEffect:${StatusEffect[statusEffect].toLowerCase()}.activation`,{pokemonNameWithAffix:''});
   switch (statusEffect) {
     case StatusEffect.POISON:
     case StatusEffect.TOXIC:
@@ -81,6 +86,8 @@ export function getStatusEffectActivationText(statusEffect: StatusEffect): strin
 }
 
 export function getStatusEffectOverlapText(statusEffect: StatusEffect): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && statusEffect>=StatusEffect.POISON && statusEffect<=StatusEffect.BURN)
+    return i18next.t(`statusEffect:${StatusEffect[statusEffect].toLowerCase()}.overlap`,{pokemonNameWithAffix:''});
   switch (statusEffect) {
     case StatusEffect.POISON:
     case StatusEffect.TOXIC:
@@ -99,6 +106,8 @@ export function getStatusEffectOverlapText(statusEffect: StatusEffect): string {
 }
 
 export function getStatusEffectHealText(statusEffect: StatusEffect): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && statusEffect>=StatusEffect.POISON && statusEffect<=StatusEffect.BURN)
+    return i18next.t(`statusEffect:${StatusEffect[statusEffect].toLowerCase()}.heal`,{pokemonNameWithAffix:''});
   switch (statusEffect) {
     case StatusEffect.POISON:
     case StatusEffect.TOXIC:
@@ -117,6 +126,8 @@ export function getStatusEffectHealText(statusEffect: StatusEffect): string {
 }
 
 export function getStatusEffectDescriptor(statusEffect: StatusEffect): string {
+  if ((i18next.resolvedLanguage??i18next.language)==='zh-Hans' && statusEffect>=StatusEffect.POISON && statusEffect<=StatusEffect.BURN)
+    return i18next.t(`statusEffect:${StatusEffect[statusEffect].toLowerCase()}.description`);
   switch (statusEffect) {
     case StatusEffect.POISON:
     case StatusEffect.TOXIC:

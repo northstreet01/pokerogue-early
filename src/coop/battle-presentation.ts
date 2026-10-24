@@ -7,19 +7,21 @@ import { Type } from '../data/type';
 import { getBiomeKey } from '../field/arena';
 import { CommonBattleAnim, MoveAnim, initMoveAnim, loadMoveAnimAssets } from '../data/battle-anims';
 import { trainerConfigs } from '../data/trainer-config';
-import { getPokeballName } from '../data/pokeball';
+import { getPokeballDisplayName as getPokeballName } from '../data/pokeball';
 import { animatePokemonExit } from '../field/pokemon-exit-animation';
 import { animatePokemonSummon } from '../field/pokemon-summon-animation';
 import { CoopBattleAudio } from './battle-audio';
 import { Biome } from '../data/enums/biome';
 import { animateEncounterScroll, animateBiomeBackground } from '../field/encounter-animation';
+import { presentOriginalEvolution } from './evolution-presentation';
+import {renderPresentationText} from '../system/presentation-text.mjs';
 
 export function captureResultText(event: any): string {
   const ball = getPokeballName(event.pokeballType);
-  if (event.outcome === 'caught') return `${ball}：捕获成功。`;
-  if (event.outcome === 'failed') return `${ball}：捕获失败，可继续选择行动。`;
-  if (event.outcome === 'cancelled') return '捕获取消：目标已离场，未消耗精灵球。';
-  return '捕获结果暂时无法显示，请查看同步状态。';
+  if (event.outcome === 'caught') return i18next.t('coop:captureCaught',{ball});
+  if (event.outcome === 'failed') return i18next.t('coop:captureFailed',{ball});
+  if (event.outcome === 'cancelled') return i18next.t('coop:captureCancelled');
+  return i18next.t('coop:captureUnknown');
 }
 
 const within = async (task: Promise<unknown>, ms: number, signal: AbortSignal) => {
@@ -139,7 +141,7 @@ export class CoopBattlePresentation {
         if (this.playedEvents.has(key)) continue;
         try {
           if (event.kind === 'bgm') this.audio.play(event.key);
-          else if (batch && !batch.replay && ['battle-animation', 'damage-display', 'pokemon-hp', 'pokemon-exit', 'pokemon-enter', 'faint-cry', 'showInfo'].includes(event.kind)) continue;
+          else if (batch && !batch.replay && ['battle-animation', 'damage-display', 'pokemon-hp', 'pokemon-progress', 'level-stats', 'experience-bar', 'evolution-display', 'pokemon-exit', 'pokemon-enter', 'faint-cry', 'showInfo'].includes(event.kind)) continue;
           else if (event.kind === 'battle-animation') await this.playAnimation(event, signal);
           else if (event.kind === 'phase-start') await this.playPhase(event, signal);
           else if (event.kind === 'damage-display' || event.kind === 'pokemon-hp') await this.playDamage(event, signal);
@@ -153,6 +155,9 @@ export class CoopBattlePresentation {
           else if (event.kind === 'dialogue') await this.playDialogue(event, signal);
           else if (event.kind === 'message') await this.playMessage(event, signal);
           else if (event.kind === 'experience-bar') await this.playExperience(event, signal);
+          else if (event.kind === 'pokemon-progress') await this.playProgress(event, signal);
+          else if (event.kind === 'level-stats') await this.playLevelStats(event, signal);
+          else if (event.kind === 'evolution-display') await this.playEvolution(event, signal);
           else if (event.kind === 'capture-result') await this.playMessage({ text: captureResultText(event) }, signal);
         } catch (error) { if (signal.aborted) return; throw error; }
         if (signal.aborted) return;
@@ -290,6 +295,8 @@ export class CoopBattlePresentation {
   }
 
   private async playDialogue(event: any, signal: AbortSignal) {
+    if(event.presentation)event={...event,text:this.localText(event.presentation)};
+    if(event.speakerPresentation)event={...event,speaker:this.localText(event.speakerPresentation)};
     // Original UI.showDialogue forces a user prompt and chains page callbacks.
     // Use the same original message handler without a prompt for bounded replay.
     const handler: any = this.scene.ui.getMessageHandler?.();
@@ -302,9 +309,12 @@ export class CoopBattlePresentation {
   }
 
   private async playMessage(event: any, signal: AbortSignal) {
-    if (event.messageKey === 'battle:switchQuestion') {
-      const pokemon = this.displayedById.get(event.pokemonId);
-      event = { ...event, text: i18next.t(event.messageKey, { pokemonName: event.useName && pokemon ? pokemon.name : i18next.t('common:pokemon', {defaultValue:'宝可梦'}) }) };
+    if(event.presentation)event={...event,text:this.localText(event.presentation)};
+    if (['battle:switchQuestion','battle:levelUp','battle:expGain'].includes(event.messageKey)) {
+      const pokemon = this.displayedById.get(event.pokemonId) ?? this.pending?.applied.byId.get(event.pokemonId)?.pokemon;
+      const name=pokemon?.species.getName(pokemon.formIndex) ?? i18next.t('coop:pokemon');
+      event = { ...event, text: i18next.t(event.messageKey, {...event.values,
+        pokemonName:event.messageKey==='battle:switchQuestion'&&!event.useName?i18next.t('coop:pokemon'):name}) };
     }
     if (!event.text || typeof (this.scene.ui as any).showText !== 'function') return;
     if (signal.aborted) return;
@@ -314,8 +324,19 @@ export class CoopBattlePresentation {
     await wait(Math.min(1800, Math.max(500, event.text.length * 25)), signal);
   }
 
+  private localText(value:any):string {
+    return String(renderPresentationText(value,i18next.t.bind(i18next),id=>{
+      const pokemon=this.displayedById.get(id)??this.pending?.applied.byId.get(id)?.pokemon;
+      return pokemon?.species.getName(pokemon.formIndex);
+    }));
+  }
+
   private async playExperience(event: any, signal: AbortSignal) {
-    const target = this.displayedById.get(event.pokemonId);
+    // Off-field party members use the original PartyExpBar too. The verified
+    // instance stays detached; no Pokemon constructor or addExp runs here.
+    const owned = this.pending?.applied?.byId.get(event.pokemonId);
+    const target = this.displayedById.get(event.pokemonId)
+      ?? (owned ? Object.assign(restorePokemonState(capturePokemonState(owned.pokemon)), {scene:this.scene}) : null);
     if (!target) return;
     try {
       await within(Promise.resolve(this.scene.partyExpBar?.showPokemonExp?.(target, event.exp)), 1000, signal);
@@ -327,6 +348,70 @@ export class CoopBattlePresentation {
         this.scene.partyExpBar?.setVisible(false);
         if (this.scene.partyExpBar) this.scene.partyExpBar.shown = false;
       }
+    }
+  }
+
+  private async playProgress(event: any, signal: AbortSignal) {
+    const target = this.displayedById.get(event.pokemonId);
+    if (!target) return;
+    Object.assign(target, {hp:event.hp, stats:[...event.stats], level:event.level, exp:event.exp, levelExp:event.levelExp});
+    this.modelKeys.delete(target.id);
+    await within(Promise.resolve(target.updateInfo(false)), 12000, signal);
+  }
+
+  private async playLevelStats(event: any, signal: AbortSignal) {
+    const handler: any = this.scene.ui.getMessageHandler?.();
+    if (!handler?.promptLevelUpStatsValues || !this.scene.showLevelUpStats) return;
+    const audioPort:any=Object.create(this.scene),audioTimers:any[]=[];
+    let active=true;
+    audioPort.time={delayedCall:(delay,callback,...args)=>{
+      const timer=this.scene.time.delayedCall(delay,()=>{if(active&&!signal.aborted)callback();},...args);
+      audioTimers.push(timer);return timer;
+    }};
+    const sound=this.scene.playSoundWithoutBgm.call(audioPort,'level_up_fanfare',1500);
+    // Reuse both original pages (increase, then total). A bounded automatic
+    // advance also permits the original ACTION/CANCEL, without holding ACK
+    // forever on a display-only panel.
+    let timer: ReturnType<typeof setInterval>;
+    const close = () => {
+      if(!active)return;
+      active=false;
+      for(const timer of audioTimers)timer?.destroy();
+      if(signal.aborted)sound?.stop();
+      clearInterval(timer);
+      handler.levelUpStatsContainer?.setVisible(false);
+      handler.awaitingActionInput = false;
+      handler.onActionInput = null;
+    };
+    signal.addEventListener('abort', close, {once:true});
+    try {
+      const task = handler.promptLevelUpStatsValues([...event.stats], [...event.previous], false);
+      timer = setInterval(() => { if (!signal.aborted) handler.onActionInput?.(); }, 1500);
+      await within(task, 4000, signal);
+    } finally { close(); signal.removeEventListener('abort', close); }
+  }
+
+  private async playEvolution(event:any, signal:AbortSignal) {
+    const controller=new AbortController(), cancel=()=>controller.abort();
+    signal.addEventListener('abort',cancel,{once:true});
+    const before = this.container(restorePokemonState(event.before),true) as PlayerPokemon;
+    const after = this.container(restorePokemonState(event.after),true) as PlayerPokemon;
+    let afterDestroyed=false;
+    const destroy=after.destroy.bind(after);
+    after.destroy=()=>{if (!afterDestroyed){afterDestroyed=true;destroy();}};
+    try {
+      before.init();after.init();
+      (before as any).battleInfo?.setVisible(false);(after as any).battleInfo?.setVisible(false);
+      await within(Promise.all([before.loadAssets(true,signal),after.loadAssets(true,signal)]),5000,signal);
+      if (signal.aborted) return;
+      await within(presentOriginalEvolution(this.scene,before,after,controller.signal),45000,signal);
+    } finally {
+      controller.abort();signal.removeEventListener('abort',cancel);
+      before.destroy();after.destroy();
+      // Evolution fades the original room music. Reset deduplication before
+      // selecting the original battle/victory track for this committed frame.
+      this.audio.invalidate();
+      if (!signal.aborted && this.pending) this.audio.apply(this.pending.snapshot);
     }
   }
 

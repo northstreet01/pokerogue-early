@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import i18next from 'i18next';
 import * as language from '../src/system/language.mjs';
+import * as presentationText from '../src/system/presentation-text.mjs';
 
 const root = new URL('../', import.meta.url);
 const bundledLocales = {};
@@ -28,7 +29,7 @@ function loadTs(path, dependencies, globals = {}) {
 }
 function initialize(storage) {
   const instance = i18next.createInstance();
-  loadTs('src/i18n.ts', { i18next: { default: instance }, './system/language.mjs': language }, { localStorage: storage });
+  loadTs('src/i18n.ts', { i18next: { default: instance }, './system/language.mjs': language,'./system/presentation-text.mjs':presentationText }, { localStorage: storage });
   return instance;
 }
 const storage = value => ({ value, getItem(key) { assert.equal(key, 'prLang'); return this.value; }, setItem(key, value) { assert.equal(key, 'prLang'); this.value = value; } });
@@ -156,7 +157,7 @@ test('language selection persists until reload and never writes a game save or r
 
 test('catalog localization keeps implementation markers and early descriptions when upstream mechanics differ', () => {
   const i18n = initialize(storage(null));
-  const { catalogName, catalogDescription } = loadTs('src/system/localized-catalog.ts', { '../i18n': { default: i18n } });
+  const { catalogName, catalogDescription } = loadTs('src/system/localized-catalog.ts', { '../i18n': { default: i18n },'./presentation-text.mjs':presentationText });
   assert.equal(catalogName('move', 'TACKLE', 'Tackle (P)'), '撞击 (P)');
   assert.equal(catalogName('pokemon', 'BULBASAUR', 'Bulbasaur'), '妙蛙种子');
   assert.equal(catalogName('move', 'EARLY_ONLY', 'Early Only (N)'), 'Early Only (N)');
@@ -176,6 +177,17 @@ test('all literal translation call sites resolve in both bundled languages with 
       if (!entry.name.endsWith('.ts')) continue;
       const source = ts.createSourceFile(url.pathname, fs.readFileSync(url, 'utf8'), ts.ScriptTarget.Latest, true);
       const visit = node => {
+        if(ts.isCallExpression(node)&&node.expression.getText(source)==='getLocalizedPokemonMessage'&&ts.isStringLiteralLike(node.arguments[1])){
+          const key=node.arguments[1].text,args={pokemonNameWithAffix:'name',pokemonName:'name'};
+          let values=node.arguments[2]?.body;
+          if(values&&ts.isParenthesizedExpression(values))values=values.expression;
+          if(values&&ts.isObjectLiteralExpression(values))for(const property of values.properties)args[property.name?.getText(source)]='value';
+          for(const lng of ['en','zh-Hans']){
+            assert.ok(i18n.exists(key,{lng,fallbackLng:false}),`${url.pathname}: missing ${lng} ${key}`);
+            assert.doesNotMatch(i18n.t(key,{...args,lng}),/\{\{[^}]+\}\}/,`${url.pathname}: incomplete ${lng} ${key}`);
+          }
+          count++;
+        }
         if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
           && node.expression.expression.getText(source) === 'i18next' && node.expression.name.text === 't'
           && node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])) {

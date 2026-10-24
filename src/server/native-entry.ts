@@ -31,7 +31,7 @@ import { resolveFightIntent } from '../battle-core/fight-command.mjs';
 import { advanceCollectedFightCommands } from '../battle-core/fight-command.mjs';
 import { bindCoopModifierScope } from '../battle-core/modifier-scope.mjs';
 import { bindCoopFaint } from '../battle-core/faint-queue.mjs';
-import { openPreparation, advancePreparation, validatePreparationAction, coopRewardExclusions } from '../battle-core/preparation-runner.mjs';
+import { openPreparation, advancePreparation, validatePreparationAction, completeSharedPreparation, coopRewardExclusions } from '../battle-core/preparation-runner.mjs';
 import { advancePreparationEffect, validatePreparationEffect } from '../battle-core/preparation-effects-runner.mjs';
 import { advanceNextBattle } from '../battle-core/next-battle-runner.mjs';
 import { originalSafeDecisionCodec } from '../original-phase-checkpoints';
@@ -57,6 +57,22 @@ import { canonical, requireContract as check } from '../battle-core/coop-contrac
 import { advanceProgressionChoice } from '../battle-core/progression-choice-runner.mjs';
 import { createLearnDecision, inspectLearnMove } from '../battle-core/learn-command.mjs';
 import { recoverVictoryParties } from '../battle-core/victory-aftermath-runner.mjs';
+import { EvolutionPhase, EndEvolutionPhase } from '../evolution-phase';
+import { evolutionReferenceCodec } from '../original-phase-checkpoints';
+import { advancePreparationGrowth } from '../battle-core/preparation-growth-runner.mjs';
+import { presentationText } from '../system/presentation-text.mjs';
+import i18next from '../i18n';
+
+// Progression choices append a safe sequence suffix. Keep the legacy native
+// counter for old checkpoints, and carry choice suffixes forward intact; parsing
+// a suffixed ID as a number would produce a repeated "native-…-NaN" boundary.
+function nextNativeDecisionId(c) {
+  const last = c.decision.id.split('-').at(-1);
+  if (!/^\d+$/.test(last)) return nextSafeDecisionId(c.decision.id);
+  const sequence=Number(last)+1;
+  check(Number.isSafeInteger(sequence),'DECISION_SEQUENCE_EXHAUSTED');
+  return `native-${c.battle.waveIndex}-${sequence}`;
+}
 
 // Trainer visuals are display-only. Native battle tests have no Phaser
 // Container list; the original encounter/rules still construct the real
@@ -89,7 +105,7 @@ class DisplayTarget {
 
 const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, EvolutionPhase, EndEvolutionPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
@@ -105,17 +121,20 @@ function installPokemonDisplayPort() {
   for (const name of ['tint', 'untint', 'cry', 'showInfo', 'hideInfo', 'playAnim', 'sparkle', 'updateScale', 'initBattleInfo'])
     proto[name] = function () {
       const view = name === 'showInfo' ? this.scene.nativePublicPokemon?.(this) : null;
-      this.scene.nativeEvents.push({ kind: name, pokemonId: this.id, ...(view ? { view } : {}) });
+      this.scene.nativeEvents.push({ kind: name, pokemonId: this.id, ...(view ? { view, scope:'shared' } : {}) });
       if (name === 'hideInfo') return Promise.resolve();
     };
   proto.loadAssets = function () { return Promise.resolve(); };
   proto.updateInfo = function () {
     const view = this.scene.nativePublicPokemon?.(this);
-    if (view) this.scene.nativeEvents.push({ kind: 'pokemon-hp', pokemonId: this.id, remainingHp: view.hp, maxHp: view.maxHp });
+    if (view) this.scene.nativeEvents.push({ kind: 'pokemon-hp', scope:'shared', pokemonId: this.id, remainingHp: view.hp, maxHp: view.maxHp });
+    const owner = this.scene.nativeOwner;
+    if (owner === 0 || owner === 1) this.scene.nativeEvents.push({ kind: 'pokemon-progress', scope: owner,
+      pokemonId: this.id, hp: this.hp, stats: [...this.stats], level: this.level, exp: this.exp, levelExp: this.levelExp });
     return Promise.resolve();
   };
   proto.faintCry = function (callback) {
-    this.scene.nativeEvents.push({ kind: 'faint-cry', pokemonId: this.id });
+    this.scene.nativeEvents.push({ kind: 'faint-cry', scope:'shared', pokemonId: this.id });
     this.scene.time.delayedCall(0, callback);
   };
   proto.getSprite = function () { return new DisplayTarget(); };
@@ -147,7 +166,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     setPokemonSeen: (p, incrementCount = true) => intents.push({ kind: 'seen', pokemonId: p.id,
       speciesId: p.species.speciesId, dexAttr: p.getDexAttr().toString(), incrementCount }),
     updateSpeciesDexIvs: (speciesId, ivs) => intents.push({ kind: 'dex-ivs', speciesId, ivs: [...ivs] }),
-    setPokemonCaught: p => { intents.push({ kind: 'capture-pending', pokemonId: p.id,
+    setPokemonCaught: (p, incrementCount = true) => { intents.push({ kind: incrementCount ? 'capture-pending' : 'evolution-pending', pokemonId: p.id,
       speciesId: p.species.speciesId, dexAttr: p.getDexAttr().toString(), level: p.level,
       ivs: [...p.ivs], nature: p.nature, pokemon: capturePokemonState(p) }); return Promise.resolve(); },
     saveSystem: () => { throw new Error('PERMANENT_SAVE_UNAVAILABLE'); },
@@ -155,7 +174,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.gameData = deferredData();
   const views = parties.map((party, seat) => {
     const view = Object.create(root);
-    Object.assign(view, { modifiers: c.players[seat].modifiers, money: c.players[seat].money,
+    Object.assign(view, { nativeOwner: seat, modifiers: c.players[seat].modifiers, money: c.players[seat].money,
       pokeballCounts: c.players[seat].pokeballCounts, gameData: deferredData(), getParty: () => party,
       getPlayerField: () => root.getPlayerField(), getEnemyField: () => root.getEnemyField(),
       getField: active => root.getField(active), getPokemonById: id => root.getPokemonById(id),
@@ -192,7 +211,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   c.arena.scene = root;
   if (c.battle?.trainer) c.battle.trainer.scene = root;
   const trackers = [root, ...views].map(scene => createRuleTaskTracker(scene));
-  const disposePorts = [root, ...views].map(scene => bindPresentationPort(scene, (kind, payload) => events.push({ kind, ...payload })));
+  const disposePorts = [root, ...views].map(scene => bindPresentationPort(scene, (kind, payload) => events.push({ kind, ...payload,
+    ...(['pokemon-enter','pokemon-exit'].includes(kind) ? {scope:'shared'} : {}) })));
   root.deferEncounterPersistence = () => {
     intents.push({ kind: 'encounter-persistence-pending', waveIndex: root.currentBattle.waveIndex });
     return Promise.resolve();
@@ -262,7 +282,14 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       schedule(() => { if (!counter.stopped) config.onComplete?.(); }, (repeats + 1) * ((config.duration ?? 0) + (config.repeatDelay ?? 0)));
       return counter;
     } };
-  root.ui = { getMessageHandler: () => ({ promptLevelUpStats: () => Promise.resolve() }), setMode: (mode, seat, _move, callback) => {
+  root.ui = { getMessageHandler: () => ({ promptLevelUpStats: (index, previous) => {
+    const phase = root.currentPhase, owner = views.indexOf(phase?.scene);
+    check(phase instanceof LevelUpPhase && (owner === 0 || owner === 1), 'INVALID_LEVEL_DISPLAY_OWNER');
+    const pokemon = parties[owner][index];
+    events.push({kind:'level-stats', scope:owner, pokemonId:pokemon.id, level:pokemon.level,
+      previous:[...previous], stats:[...pokemon.stats]});
+    return Promise.resolve();
+  } }), setMode: (mode, seat, _move, callback) => {
     if (mode === Mode.COMMAND) {
       check(root.currentPhase instanceof CommandPhase, 'NATIVE_UI_DECISION_REQUIRED');
       const p = root.currentPhase, action = inputs[seat];
@@ -299,22 +326,25 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     return Promise.resolve();
   },
     showDialogue: (...args: any[]) => {
-      events.push({ kind: 'dialogue', text: args[0] ?? null, speaker: args[1] ?? null });
+      events.push({ kind: 'dialogue', text: args[0] ?? null, speaker: args[1] ?? null,
+        presentation:presentationText(args[0]),speakerPresentation:presentationText(args[1]) });
       const callback = [...args].reverse().find(arg => typeof arg === 'function');
       schedule(callback);
     },
-    showText: (text, _delay, callback) => {
+    showText: (text, _delay, callback, _callbackDelay?, _prompt?, _promptDelay?, metadata?) => {
       const owner = root.currentPhase instanceof MoneyRewardPhase || root.currentPhase instanceof CheckSwitchPhase
+        || root.currentPhase instanceof ExpPhase || root.currentPhase instanceof LevelUpPhase || root.currentPhase instanceof LearnMovePhase
         ? views.indexOf(root.currentPhase.scene) : -1;
       const phase = root.currentPhase;
       const question = phase instanceof CheckSwitchPhase ? {
         messageKey: 'battle:switchQuestion', pokemonId: views[owner].getPlayerField()[(phase as any).fieldIndex].id,
         useName: !!(phase as any).useName,
       } : {};
-      events.push({ kind: 'message', text, ...question, ...(owner >= 0 ? {scope:owner} : {}) }); schedule(callback);
+      events.push({ kind: 'message', text, presentation:presentationText(text), ...question, ...metadata, ...(owner >= 0 ? {scope:owner} : {}) }); schedule(callback);
     } };
   root.damageNumberHandler = { add: (p, amount, result = HitResult.EFFECTIVE, critical = false) =>
-    events.push({ kind: 'damage-display', pokemonId: p.id, amount, result, critical, remainingHp: p.hp }) };
+    events.push({ kind: 'damage-display', scope:'shared', pokemonId: p.id, amount, result, critical, remainingHp: p.hp }) };
+  root.ui.setModeForceTransition = root.ui.setMode;
   BattleAnim.prototype.play = function (scene: any, callback) {
     const animation = this as any;
     const event: any = { kind: 'battle-animation', animation: this.constructor.name,
@@ -774,10 +804,15 @@ export async function stepNativeEntry(runtime, checkpoint) {
     supports: (_c, p) => supportsPhase(p),
     async execute(c, p) {
       const binding = bindNativeScene(c, runtime.scene.gameData);
+      if (p instanceof EvolutionPhase) {
+        binding.bindPhase(p); binding.dispose();
+        return {completed:false, suspended:true, pendingTasks:0, events:[], grants:[]};
+      }
       try { const result = await binding.execute(p); intents = binding.intents; return result; }
       finally { binding.dispose(); }
     },
     suspendBoundary(c, p, id) {
+      if (p instanceof EvolutionPhase) return evolutionBoundary(c, p, id);
       return { remaining: switchKind(p), decision: switchDecision(id, c, p) };
     },
     finishBoundary(c, p, id) {
@@ -789,7 +824,7 @@ export async function stepNativeEntry(runtime, checkpoint) {
       try { return actionDecision(c, binding.root, id); }
       finally { binding.dispose(); }
     }
-  }, { decisionId: `native-${input.battle.waveIndex}-${Number(input.decision.id.split('-').at(-1)) + 1}` });
+  }, { decisionId: nextNativeDecisionId(input) });
   return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 
@@ -800,6 +835,15 @@ export async function stepNativeEntry(runtime, checkpoint) {
 // resumed, then the normal queue continues.
 function progressionContext(c, seat) {
   const d = c.decision, current = c.continuation.currentPhase, phase = current?.phase;
+  if (d.kind === 'evolution') {
+    check(d.requiredSeats.length === 1 && d.requiredSeats[0] === seat && phase instanceof EvolutionPhase
+      && current?.kind === 'original-phase' && c.continuation.standbyPhase === null
+      && current.remaining === (d.stage === 'pause-confirm' ? 'evolution-pause' : 'evolution-apply')
+      && phases.capture(phase,c).scope === seat && (phase as any).pokemon.id === d.pokemonId
+      && canonical(evolutionReferenceCodec.capture((phase as any).evolution)) === canonical(d.reference)
+      && (phase as any).lastLevel === d.lastLevel, 'INVALID_PROGRESSION_PHASE');
+    return {d,current,phase,party:null};
+  }
   check(d.kind === 'learn-move' && d.requiredSeats.length === 1 && d.requiredSeats[0] === seat
     && current?.kind === 'original-phase' && current.remaining === 'learn-apply'
     && c.continuation.standbyPhase === null && phase instanceof LearnMovePhase
@@ -816,7 +860,7 @@ export function validateNativeProgression(runtime, payload) {
   const c = codec.restore(payload.checkpoint);
   const { d, phase } = progressionContext(c, payload.seat);
   codec.validateAction(c, payload.seat, payload.action);
-  check((phase as any).moveId === d.learn.moveId, 'INVALID_PROGRESSION_PHASE');
+  if (d.kind === 'learn-move') check((phase as any).moveId === d.learn.moveId, 'INVALID_PROGRESSION_PHASE');
   return true;
 }
 
@@ -825,7 +869,14 @@ export async function chooseNativeProgression(runtime, payload) {
   const c = codec.restore(payload.checkpoint);
   const seat = payload.seat;
   progressionContext(c, seat);
-  const result = await advanceProgressionChoice(c, { [seat]: payload.action }, codec, originalSafeDecisionCodec, {
+  const intents=[];
+  const result = await advanceProgressionChoice(c, { [seat]: payload.action }, codec, originalSafeDecisionCodec, nativeProgressionDriver(runtime,intents),
+    { decisionId: nextSafeDecisionId(c.decision.id) });
+  return { checkpoint: codec.capture(result.context), events: result.events, intents };
+}
+
+function nativeProgressionDriver(runtime, intents=[]) {
+  return {
     async resumeLearning(candidate, phase, { action }) {
       const binding = bindNativeScene(candidate, runtime.scene.gameData);
       try {
@@ -833,8 +884,63 @@ export async function chooseNativeProgression(runtime, payload) {
         return await binding.execute(phase, () => phase.forgetMove(action.slot, Mode.MESSAGE));
       } finally { binding.dispose(); }
     },
-  }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}` });
-  return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
+    async resumeEvolution(candidate, phase, {seat, cancelled}) {
+      const binding = bindNativeScene(candidate,runtime.scene.gameData), pokemon = (phase as any).pokemon;
+      const before = capturePokemonState(pokemon);
+      try {
+        const result = await binding.execute(phase, () => observeRulePromise(phase.scene, (async () => {
+          if (!cancelled) await (phase as any).applyEvolution();
+          phase.end();
+        })()));
+        if (!cancelled) result.events.push({kind:'evolution-display', scope:seat, pokemonId:pokemon.id,
+          before, after:capturePokemonState(pokemon)});
+        // Original collection hooks stay deferred and follow the same durable
+        // candidate transaction as the evolved rule state.
+        intents.push(...binding.intents);
+        return result;
+      } finally { binding.dispose(); }
+    },
+    async stageEvolutionPause(candidate, phase) {
+      const binding = bindNativeScene(candidate,runtime.scene.gameData);
+      try {
+        withOriginalRules(candidate, () => (phase as any).queueEndEvolution());
+        binding.sync();
+        return {completed:false,suspended:true,pendingTasks:0,events:[],grants:[]};
+      } finally { binding.dispose(); }
+    },
+  };
+}
+
+function evolutionBoundary(c, p, id) {
+  const seat = phases.capture(p,c).scope;
+  check(seat === 0 || seat === 1,'INVALID_EVOLUTION_OWNER');
+  return {remaining:'evolution-apply',decision:{id,kind:'evolution',requiredSeats:[seat],pokemonId:(p as any).pokemon.id,
+    reference:evolutionReferenceCodec.capture((p as any).evolution),lastLevel:(p as any).lastLevel,stage:'evolve-or-cancel'}};
+}
+
+function nativePreparationGrowthDriver(runtime,intents) {
+  return {...nativeProgressionDriver(runtime,intents),
+    supports:(_c,p)=>[LevelUpPhase,LearnMovePhase,EvolutionPhase,EndEvolutionPhase].some(ctor=>Object.getPrototypeOf(p)===ctor.prototype),
+    async execute(c,p) {
+      const binding=bindNativeScene(c,runtime.scene.gameData);
+      try {
+        const seat=binding.bindPhase(p);
+        if (p instanceof EvolutionPhase || p instanceof LearnMovePhase
+          && inspectLearnMove(binding.views[seat].getParty()[(p as any).partyMemberIndex],(p as any).moveId).kind==='choose') {
+          phases.capture(p,c,seat);
+          return {completed:false,suspended:true,pendingTasks:0,events:[],grants:[]};
+        }
+        const result=await binding.execute(p);intents.push(...binding.intents);return result;
+      } finally {binding.dispose();}
+    },
+    suspendBoundary(c,p,id) {
+      if (p instanceof EvolutionPhase) return evolutionBoundary(c,p,id);
+      const seat=phases.capture(p,c).scope;
+      const pokemon=c.roster.entries.find(e=>e.owner===seat&&e.group==='party'&&e.index===(p as any).partyMemberIndex).pokemon;
+      return {remaining:'learn-apply',decision:createLearnDecision(id,c,seat,pokemon.id,(p as any).moveId,id=>!!allMoves[id])};
+    },
+    finishBoundary:(_c,_p,id)=>({id,kind:'continuing',requiredSeats:[],reason:'effects'}),
+  };
 }
 
 export async function runNativeUntilBoundary(runtime, checkpoint) {
@@ -847,6 +953,15 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
       const next = binding.root.phaseQueuePrepend.at(-1) ?? binding.root.phaseQueue[0];
       if (next instanceof SelectModifierPhase) return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
       const p = selectNextPhase(binding.root, () => populatePhaseQueue(binding.root, () => new TurnInitPhase(binding.root))).phase;
+      if (p instanceof EvolutionPhase) {
+        binding.bindPhase(p); binding.sync();
+        const stop = evolutionBoundary(c,p,nextSafeDecisionId(c.decision.id));
+        c.continuation.currentPhase = {kind:'original-phase',phaseId:Math.max(-1,
+          ...Object.values(c.continuation).flat().filter((d:any)=>d?.phaseId!==undefined).map((d:any)=>d.phaseId))+1,
+          phase:p,remaining:stop.remaining};
+        c.decision = stop.decision;
+        return {checkpoint:codec.capture(c),events:binding.events,intents:binding.intents};
+      }
       if (p instanceof LearnMovePhase) {
         const partyIndex = (p as any).partyMemberIndex, moveId = (p as any).moveId;
         const seat = binding.bindPhase(p);
@@ -1006,19 +1121,27 @@ export async function submitNativeActions(runtime, payload) {
         return { completed: true, pendingTasks: 0, events: binding.events, grants: [] };
       } finally { binding.dispose(); }
     }
-  }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`, allowSwitch: true });
+  }, { decisionId: nextNativeDecisionId(c), allowSwitch: true });
   return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 
-export async function openNativePreparation(runtime, checkpoint) {
+export async function openNativePreparation(runtime, checkpoint, sharedMarket = false) {
   const c = codec.restore(checkpoint);
   const result = await openPreparation(c, codec, {
-    openPersonalMenu: (candidate, _queued, { seat }) => openNativePersonalMenu(candidate, runtime, seat),
-  }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}` });
+    openPersonalMenu: (candidate, _queued, { seat }) => openNativePersonalMenu(candidate, runtime, seat, null, sharedMarket),
+    copySharedMenu(candidate, template, {seat}) {
+      const binding = bindNativeScene(candidate, runtime.scene.gameData);
+      try {
+        const phase = new SelectModifierPhase(binding.views[seat]);
+        phases.capture(phase, candidate, seat);
+        return {...template, phase, events: []};
+      } finally { binding.dispose(); }
+    },
+  }, { decisionId: nextNativeDecisionId(c), sharedMarket });
   return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
 }
 
-async function openNativePersonalMenu(candidate, runtime, seat, rerolledPhase = null) {
+async function openNativePersonalMenu(candidate, runtime, seat, rerolledPhase = null, sharedMarket = false) {
   const binding = bindNativeScene(candidate, runtime.scene.gameData), scene = binding.views[seat];
   const phase = rerolledPhase ?? new SelectModifierPhase(scene);
   phase.scene = scene;
@@ -1029,7 +1152,14 @@ async function openNativePersonalMenu(candidate, runtime, seat, rerolledPhase = 
   } };
   try {
     const shop = await withOriginalRules(candidate, () => {
-      phase.start();
+      const ownParty = scene.getParty, ownModifiers = scene.modifiers;
+      if (sharedMarket) {
+        const party = [seat, 1-seat].flatMap(owner => binding.views[owner].getParty());
+        scene.getParty = () => party;
+        scene.modifiers = candidate.players.flatMap(player => player.modifiers);
+      }
+      try { phase.start(); }
+      finally { scene.getParty = ownParty; scene.modifiers = ownModifiers; }
       const shop = getPlayerShopModifierTypeOptionsForWave(candidate.battle.waveIndex, scene.getWaveMoneyAmount(1));
       for (const option of shop) if (!option.type.id) option.type.id = Object.keys(modifierTypes).find(id => {
         const type = modifierTypes[id](); return type.constructor === option.type.constructor && type.name === option.type.name;
@@ -1106,17 +1236,21 @@ function preparationEffectDriver(runtime, intents = []) {
       Object.defineProperty(view, 'money', { configurable: true, get: () => c.players[seat].money,
         set: value => { c.players[seat].money = value; } });
       let ended = false, next = null;
+      const growth=[];
       const beforeMoney = c.players[seat].money;
       const displayTasks = party.map(pokemon => {
         const descriptor = Object.getOwnPropertyDescriptor(pokemon, 'updateInfo'), update = pokemon.updateInfo;
         pokemon.updateInfo = (...args) => observeRulePromise(view, update.apply(pokemon, args));
         return () => { if (descriptor) Object.defineProperty(pokemon, 'updateInfo', descriptor); else delete (pokemon as any).updateInfo; };
       });
-      view.unshiftPhase = phase => { check(!next && phase instanceof SelectModifierPhase, 'UNEXPECTED_PREPARATION_PHASE'); next = phase; };
+      view.unshiftPhase = phase => {
+        if (phase instanceof LevelUpPhase) {phases.capture(phase,c,seat);growth.unshift(phase);return;}
+        check(!next && phase instanceof SelectModifierPhase, 'UNEXPECTED_PREPARATION_PHASE'); next = phase;
+      };
       view.validateAchvs = BattleScene.prototype.validateAchvs; // validateAchv is the existing deferred owned port.
       // The original max-stack fallback queues a prompt. Preparation has no
       // battle queue to consume it; publish that display text privately instead.
-      view.queueMessage = text => binding.events.push({kind:'message',scope:seat,text});
+      view.queueMessage = text => binding.events.push({kind:'message',scope:seat,text,presentation:presentationText(text)});
       view.shiftPhase = () => { ended = true; };
       view.ui = {
         clearText() {}, playError() { throw new Error('ORIGINAL_MENU_REJECTED'); },
@@ -1158,16 +1292,19 @@ function preparationEffectDriver(runtime, intents = []) {
         check(ended === (action.operation !== 'buy'), 'INCOMPLETE_PREPARATION_EFFECT');
         intents.push(...binding.intents);
         const events = [...binding.events, { kind: 'preparation-effect', seat, operation: action.operation }];
-        if (c.players[seat].money !== beforeMoney) events.push({ kind: 'message', scope: seat,
-          text: `资金${c.players[seat].money > beforeMoney ? '增加' : '支出'} ₽${Math.abs(c.players[seat].money - beforeMoney)}，余额 ₽${c.players[seat].money}` } as any);
+        if (c.players[seat].money !== beforeMoney) {
+          const text=i18next.t('coop:moneyChange',{direction:i18next.t(c.players[seat].money>beforeMoney?'coop:moneyIncrease':'coop:moneySpend'),
+            amount:Math.abs(c.players[seat].money-beforeMoney),balance:c.players[seat].money});
+          events.push({kind:'message',scope:seat,text,presentation:presentationText(text)} as any);
+        }
         if (action.operation === 'reroll') {
           check(next instanceof SelectModifierPhase, 'INCOMPLETE_ORIGINAL_REROLL');
           binding.dispose();
-          const menu = await openNativePersonalMenu(c, runtime, seat, next);
+          const menu = await openNativePersonalMenu(c, runtime, seat, next, !!c.decision.shared);
           return { completed: true, pendingTasks: 0, ended, events: [...events, ...menu.events], grants: [], menu, phase: menu.phase };
         }
         check(next === null, 'UNEXPECTED_PREPARATION_PHASE');
-        return { completed: true, pendingTasks: 0, ended, events, grants: [] };
+        return { completed: true, pendingTasks: 0, ended, events, grants: [], ...(growth.length?{growth}: {}) };
       } finally { displayTasks.forEach(restore => restore()); binding.dispose(); }
     },
   };
@@ -1176,6 +1313,12 @@ function preparationEffectDriver(runtime, intents = []) {
 export async function chooseNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
+  if (c.decision.kind==='preparation' && c.decision.players[payload.seat]?.subdecision) {
+    const intents=[];
+    const result=await advancePreparationGrowth(c,payload.seat,payload.action,codec,originalSafeDecisionCodec,nativePreparationGrowthDriver(runtime,intents));
+    completeSharedPreparation(result,codec);
+    return {checkpoint:codec.capture(result.context),events:result.events,intents};
+  }
   check(payload.action?.operation !== 'reserve-swap', 'RESERVE_STORAGE_DISABLED');
   if (payload.action?.operation === 'legacy-capture') {
     validateLegacyCapture(c, payload.seat, payload.action, codec, originalSafeDecisionCodec);
@@ -1201,7 +1344,12 @@ export async function chooseNativePreparation(runtime, payload) {
   }
   check(!hasLegacyCaptures(c, payload.seat) || payload.action?.operation === 'unready', 'LEGACY_CAPTURE_PENDING');
   const intents = [];
-  const result = await advancePreparationEffect(c, payload.seat, payload.action, codec, originalSafeDecisionCodec, preparationEffectDriver(runtime, intents));
+  let result = await advancePreparationEffect(c, payload.seat, payload.action, codec, originalSafeDecisionCodec, preparationEffectDriver(runtime, intents));
+  if (result.context.pendingEffects.some(e=>e.id.startsWith(`preparation-growth-${payload.seat}-`))) {
+    const grown=await advancePreparationGrowth(result.context,payload.seat,null,codec,originalSafeDecisionCodec,nativePreparationGrowthDriver(runtime,intents));
+    grown.events.unshift(...result.events);result=grown;
+  }
+  completeSharedPreparation(result, codec);
   return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 
@@ -1297,7 +1445,7 @@ export async function chooseNativeSwitch(runtime, payload) {
         try { return await binding.execute(phase, () => phase.createSwitchSelectCallback(0)(partyIndex, PartyOption.SEND_OUT)); }
         finally { binding.dispose(); }
       },
-    }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}` });
+    }, { decisionId: nextNativeDecisionId(c) });
     return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
   }
   const result = await advancePreBattleSwitch(c, payload.inputs, codec, {
@@ -1318,7 +1466,7 @@ export async function chooseNativeSwitch(runtime, payload) {
         }
       }); } finally { binding.dispose(); }
     }
-  }, { decisionId: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}` });
+  }, { decisionId: nextNativeDecisionId(c) });
   return { checkpoint: codec.capture(result.context), events: result.events, intents: [] };
 }
 
@@ -1327,6 +1475,9 @@ export async function chooseNativeSwitch(runtime, payload) {
 export function validateNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
+  if (c.decision.kind==='preparation' && c.decision.players[payload.seat]?.subdecision) {
+    codec.validateAction(c,payload.seat,payload.action);return true;
+  }
   check(payload.action?.operation !== 'reserve-swap', 'RESERVE_STORAGE_DISABLED');
   if (payload.action?.operation === 'legacy-capture') {
     validateLegacyCapture(c, payload.seat, payload.action, codec, originalSafeDecisionCodec); return true;
@@ -1444,7 +1595,11 @@ export function projectNativeSnapshot(runtime, payload) {
       requiredSeats: [...c.decision.requiredSeats],
       options: c.decision.options?.[payload.seat] ?? null,
       players: c.decision.kind === 'preparation' ? c.decision.players[payload.seat] : null,
+      ...(c.decision.kind === 'preparation' && c.decision.shared ? {sharedMarket: {...c.decision.shared,
+        finished:c.decision.players.map(p=>p.ready),rerollLocked:c.decision.players.some(p=>p.rewardResolved)}} : {}),
       learn: c.decision.kind === 'learn-move' && c.decision.requiredSeats.includes(payload.seat) ? c.decision.learn : null,
+      ...(c.decision.kind === 'evolution' && c.decision.requiredSeats.includes(payload.seat)
+        ? {evolution:{pokemonId:c.decision.pokemonId,stage:c.decision.stage}} : {}),
       switch: ['switch-confirm', 'switch-select'].includes(c.decision.kind)
         ? { outgoing: c.decision.switch?.outgoing?.[payload.seat] ?? null } : null,
       ...(legacyCaptureOptions(c, payload.seat) ? { legacyCapture: legacyCaptureOptions(c, payload.seat) } : {}),

@@ -22,7 +22,7 @@ function stageOf(context) {
   if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') return 'switch';
   if (decision.kind === 'wait-actions') return 'battle';
   if (decision.kind === 'wait-target') return 'target';
-  if (decision.kind === 'learn-move') return 'learning';
+  if (decision.kind === 'learn-move' || decision.kind === 'evolution') return 'learning';
   if (decision.kind === 'continuing') return decision.reason === 'next-battle' ? 'next-battle' : 'resolving';
   if (decision.kind === 'ended') return 'ended';
   return 'unknown';
@@ -139,6 +139,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
     return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
   function scopeEvent(event, checkpoint) {
+    if (event.scope === 'shared' && ['damage-display','pokemon-hp','faint-cry','pokemon-enter','pokemon-exit','showInfo'].includes(event.kind)) return {...event};
     if (event.kind === 'message' && [0,1].includes(event.scope)) return { ...event };
     if (['preparation-open', 'legacy-capture-choice', 'capture-result'].includes(event.kind) && (event.seat === 0 || event.seat === 1))
       return { ...event, scope: event.seat };
@@ -164,10 +165,10 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       if (decision.kind === 'wait-actions' || decision.kind === 'preparation'
         || decision.kind === 'wait-target' || decision.kind === 'ended'
         || decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch'
-        || decision.kind === 'capture-choice' || decision.kind === 'learn-move') break;
+        || decision.kind === 'capture-choice' || decision.kind === 'learn-move' || decision.kind === 'evolution') break;
       check(decision.kind === 'continuing', 'UNSUPPORTED_DECISION');
       if (decision.reason === 'next-battle') await apply('native-next');
-      else if (frontPhase(checkpoint) === 'SelectModifierPhase') await apply('native-preparation');
+      else if (frontPhase(checkpoint) === 'SelectModifierPhase') await apply(context.provisioning.sharedPreparation ? 'native-preparation-shared' : 'native-preparation');
       else await apply('native-run-to-boundary');
     }
     return { context: contextFor(room, null, checkpoint, intents, context.formatVersion), events, intents, grants: [] };
@@ -258,7 +259,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       check(Array.isArray(fixtureIdentities) && fixtureIdentities.length === 2, 'INVALID_TRAINER_IDENTITY');
       const seed = fixture.profileLobby && typeof seedFactory === 'function' ? seedFactory() : fixture.seed;
       check(typeof seed === 'string' && seed.length > 0, 'INVALID_ROOM_SEED');
-      const provisioning = { seed, identities: clone(fixtureIdentities) };
+      const provisioning = { seed, identities: clone(fixtureIdentities), ...(fixture.sharedPreparation ? {sharedPreparation:true} : {}) };
       const room = await roomFor(runId, provisioning);
       if (fixture.profileLobby) {
         const context = contextFor(room, profileLobbyState(), null, []);
@@ -288,7 +289,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         return { id: decision.id, requiredSeats: [...decision.requiredSeats], collection: 'incremental' };
       if (decision.kind === 'wait-actions' || decision.kind === 'wait-target'
         || decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice'
-        || decision.kind === 'learn-move')
+        || decision.kind === 'learn-move' || decision.kind === 'evolution')
         return { id: decision.id, requiredSeats: [...decision.requiredSeats], collection: 'all' };
       if (decision.kind === 'continuing')
         return { id: decision.id, requiredSeats: [], collection: 'auto' };
@@ -321,7 +322,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         await request(room, 'native-validate-switch', { checkpoint: context.checkpoint, seat, action: COPY(action) });
         return;
       }
-      if (decision.kind === 'learn-move') {
+      if (decision.kind === 'learn-move' || decision.kind === 'evolution') {
         await request(room, 'native-validate-progression', { checkpoint: context.checkpoint, seat, action: COPY(action) });
         return;
       }
@@ -406,7 +407,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       } else if (decision.kind === 'switch-confirm' || decision.kind === 'switch-select' || decision.kind === 'wait-switch' || decision.kind === 'capture-choice') {
         check(inputs && Object.keys(inputs).length === 1, 'INCOMPLETE_SWITCH_INPUTS');
         await apply('native-switch', { checkpoint, inputs: COPY(inputs) });
-      } else if (decision.kind === 'learn-move') {
+      } else if (decision.kind === 'learn-move' || decision.kind === 'evolution') {
         check(inputs && Object.keys(inputs).length === 1, 'INCOMPLETE_PROGRESSION_INPUTS');
         const seat = Number(Object.keys(inputs)[0]);
         check(seat === 0 || seat === 1, 'INVALID_SEAT');
@@ -437,7 +438,8 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       check(Object.keys(checkpoint).sort().join(',') === 'formatVersion,intents,lobby,nativeCheckpoint,provisioning,runId,stage', 'INVALID_CHECKPOINT');
       check([2, 3].includes(checkpoint.formatVersion) && typeof checkpoint.runId === 'string'
         && checkpoint.runId.length > 0, 'INVALID_CHECKPOINT');
-      check(checkpoint.provisioning && Object.keys(checkpoint.provisioning).sort().join(',') === 'identities,seed'
+      check(checkpoint.provisioning && ['identities,seed','identities,seed,sharedPreparation'].includes(Object.keys(checkpoint.provisioning).sort().join(','))
+        && (!Object.hasOwn(checkpoint.provisioning,'sharedPreparation') || checkpoint.provisioning.sharedPreparation === true)
         && typeof checkpoint.provisioning.seed === 'string' && checkpoint.provisioning.seed.length > 0
         && Array.isArray(checkpoint.provisioning.identities) && checkpoint.provisioning.identities.length === 2
         && checkpoint.provisioning.identities.every(identity => identity && Object.keys(identity).sort().join(',') === 'secretId,trainerId' && Number.isInteger(identity.trainerId)

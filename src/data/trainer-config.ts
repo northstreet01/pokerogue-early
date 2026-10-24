@@ -14,6 +14,8 @@ import { initTrainerTypeDialogue } from "./dialogue";
 import { PersistentModifier } from "../modifier/modifier";
 import { TrainerVariant } from "../field/trainer";
 import { PartyMemberStrength } from "./enums/party-member-strength";
+import i18next from '../i18n';
+import {localeKey} from '../system/localized-catalog';
 
 export enum TrainerPoolTier {
   COMMON,
@@ -432,17 +434,30 @@ export class TrainerConfig {
     let ret = this.name;
 
     if (!trainerSlot && variant === TrainerVariant.DOUBLE && this.nameDouble)
-      return this.nameDouble;
+      return this.displayTitle(this.nameDouble,trainerSlot,variant);
     
     if (this.hasGenders) {
       if (this.nameFemale) {
         if (variant === TrainerVariant.FEMALE || (variant === TrainerVariant.DOUBLE && trainerSlot === TrainerSlot.TRAINER_PARTNER))
-          return this.nameFemale;
+          return this.displayTitle(this.nameFemale,trainerSlot,variant);
       } else
         ret += !variant ? '♂' : '♀';
     }
 
-    return ret;
+    return this.displayTitle(ret,trainerSlot,variant);
+  }
+
+  private displayTitle(original:string,slot:TrainerSlot,variant:TrainerVariant):string {
+    if ((i18next.resolvedLanguage??i18next.language)!=='zh-Hans') return original;
+    const type=this.getDerivedType(),female=variant===TrainerVariant.FEMALE||variant===TrainerVariant.DOUBLE&&slot===TrainerSlot.TRAINER_PARTNER;
+    const baseAliases={RICH:'gentleman',RICH_KID:'richBoy',SNOW_WORKER:'worker',POKEFAN:'pokéfan',RANGER:'pokémonRanger',STUDENT:'schoolKid'};
+    const femaleAliases={BLACK_BELT:'battleGirl',DOCTOR:'nurse',RICH:'madame',RICH_KID:'lady',WAITER:'waitress',YOUNGSTER:'lass'};
+    const doubleAliases={ACE_TRAINER:'aceDuo',BACKPACKER:'backpackers',BLACK_BELT:'crushKin',BREEDER:'breeders',CLERK:'colleagues',CYCLIST:'cyclists',DOCTOR:'medicalTeam',POKEFAN:'pokéfanFamily',PRESCHOOLER:'preschoolers',PSYCHIC:'psychics',RANGER:'pokémonRangers',RICH:'richCouple',RICH_KID:'richKids',SCIENTIST:'scientists',SNOW_WORKER:'workers',STUDENT:'schoolKids',SWIMMER:'swimmers',VETERAN:'veteranDuo',WAITER:'restaurantStaff',WORKER:'workers',YOUNGSTER:'beginners'};
+    const symbol=TrainerType[type],base=baseAliases[symbol]??localeKey(symbol);
+    let key=!slot&&variant===TrainerVariant.DOUBLE&&this.nameDouble?doubleAliases[symbol]:female?femaleAliases[symbol]??`${base}Female`:base;
+    let namespace=i18next.exists(`trainerNames:${key}`)?'trainerNames':'trainerClasses';
+    if (!i18next.exists(`${namespace}:${key}`)) {key=base;namespace=i18next.exists(`trainerNames:${key}`)?'trainerNames':'trainerClasses';}
+    return i18next.t(`${namespace}:${key}`,{defaultValue:original.replace(/[♂♀]$/,'')})+(original.match(/[♂♀]$/)?.[0]??'');
   }
 
   loadAssets(scene: BattleScene, variant: TrainerVariant): Promise<void> {

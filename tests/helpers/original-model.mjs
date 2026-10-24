@@ -7,6 +7,7 @@ import { createEffectStateCodec, effectStateFields } from '../../src/battle-core
 import { nextBattleRandomInt, readBattleRandomCheckpoint } from '../../src/battle-core/random.mjs';
 import { createPokemonStateCodec } from '../../src/battle-core/pokemon-state.mjs';
 import {applyPokemonMove} from '../../src/battle-core/move-damage.mjs';
+import {originalI18n,originalLocalizedPokemonMessage} from './localization-model.mjs';
 
 const read = file => fs.readFileSync(new URL(`../../src/${file}`, import.meta.url), 'utf8');
 const parse = file => ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
@@ -40,17 +41,21 @@ Object.assign(utils, evaluate(parse('utils.ts').statements.find(n => ts.isFuncti
 const pokemonEnums = enums('field/pokemon.ts', ['HitResult', 'MoveResult']);
 const allMoves = new Proxy([], { get: (_, id) => ({ name: `Move ${id}`, pp: 20 }) });
 const messages = { getPokemonMessage: (pokemon, suffix) => `${pokemon.name}${suffix}` };
-const status = evaluate(read('data/status-effect.ts'), { '../utils': utils, '../battle-core/effect-state.mjs': effectModule });
+messages.getLocalizedPokemonMessage=originalLocalizedPokemonMessage(messages.getPokemonMessage,p=>p.name);
+messages.getPokemonNameWithAffix=p=>p.name;
+const status = evaluate(read('data/status-effect.ts'), { '../utils': utils, '../battle-core/effect-state.mjs': effectModule,'../i18n':{default:originalI18n} });
 const terrain = evaluate(read('data/terrain.ts'), {
   './type': types, '../utils': utils, './ability': {}, '../battle-core/effect-state.mjs': effectModule
 });
 const weather = evaluate(read('data/weather.ts'), {
+  '../i18n':{default:originalI18n},
   './enums/biome': {}, '../messages': messages, './type': types, '../utils': utils,
   './ability': {}, './move': {}, './terrain': terrain, '../battle-core/effect-state.mjs': effectModule
 });
 const phases = Object.fromEntries(['CommonAnimPhase', 'MoveEffectPhase', 'MovePhase', 'PokemonHealPhase',
   'ShowAbilityPhase', 'StatChangePhase'].map(name => [name, Phase]));
 const battler = evaluate(read('data/battler-tags.ts'), {
+  '../i18n':{default:originalI18n},
   './battle-anims': { ...commonAnim, CommonBattleAnim: class { play() {} } }, '../phases': phases,
   '../messages': messages, '../field/pokemon': pokemonEnums, './pokemon-stat': stats,
   './status-effect': status, '../utils': utils, './enums/moves': moves, './move': { allMoves },
@@ -58,6 +63,7 @@ const battler = evaluate(read('data/battler-tags.ts'), {
   './terrain': terrain, './weather': weather, './battle-stat': battleStats, '../battle-core/effect-state.mjs': effectModule
 });
 const arena = evaluate(read('data/arena-tag.ts'), {
+  '../i18n':{default:originalI18n},
   './type': types, '../utils': utils, './move': { allMoves }, '../messages': messages,
   '../field/pokemon': { ...pokemonEnums, PokemonMove: class { constructor(moveId) { this.moveId = moveId; } } },
   '../phases': phases, './status-effect': status, '../battle': battleIndices, './enums/moves': moves,

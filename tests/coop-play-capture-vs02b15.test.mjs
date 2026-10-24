@@ -15,8 +15,10 @@ import { formalFixture } from './helpers/formal-ws.mjs';
 import { defaultTrainerRoute, progressDefault } from './helpers/native-default-trainer.mjs';
 import { createSnapshotConsumer } from '../src/battle-core/coop-client.mjs';
 import { presentationFixture } from './helpers/coop-presentation-fixture.mjs';
+import {createOriginalRuleHost} from '../server/original-rule-host.mjs';
+import {naturalConfig,naturalSelection} from './helpers/native-natural-learning.mjs';
 
-let api, profiles, firstPreparation;
+let api, profiles, firstPreparation, firstSharedPreparation;
 before(async () => {
   await buildCoopRuntime();
   await build({ configFile: false, publicDir: false, logLevel: 'error',
@@ -31,7 +33,12 @@ before(async () => {
   const route = await defaultTrainerRoute(); profiles = route.profiles;
   try {
     let c = route.initial;
-    for (let n = 0; n < 70 && c.decision.kind !== 'preparation'; n++) c = (await progressDefault(route.h, c)).checkpoint;
+    for (let n = 0; n < 70 && c.decision.kind !== 'preparation'; n++) {
+      const front=(c.continuation.phaseQueuePrepend.at(-1)??c.continuation.phaseQueue[0])?.phase.type;
+      if (c.decision.kind==='continuing'&&front==='SelectModifierPhase')
+        firstSharedPreparation=(await route.h.request('native-preparation-shared',c)).checkpoint;
+      c = (await progressDefault(route.h, c)).checkpoint;
+    }
     assert.equal(c.decision.kind, 'preparation'); firstPreparation = c;
   } finally { await route.h.close(); }
 });
@@ -45,14 +52,14 @@ const until = async (predicate, description) => {
 
 // Original phase + original Command/Ball handlers + real IDB/WS/service/Worker.
 // Rendering/asset ports are headless: this is not a browser visual acceptance.
-async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry = false, render = false) {
+async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry = false, render = false, sharedFresh = false) {
   const directory = await mkdtemp(join(tmpdir(), 'vs02b15-ui-'));
   const original = createOriginalCoopAdapter({ fixture: { profileLobby: true,
-    seed: 'learning-natural-2', identities: profiles.map(profile => profile.trainer) } });
+    seed: 'learning-natural-2', identities: profiles.map(profile => profile.trainer),...(sharedFresh||prepared?.decision.shared?{sharedPreparation:true}:{}) } });
   // Optional synthetic original-factory preparation, explicitly distinct from
   // the normal selected-profile lobby used by the preceding VS15–17 cases.
   const adapter = prepared ? { ...original, createInitialContext: ({ runId }) => original.restoreCheckpoint({
-    formatVersion: 2, runId, stage: 'preparation', provisioning: { seed: 'learning-natural-2', identities: profiles.map(profile => profile.trainer) },
+    formatVersion: 2, runId, stage: prepared.decision.kind==='evolution'?'learning':'preparation', provisioning: { seed: 'learning-natural-2', identities: profiles.map(profile => profile.trainer),...(prepared?.decision.shared?{sharedPreparation:true}:{}) },
     lobby: null, nativeCheckpoint: structuredClone(prepared), intents: [],
   }) } : original;
   const server = await formalFixture(adapter, new FormalRoomStore(directory));
@@ -75,7 +82,10 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry
       await consumer(message); peerLatest = message;
     }).catch(error => errors.push(error));
   });
-  const ui = { mode: api.Mode.MESSAGE, playSelect() {}, playError() { errors.push(Error('UI_ERROR')); },
+  const ui = { mode: api.Mode.MESSAGE, modeChain:[], playSelect() {}, playError() { errors.push(Error('UI_ERROR')); },
+    getHandler:()=>({clear(){}}),
+    async setOverlayMode(mode,...args){this.modeChain.push(this.mode);this.mode=mode;modes.push([mode,...args]);},
+    async revertMode(){this.mode=this.modeChain.pop();return true;},
     async setMode(mode, ...args) {
       if (ball.active) ball.clear();
       this.mode = mode; modes.push([mode, ...args]);
@@ -151,7 +161,7 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry
     peer.send({ type: 'createRoom', name: 'synthetic-peer' });
     await until(() => peerLatest, 'peer room'); await phase.joinRoom(peerLatest.roomId);
   }
-  await until(() => phase.inputReady && peerLatest && phase.latest?.personal.decision.kind === (prepared ? 'preparation' : 'lobby'), 'initial model ACK');
+  await until(() => phase.inputReady && peerLatest && phase.latest?.personal.decision.kind === (prepared ? prepared.decision.kind : 'lobby'), 'initial model ACK');
   const submitPeer = action => peer.send({ type: 'submitAction', roomId: peerLatest.roomId, runId: peerLatest.runId,
     decisionId: peerLatest.decisionId, expectedRevision: peerLatest.revision, actionId: crypto.randomUUID(), action });
   const environment = { phase, command, ball, ui, peer, errors, modes, server, directory, adapter,
@@ -230,6 +240,119 @@ const attack = snapshot => {
   return options.find(option => [52, 55, 22, 670].includes(moves[option.cursor]?.fields.moveId))
     ?? options.find(option => [33, 10].includes(moves[option.cursor]?.fields.moveId)) ?? options[0];
 };
+
+test('VS22 fresh production profile lobby reaches the shared original market and automatically finishes both seats',{timeout:120000},async t=>{
+ const env=await openUiRoom(0,t,false,null,false,false,true);
+ try{const {phase,modes,ui}=env;
+  // Initial entry uses real profile selection, not a preparation checkpoint.
+  phase.presentation={apply:async()=>{},playEvents:async()=>{}};
+  phase.enterBattle=api.CoopPlayPhase.prototype.enterBattle.bind(phase);
+  for(let n=0;n<12&&phase.latest.personal.decision.kind==='wait-actions';n++){
+   const revision=phase.latest.revision;await phase.sendAction(attack(phase.latest),'fresh original FIGHT');
+   await until(()=>phase.submitted||env.errors.length,'own fresh fight accepted');assert.deepEqual(env.errors,[]);
+   env.submitPeer(attack(env.peerSnapshot()));
+   await until(()=>phase.inputReady&&phase.latest.revision>revision||env.errors.length,'fresh original next input');assert.deepEqual(env.errors,[]);
+  }
+  assert.equal(phase.latest.personal.decision.kind,'preparation');
+  await until(()=>modes.at(-1)?.[0]===api.Mode.MODIFIER_SELECT,'fresh original shared menu opened');
+  assert.equal(modes.at(-1)[0],api.Mode.MODIFIER_SELECT);
+  assert.equal(modes.at(-1)[5].preparation.automatic,true);
+  await until(()=>env.peerSnapshot().revision===phase.latest.revision,'fresh shared menu partner');
+  const disk=(await env.server.store.load()).find(r=>r.roomId===phase.roomId);
+  assert.equal(disk.checkpoint.provisioning.sharedPreparation,true);
+  assert.deepEqual(phase.latest.personal.decision.players.rewards,env.peerSnapshot().personal.decision.players.rewards);
+  const handler=Object.assign(Object.create(api.ModifierSelectUiHandler.prototype),{getUi:()=>ui,player:true,awaitingActionInput:true,inputPresentation:modes.at(-1)[5],onActionInput:modes.at(-1)[3]});
+  handler.processInput(api.Button.CANCEL);assert.equal(ui.mode,api.Mode.CONFIRM);await modes.at(-1)[1]();
+  await until(()=>phase.inputReady&&phase.latest.personal.decision.players.ready,'own automatic finish');
+  await until(()=>env.peerSnapshot().revision===phase.latest.revision,'fresh partner ACK');
+  env.submitPeer({kind:'preparation',operation:'skip-reward'});
+  await until(()=>phase.inputReady&&phase.latest.personal.decision.kind!=='preparation','both automatic next battle');
+  assert.deepEqual(env.errors,[]);assert.deepEqual(await phase.storage.pendingActions(location.origin,phase.roomId,0),[]);
+ }finally{await env.close();}
+});
+
+for (const seat of [0,1]) test(`VS22 seat ${seat}: shared stock preserves original Party, rejects sold choice locally, confirms skip and automatically advances`,{timeout:120000},async t=>{
+ const env=await openUiRoom(seat,t,false,firstSharedPreparation,false,true);
+ try{
+  const {phase,modes,ui,visual}=env;
+  await until(()=>phase.inputReady&&modes.at(-1)?.[0]===api.Mode.MODIFIER_SELECT,'shared original menu');
+  const initial=phase.latest,menu=modes.at(-1),row=initial.personal.decision.players;
+  assert.equal(menu[5].preparation.automatic,true);assert.equal(menu[5].allowReroll,true);
+  const field=[...phase.presentation.field],allocations={...visual.counts};
+  phase.makeTeamPokemon=entry=>{const p=api.restorePokemonState(api.capturePokemonState(entry.pokemon));p.scene=phase.scene;
+    p.init=()=>{};p.loadAssets=async()=>{};p.destroy=()=>{};return p;};
+  const potionIndex=row.shop.findIndex(o=>o.type.catalogId==='POTION');assert.ok(potionIndex>=0);
+  menu[3](row.shop.length>6?3:2,potionIndex);
+  await until(()=>ui.mode===api.Mode.PARTY,'own original item target');
+  const party=phase.scene.party,choose=modes.at(-1)[3];
+  await until(()=>env.peerSnapshot().revision===phase.latest.revision,'peer initial stock');
+  const peerOption=env.peerSnapshot().personal.decision.players.rewards.find(o=>o.type.catalogId==='POKEBALL');assert.ok(peerOption);
+  env.submitPeer({kind:'preparation',operation:'reward',optionId:peerOption.id,pokemonId:null,moveIndex:null,fusionId:null});
+  await until(()=>phase.inputReady&&phase.latest.revision>initial.revision,'peer claims shared free stock');
+  assert.equal(ui.mode,api.Mode.PARTY);assert.equal(phase.scene.party,party);
+  assert.deepEqual(phase.presentation.field,field);assert.deepEqual(visual.counts,allocations);
+  await choose(-1,api.PartyOption.APPLY);
+  await until(()=>ui.mode===api.Mode.MODIFIER_SELECT,'return from retained target');
+  assert.equal(modes.at(-1)[5].allowReroll,false);
+  let writes=0;const save=phase.storage.saveAction.bind(phase.storage);
+  phase.storage={...phase.storage,saveAction:(...args)=>{writes++;return save(...args);}};
+  const before=phase.latest;
+  modes.at(-1)[3](1,row.rewards.findIndex(o=>o.id===peerOption.id));
+  await until(()=>env.errors.length===1,'sold choice explanation');
+  assert.equal(writes,0);assert.equal(phase.latest.revision,before.revision);
+  assert.deepEqual(await phase.storage.pendingActions(location.origin,phase.roomId,seat),[]);
+  assert.match(env.errors[0].message,new RegExp(api.i18next.t('coop:claimed')));env.errors.length=0;
+  const cancel=()=>{
+   const menu=modes.at(-1),handler=Object.assign(Object.create(api.ModifierSelectUiHandler.prototype),{
+    getUi:()=>ui,awaitingActionInput:true,inputPresentation:menu[5],rowCursor:1,cursor:0,player:true,onActionInput:menu[3]});
+   assert.equal(handler.processInput(api.Button.SUBMIT),false,'automatic mode has no manual-ready action');
+   assert.equal(handler.processInput(api.Button.CANCEL),true);
+  };
+  cancel();assert.equal(ui.mode,api.Mode.CONFIRM);assert.equal(writes,0);
+  await modes.at(-1)[2]();assert.equal(ui.mode,api.Mode.MODIFIER_SELECT);assert.equal(writes,0);
+  cancel();await modes.at(-1)[1]();
+  await until(()=>phase.inputReady&&phase.latest.personal.decision.kind!=='preparation','automatic next encounter');
+  assert.equal(writes,1);assert.deepEqual(env.errors,[]);
+  assert.deepEqual(await phase.storage.pendingActions(location.origin,phase.roomId,seat),[]);
+ }finally{await env.close();}
+});
+
+let evolutionCheckpoint;
+async function getEvolutionCheckpoint(){
+ if(evolutionCheckpoint)return evolutionCheckpoint;
+ const h=await createOriginalRuleHost(naturalConfig);
+ try{const selection=structuredClone(naturalSelection);selection.starterSelections[0][0].speciesId=10;selection.starterSelections[0][0].moveset=null;
+  let c=(await h.request('native-open-selected-to-input',selection)).checkpoint;
+  for(let n=0;n<160&&c.decision.kind!=='evolution';n++)c=(await progressDefault(h,c)).checkpoint;
+  assert.equal(c.decision.kind,'evolution');return evolutionCheckpoint=c;
+ }finally{await h.close();}
+}
+for(const seat of [0,1])test(`VS22 natural evolution UI seat ${seat}: owned original confirm, durable IDB action and private committed result`,{timeout:120000},async t=>{
+ const checkpoint=await getEvolutionCheckpoint(),env=await openUiRoom(seat,t,false,checkpoint);
+ try{const {phase,modes}=env;
+  const peerSignature=party=>JSON.stringify(party.map(e=>({id:e.id,species:e.pokemon.fields.species,ivs:e.pokemon.fields.ivs,moveset:e.pokemon.fields.moveset})));
+  const peerParty=peerSignature(seat===0?env.peerSnapshot().personal.party:phase.latest.personal.party);
+  let writes=0;const save=phase.storage.saveAction.bind(phase.storage);
+  phase.storage={...phase.storage,saveAction:(...args)=>{writes++;return save(...args);}};
+  const action={kind:'evolution',pokemonId:checkpoint.decision.pokemonId,choice:'evolve'};
+  if(seat===0){
+   await until(()=>modes.at(-1)?.[0]===api.Mode.CONFIRM,'owned original evolution confirm');
+   const callback=modes.at(-1)[1];await callback();
+   await until(()=>phase.inputReady&&phase.latest.personal.party[0].pokemon.fields.species===11,'verified evolution result');
+   assert.equal(writes,1);await callback();assert.equal(writes,1,'consumed original callback cannot submit again');
+   assert.equal(peerSignature(env.peerSnapshot().personal.party),peerParty);
+  }else{
+   assert.equal(modes.some(m=>m[0]===api.Mode.CONFIRM),false);
+   assert.equal(phase.latest.personal.decision.evolution,undefined);
+   env.submitPeer(action);
+   await until(()=>phase.inputReady&&env.peerSnapshot().personal.party[0].pokemon.fields.species===11,'peer original evolution');
+   assert.equal(writes,0);assert.equal(peerSignature(phase.latest.personal.party),peerParty);
+   assert.equal(phase.latest.events.some(e=>['level-stats','evolution-display','pokemon-progress'].includes(e.kind)&&e.pokemonId===checkpoint.decision.pokemonId),false);
+  }
+  assert.deepEqual(env.errors,[]);
+  assert.deepEqual(await phase.storage.pendingActions(location.origin,phase.roomId,seat),[]);
+ }finally{await env.close();}
+});
 
 for (const seat of [0, 1]) test(`VS20 seat ${seat}: real IDB/dual WS/Worker preparation keeps original displays and peer menu callbacks`, { timeout: 120000 }, async t => {
   // firstPreparation was reached through the unmodified natural Worker route.
@@ -396,7 +519,7 @@ for (const seat of [0,1]) test(`VS18 original persistent Party seat ${seat}: syn
     const choose=modes.at(-1)[3];await choose(0,api.PartyOption.APPLY);await choose(0,api.PartyOption.APPLY);
     await until(()=>phase.latest.revision>before.revision&&phase.inputReady,'persisted original held item');
     assert.equal(phase.model.applied.personal.resources.modifiers[0].stackCount,1);
-    assert.match(phase.modifierLine.textContent,/Lucky Egg ×1/);
+    assert.match(phase.modifierLine.textContent,/幸运蛋 ×1/);
     await until(()=>env.peerSnapshot().revision===phase.latest.revision,'peer ACK');
     assert.deepEqual(env.peerSnapshot().personal.resources.modifiers,[]);
     assert.deepEqual(await phase.storage.pendingActions(location.origin,phase.roomId,seat),[]);

@@ -1,0 +1,15 @@
+{
+ "arenaExpired":"{{moveName}}'s effect wore off.",
+ "arenaExpiredPlayer":"{{moveName}}'s effect wore off on your side.",
+ "arenaExpiredEnemy":"{{moveName}}'s effect wore off on the foe's side.",
+ "mistPrevented":"The mist prevented the lowering of stats!",
+ "absorbedHazard":"{{pokemonNameWithAffix}} absorbed the {{moveName}}!",
+ "hpRestored":"{{pokemonNameWithAffix}}'s HP was restored.",
+ "attackMissed":"{{pokemonNameWithAffix}}'s\nattack missed!",
+ "hpFull":"{{pokemonNameWithAffix}}'s\nHP is full!",
+ "statusProblems":"status problems",
+ "transferItemHelp":"Transfer a held item from one Pokémon to another",
+ "countdownPoof":"@d{32}1, @d{15}2, and@d{15}… @d{15}… @d{15}… @d{15}@s{pb_bounce_1}Poof!",
+ "berryHeal":"{{pokemonNameWithAffix}}'s {{berryName}}\nrestored its HP!",
+ "berryPp":"{{pokemonNameWithAffix}} restored PP to its move {{moveName}}\nusing its {{berryName}}!"
+}

@@ -7,8 +7,9 @@ import {bindAction,compileReference,utils} from './move-execution-model.mjs';
 import {advanceQueuedRulePhase} from '../../src/battle-core/rule-phase-runner.mjs';
 import {selectNextPhase} from '../../src/battle-core/phase-queue.mjs';
 import {createRuleTaskTracker} from '../../src/battle-core/rule-task-tracker.mjs';
+import {originalI18n} from './localization-model.mjs';
 
-export const statRules=evaluate(read('data/battle-stat.ts'));
+export const statRules=evaluate(read('data/battle-stat.ts'),{'../i18n':{default:originalI18n}});
 export const {BattleSpec}=evaluate(read('enums/battle-spec.ts'));
 installPhaseTestDependencies({'./data/battle-stat':statRules,'./data/arena-tag':arena,'./enums/battle-spec':{BattleSpec}});
 utils.fixedInt=n=>n; // Presentation duration only; no rule RNG or clocks are replaced.

@@ -1,5 +1,6 @@
 import { copy, canonical, requireContract as check } from './coop-contract.mjs';
 import {createLearnDecision,resolveLearnIntent} from './learn-command.mjs';
+import {validateSharedPreparation,validateSharedPreparationAction} from './shared-preparation.mjs';
 
 const exact=(v,keys)=>check(v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===[...keys].sort().join(','),'INVALID_SAFE_DECISION');
 const uint=v=>Number.isSafeInteger(v)&&v>=0;
@@ -43,7 +44,7 @@ export function createSafeDecisionCodec({evolution,modifierType,hasBiome,hasMove
         &&d.choices.every(v=>v===null||d.biomes.includes(v)),'INVALID_MAP_DECISION');
       check(d.sourceBiome===c.arena.biomeType,'STALE_MAP_DECISION');
     } else if(kind==='preparation') {
-      exact(d,['id','kind','requiredSeats','players']);check(canonical(d.requiredSeats)===canonical(seats)&&Array.isArray(d.players)&&d.players.length===2,'INVALID_PREPARATION');
+      exact(d,['id','kind','requiredSeats','players',...(Object.hasOwn(d,'shared')?['shared']:[])]);check(canonical(d.requiredSeats)===canonical(seats)&&Array.isArray(d.players)&&d.players.length===2,'INVALID_PREPARATION');
       for(const p of d.players){
         exact(p,['ready','rewardResolved','rerollCount','rerollCost','rewards','shop','selection','subdecision']);
         check(typeof p.ready==='boolean'&&typeof p.rewardResolved==='boolean'&&uint(p.rerollCount)&&uint(p.rerollCost)
@@ -67,6 +68,7 @@ export function createSafeDecisionCodec({evolution,modifierType,hasBiome,hasMove
           check(p.selection.moveIndex===null||Number.isInteger(p.selection.moveIndex)&&p.selection.moveIndex>=0&&p.selection.moveIndex<4,'INVALID_PREPARATION');
         }
       }
+      validateSharedPreparation(d);
     } else {
       exact(d,['id','kind','requiredSeats','victory','reason']);check(d.requiredSeats.length===0&&typeof d.victory==='boolean'
         &&['victory','defeat','abandoned'].includes(d.reason)&&d.victory===(d.reason==='victory'),'INVALID_END_DECISION');
@@ -83,6 +85,7 @@ export function createSafeDecisionCodec({evolution,modifierType,hasBiome,hasMove
     else if(d.kind==='preparation') {
       const p=d.players[seat];
       if(p.subdecision!==null){validateAction({...c,decision:p.subdecision},seat,a);return;}
+      validateSharedPreparationAction(c,seat,a);
       check(a.kind==='preparation','INVALID_ACTION');
       if(['ready','unready','skip-reward','reroll'].includes(a.operation)){
         exact(a,['kind','operation']);

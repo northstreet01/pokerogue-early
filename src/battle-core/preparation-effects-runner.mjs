@@ -1,5 +1,6 @@
 import {canonical,copy,requireContract as check} from './coop-contract.mjs';
 import {advancePreparation,coopRewardExclusions} from './preparation-runner.mjs';
+import {recordSharedPreparationEffect} from './shared-preparation.mjs';
 
 export function validatePreparationEffect(c,seat,action,safe,driver){
   safe.validateAction(c,seat,action);
@@ -63,6 +64,7 @@ export async function advancePreparationEffect(context,seat,action,codec,safe,dr
     check(c.players[seat].money===context.players[seat].money-selected.cost,'INVALID_PREPARATION_CHARGE');
   }
   p.ready=false;
+  recordSharedPreparationEffect(c,seat,action);
   const match=/^(.*?)(?:~(\d+))?$/.exec(d.id),step=Number(match[2]??0)+1;
   check(Number.isSafeInteger(step)&&`${match[1]}~${step}`.length<=128,'DECISION_SEQUENCE_EXHAUSTED');d.id=`${match[1]}~${step}`;
   const saved=codec.capture(c),owned=saved.pendingEffects.find(e=>e.id===effect.id);

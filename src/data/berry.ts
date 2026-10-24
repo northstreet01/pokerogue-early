@@ -1,5 +1,6 @@
 import { PokemonHealPhase, StatChangePhase } from "../phases";
-import { getPokemonMessage } from "../messages";
+import { getPokemonMessage, getLocalizedPokemonMessage } from "../messages";
+import i18next from '../i18n';
 import Pokemon, { HitResult } from "../field/pokemon";
 import { getBattleStatName } from "./battle-stat";
 import { BattleStat } from "./battle-stat";
@@ -24,6 +25,10 @@ export enum BerryType {
 
 export function getBerryName(berryType: BerryType) {
   return `${Utils.toReadableString(BerryType[berryType])} Berry`;
+}
+
+export function getBerryDisplayName(berryType:BerryType) {
+  return i18next.t(`berry:${BerryType[berryType].toLowerCase()}.name`,{defaultValue:getBerryName(berryType)});
 }
 
 export function getBerryEffectDescription(berryType: BerryType) {
@@ -102,7 +107,7 @@ export function getBerryEffectFunc(berryType: BerryType): BerryEffectFunc {
         const hpHealed = new Utils.NumberHolder(Math.floor(pokemon.getMaxHp() / 4));
         applyAbAttrs(DoubleBerryEffectAbAttr, pokemon, null, hpHealed);
         pokemon.scene.unshiftPhase(new PokemonHealPhase(pokemon.scene, pokemon.getBattlerIndex(),
-          hpHealed.value, getPokemonMessage(pokemon, `'s ${getBerryName(berryType)}\nrestored its HP!`), true));
+          hpHealed.value, getLocalizedPokemonMessage(pokemon,'earlyBattle:berryHeal',()=>({berryName:getBerryDisplayName(berryType)}),()=>`'s ${getBerryName(berryType)}\nrestored its HP!`), true));
       };
     case BerryType.LUM:
       return (pokemon: Pokemon) => {
@@ -138,7 +143,7 @@ export function getBerryEffectFunc(berryType: BerryType): BerryEffectFunc {
       return (pokemon: Pokemon) => {
         const ppRestoreMove = pokemon.getMoveset().find(m => !m.getPpRatio());
         ppRestoreMove.ppUsed = Math.max(ppRestoreMove.ppUsed - 10, 0);
-        pokemon.scene.queueMessage(getPokemonMessage(pokemon, ` restored PP to its move ${ppRestoreMove.getName()}\nusing its ${getBerryName(berryType)}!`));
+        pokemon.scene.queueMessage(getLocalizedPokemonMessage(pokemon,'earlyBattle:berryPp',()=>({berryName:getBerryDisplayName(berryType),moveName:ppRestoreMove.getName()}),()=>` restored PP to its move ${ppRestoreMove.getName()}\nusing its ${getBerryName(berryType)}!`));
       };
   }
 }

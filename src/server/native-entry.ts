@@ -458,7 +458,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     for (const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue']) root[key] = root[key].flatMap(p => {
       if (p instanceof ModifierRewardPhase) {
         validateTrainerReward(p);
-        if (views.includes(p.scene)) return [p];
+        if (views.includes((p as any).scene)) return [p];
         check(root.phaseQueuePrependSpliceIndex === -1,'UNSAFE_TRAINER_REWARD_QUEUE_SPLIT');
         const type = captureModifierTypeState((p as any).modifierType);
         // Fixed trainer progression rewards belong to each personal party.
@@ -534,7 +534,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         Object.defineProperty(object, key, { value, writable: true, configurable: true }); };
       if (p instanceof ModifierRewardPhase) {
         const reward = p.doReward;
-        patch(p,'doReward',() => observeRulePromise(p.scene,reward.call(p)));
+        patch(p,'doReward',() => observeRulePromise((p as any).scene,reward.call(p)));
       }
       if (p instanceof MoneyRewardPhase) patch((p as any).scene,'getWaveMoneyAmount',multiplier => {
         const total = BattleScene.prototype.getWaveMoneyAmount.call(root,multiplier);

@@ -1134,16 +1134,24 @@ test(`original Party receives owned modifier inventory for ${id}, submits once a
   assert.equal(p.scene.modifiers,oldModifiers,'leaving Party restores its previous display inventory');
 });
 
-test('original held filter rejects a full stack on the display copy; cancellation never grants a reward',async()=>{
+test('original held filter localizes full-stack rejection; cancellation never grants a reward in either language',async()=>{
+  const previous=api.i18next.language;
+  try { for(const language of ['zh-Hans','en']) {
+  await api.i18next.changeLanguage(language);
   const {p,sent,modes,entry}=personalPotionPhase();
   const type=api.modifierTypes.LUCKY_EGG().withIdFromFunc(api.modifierTypes.LUCKY_EGG),modifier=type.newModifier(entry.pokemon);
   modifier.stackCount=modifier.getMaxHeldItemCount(entry.pokemon);p.model.applied.personal.resources={modifiers:[modifier]};
   await p.choosePreparationReward(rewardOption('LUCKY_EGG'),p.latest,p.epoch);
-  assert.match(modes.at(-1)[4](p.scene.party[0]),/too many/);
+  assert.equal(modes.at(-1)[4](p.scene.party[0]),language==='zh-Hans'
+    ? '妙蛙种子 已有太多\n这个物品！' : 'Bulbasaur has too many\nof this item!');
   await modes.at(-1)[3](6,api.PartyOption.CANCEL);await tick();assert.deepEqual(sent,[]);
+  } } finally { await api.i18next.changeLanguage(previous); }
 });
 
-test('committed personal modifiers render original names and stacks and are re-read for ACK verification',async()=>{
+test('committed personal modifiers render localized original names and stacks and are re-read for ACK verification',async()=>{
+  const previous=api.i18next.language;
+  try { for(const language of ['zh-Hans','en']) {
+  await api.i18next.changeLanguage(language);
   const {p,entry}=personalPotionPhase();
   const modifier=api.modifierTypes.LUCKY_EGG().withIdFromFunc(api.modifierTypes.LUCKY_EGG).newModifier(entry.pokemon);
   modifier.stackCount=2;const state=api.captureModifierState(modifier);
@@ -1152,9 +1160,11 @@ test('committed personal modifiers render original names and stacks and are re-r
   s.personal.resources={money:100,pokeballs:{0:5,1:0,2:0,3:0,4:0},modifiers:[state]};model.applySnapshot(s);
   assert.deepEqual(model.captureAppliedState().personal.resources.modifiers,[state]);
   p.model=model;p.modifierLine={hidden:true,textContent:''};p.renderPersonalModifiers();
-  assert.equal(p.modifierLine.hidden,false);assert.match(p.modifierLine.textContent,/Lucky Egg ×2/);
+  assert.equal(p.modifierLine.hidden,false);assert.equal(p.modifierLine.textContent,language==='zh-Hans'
+    ? '本人持久道具：幸运蛋 ×2（妙蛙种子）' : '本人持久道具：Lucky Egg ×2（Bulbasaur）');
   model.applied.personal.resources.modifiers[0].stackCount=3;
   assert.notDeepEqual(model.captureAppliedState().personal.resources.modifiers,[state]);
+  } } finally { await api.i18next.changeLanguage(previous); }
 });
 
 test('production-minified reward type identity is not needed for original ball submission', async () => {

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import i18next from '../i18n';
 import type BattleScene from '../battle-scene';
 import Pokemon, { PlayerPokemon, EnemyPokemon, FieldPosition, capturePokemonState, restorePokemonState } from '../field/pokemon';
 import { getPokemonSpecies } from '../data/pokemon-species';
@@ -301,6 +302,10 @@ export class CoopBattlePresentation {
   }
 
   private async playMessage(event: any, signal: AbortSignal) {
+    if (event.messageKey === 'battle:switchQuestion') {
+      const pokemon = this.displayedById.get(event.pokemonId);
+      event = { ...event, text: i18next.t(event.messageKey, { pokemonName: event.useName && pokemon ? pokemon.name : i18next.t('common:pokemon', {defaultValue:'宝可梦'}) }) };
+    }
     if (!event.text || typeof (this.scene.ui as any).showText !== 'function') return;
     if (signal.aborted) return;
     // Messages are display-only here. Do not wait for a click during the

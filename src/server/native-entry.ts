@@ -304,8 +304,14 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       schedule(callback);
     },
     showText: (text, _delay, callback) => {
-      const owner = root.currentPhase instanceof MoneyRewardPhase ? views.indexOf(root.currentPhase.scene) : -1;
-      events.push({ kind: 'message', text, ...(owner >= 0 ? {scope:owner} : {}) }); schedule(callback);
+      const owner = root.currentPhase instanceof MoneyRewardPhase || root.currentPhase instanceof CheckSwitchPhase
+        ? views.indexOf(root.currentPhase.scene) : -1;
+      const phase = root.currentPhase;
+      const question = phase instanceof CheckSwitchPhase ? {
+        messageKey: 'battle:switchQuestion', pokemonId: views[owner].getPlayerField()[(phase as any).fieldIndex].id,
+        useName: !!(phase as any).useName,
+      } : {};
+      events.push({ kind: 'message', text, ...question, ...(owner >= 0 ? {scope:owner} : {}) }); schedule(callback);
     } };
   root.damageNumberHandler = { add: (p, amount, result = HitResult.EFFECTIVE, critical = false) =>
     events.push({ kind: 'damage-display', pokemonId: p.id, amount, result, critical, remainingHp: p.hp }) };

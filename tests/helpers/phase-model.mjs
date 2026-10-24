@@ -45,6 +45,7 @@ export const evolutionPhases=evaluate(declarations('evolution-phase.ts'),evoluti
 export function installEvolutionTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(evolutionPhaseDeps[path],value);}
 export const formPhases=evaluate(declarations('form-change-phase.ts'),{...dependencies('form-change-phase.ts'),'./phases':originalPhases,'./evolution-phase':evolutionPhases});
 const eggHatchDeps={...dependencies('egg-hatch-phase.ts'),'./phase':{Phase},'./data/egg':eggs};
+eggHatchDeps['./i18n']={default:originalI18n};
 export const eggHatchPhases=evaluate(declarations('egg-hatch-phase.ts'),eggHatchDeps);
 export function installEggHatchTestDependencies(values){for(const [path,value]of Object.entries(values))Object.assign(eggHatchDeps[path],value);}
 installPhaseTestDependencies({'./egg-hatch-phase':eggHatchPhases});

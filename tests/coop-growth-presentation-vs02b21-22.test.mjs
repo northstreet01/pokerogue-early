@@ -184,6 +184,27 @@ test('original weather, terrain and arena messages render in Chinese with no lef
  await api.i18next.changeLanguage('zh-Hans');
 });
 
+test('original read-only statistics and the complete title splash catalog display Chinese without modifying save facts',async()=>{
+ await api.i18next.changeLanguage('zh-Hans');
+ const runtime=api.createOriginalRuntime('statistics-display',{trainerId:1,secretId:2});
+ const data=api.withStarterRandomContext(runtime.context,()=>new api.GameData(runtime.scene,{readOnly:true}));
+ // Explicit UI fixture: make hidden count labels visible; never a game save.
+ for(const key of Object.keys(data.gameStats))if(typeof data.gameStats[key]==='number')data.gameStats[key]=1;
+ const facts=()=>JSON.stringify({stats:data.gameStats,dex:data.dexData},(_key,value)=>typeof value==='bigint'?value.toString():value),before=facts(),shown=new Set();
+ const handler=Object.assign(Object.create(api.GameStatsUiHandler.prototype),{scene:{gameData:data},
+  statLabels:Array.from({length:18},()=>({setText:value=>shown.add(value)})),statValues:Array.from({length:18},()=>({setText(){}}))});
+ for(let cursor=0;cursor<18;cursor++){handler.cursor=cursor;handler.updateStats();}
+ const labels=JSON.parse(fs.readFileSync('locales/zh-Hans/early-stats.json','utf8'));
+ assert.equal(Object.keys(labels).length,35);for(const label of Object.values(labels))assert.ok(shown.has(label),label);
+ assert.equal(facts(),before);
+ const raw=JSON.stringify(api.splashMessages);assert.equal(api.splashMessages.length,30);
+ for(const [index,text]of api.splashMessages.entries()){
+  assert.equal(api.i18next.t(`earlySplash:${index}`,{lng:'en'}),text);
+  assert.match(api.i18next.t(`earlySplash:${index}`,{lng:'zh-Hans'}),/[\u3400-\u9fff]/u);
+ }
+ assert.equal(JSON.stringify(api.splashMessages),raw);
+});
+
 test('the complete original move and ability catalogs have guarded Chinese descriptions and preserve original English',async()=>{
  await api.i18next.changeLanguage('zh-Hans');const missing={names:[],descriptions:[]};
  const originals=JSON.stringify([...api.allMoves.filter(Boolean),...api.allAbilities.filter(Boolean)]);

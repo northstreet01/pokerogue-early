@@ -128,14 +128,14 @@ export class LoginPhase extends Phase {
             this.end();
           else {
             this.scene.ui.setMode(Mode.MESSAGE);
-            this.scene.ui.showText('Failed to load save data. Please reload the page.\nIf this continues, please contact the administrator.');
+            this.scene.ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:saveLoadFailed'):'Failed to load save data. Please reload the page.\nIf this continues, please contact the administrator.');
           }
         });
       }
     }).catch(error => {
       console.error('Local save unavailable', error);
       this.scene.ui.setMode(Mode.MESSAGE);
-      this.scene.ui.showText('Local save could not be opened.\nYour existing data has not been replaced.');
+      this.scene.ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:saveOpenFailed'):'Local save could not be opened.\nYour existing data has not been replaced.');
     });
   }
 
@@ -1467,7 +1467,7 @@ export class CommandPhase extends FieldPhase {
         if (this.scene.arena.biomeType === Biome.END) {
           this.scene.ui.setMode(Mode.COMMAND, this.fieldIndex);
           this.scene.ui.setMode(Mode.MESSAGE);
-          this.scene.ui.showText(`An unseen force\nprevents using Poké Balls.`, null, () => {
+            this.scene.ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('battle:noPokeballForce'):`An unseen force\nprevents using Poké Balls.`, null, () => {
             this.scene.ui.showText(null, 0);
             this.scene.ui.setMode(Mode.COMMAND, this.fieldIndex);
           }, null, true);

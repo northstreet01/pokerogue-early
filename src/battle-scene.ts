@@ -61,6 +61,7 @@ import DamageNumberHandler from './field/damage-number-handler';
 import PokemonInfoContainer from './ui/pokemon-info-container';
 import { biomeDepths } from './data/biomes';
 import { initTouchControls } from './touch-controls';
+import i18next from './i18n';
 
 export const bypassLogin = true;
 
@@ -1671,7 +1672,9 @@ export default class BattleScene extends Phaser.Scene {
 						this.playSound(soundName);
 				} else if (!virtual) {
 					const defaultModifierType = getDefaultModifierTypeForTier(modifier.type.tier);
-					this.queueMessage(`The stack for this item is full.\n You will receive ${defaultModifierType.name} instead.`, null, true);
+					this.queueMessage((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('battle:itemStackFull',
+            {fullItemName:modifier.type.getDisplayName(),itemName:defaultModifierType.getDisplayName()})
+            :`The stack for this item is full.\n You will receive ${defaultModifierType.name} instead.`, null, true);
 					return this.addModifier(defaultModifierType.newModifier(), ignoreUpdate, playSound, false, instant).then(() => resolve());
 				}
 				

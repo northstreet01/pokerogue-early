@@ -659,7 +659,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
                         label: allMoves[m].name,
                         handler: () => {
                           ui.setMode(Mode.STARTER_SELECT).then(() => {
-                            ui.showText(`Select a move to swap with ${allMoves[m].name}.`, null, () => {
+                            ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:swapWithMove',{moveName:allMoves[m].name}):`Select a move to swap with ${allMoves[m].name}.`, null, () => {
                               ui.setModeWithoutClear(Mode.OPTION_SELECT, {
                                 options: this.speciesStarterMoves.filter(sm => sm !== m).map(sm => {
                                   return {

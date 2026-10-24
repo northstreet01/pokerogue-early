@@ -5,6 +5,7 @@ import { Mode } from "./ui";
 import * as Utils from "../utils";
 import { TextStyle, addTextObject } from "./text";
 import { splashMessages } from "../data/splash-messages";
+import i18next from '../i18n';
 
 export default class TitleUiHandler extends OptionSelectUiHandler {
   private titleContainer: Phaser.GameObjects.Container;
@@ -41,7 +42,7 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
 
     this.titleContainer.add(this.dailyRunScoreboard);
 
-    this.playerCountLabel = addTextObject(this.scene, (this.scene.game.canvas.width / 6) - 2, (this.scene.game.canvas.height / 6) - 90, '? Players Online', TextStyle.MESSAGE, { fontSize: '54px' });
+    this.playerCountLabel = addTextObject(this.scene, (this.scene.game.canvas.width / 6) - 2, (this.scene.game.canvas.height / 6) - 90, i18next.t('earlyBattle:localSolo'), TextStyle.MESSAGE, { fontSize: '54px' });
     this.playerCountLabel.setOrigin(1, 0);
     this.titleContainer.add(this.playerCountLabel);
 
@@ -57,7 +58,7 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
   }
 
   updatePlayerCount(): void {
-    this.playerCountLabel.setText(this.config?.contextLabel ?? '本地存档 · 单人冒险');
+    this.playerCountLabel.setText(this.config?.contextLabel ?? i18next.t('earlyBattle:localSolo'));
     this.playerCountLabel.setY(this.config?.contextLabel ? 80 : 90);
   }
 
@@ -65,7 +66,8 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
     const ret = super.show(args);
 
     if (ret) {
-      this.splashMessage.setText(Utils.randItem(splashMessages));
+      const splash=Utils.randItem(splashMessages.map((message,index)=>({message,index})));
+      this.splashMessage.setText(i18next.t(`earlySplash:${splash.index}`,{defaultValue:splash.message}));
 
       const ui = this.getUi();
 

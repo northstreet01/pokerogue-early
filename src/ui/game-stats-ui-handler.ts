@@ -188,7 +188,7 @@ export default class GameStatsUiHandler extends UiHandler {
     statKeys.forEach((key, s) => {
       const stat = displayStats[key] as DisplayStat;
       const value = stat.sourceFunc(this.scene.gameData);
-      this.statLabels[s].setText(!stat.hidden || isNaN(parseInt(value)) || parseInt(value) ? stat.label : '???');
+      this.statLabels[s].setText(!stat.hidden || isNaN(parseInt(value)) || parseInt(value) ? i18next.t(`earlyStats:${key}`,{defaultValue:stat.label}) : '???');
       this.statValues[s].setText(value);
     });
     if (statKeys.length < 18) {

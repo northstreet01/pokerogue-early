@@ -1,4 +1,5 @@
 import BattleScene, { PokeballCounts, bypassLogin } from "../battle-scene";
+import i18next from '../i18n';
 import Pokemon, { EnemyPokemon, PlayerPokemon } from "../field/pokemon";
 import { pokemonPrevolutions } from "../data/pokemon-evolutions";
 import PokemonSpecies, { allSpecies, getPokemonSpecies, speciesStarters } from "../data/pokemon-species";
@@ -837,19 +838,19 @@ export class GameData {
               const displayError = (error: string) => this.scene.ui.showText(error, null, () => this.scene.ui.showText(null, 0), Utils.fixedInt(1500));
 
               if (!valid)
-                return this.scene.ui.showText(`Your ${dataName} data could not be loaded. It may be corrupted.`, null, () => this.scene.ui.showText(null, 0), Utils.fixedInt(1500));
-              this.scene.ui.showText(`Your ${dataName} data will be overridden and the page will reload. Proceed?`, null, () => {
+                return this.scene.ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:dataCorrupted',{dataName:i18next.t(`earlyBattle:dataName.${dataName}`)}):`Your ${dataName} data could not be loaded. It may be corrupted.`, null, () => this.scene.ui.showText(null, 0), Utils.fixedInt(1500));
+              this.scene.ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:dataImportConfirm',{dataName:i18next.t(`earlyBattle:dataName.${dataName}`)}):`Your ${dataName} data will be overridden and the page will reload. Proceed?`, null, () => {
                 this.scene.ui.setOverlayMode(Mode.CONFIRM, () => {
                   if (!bypassLogin && dataType < GameDataType.SETTINGS) {
                     updateUserInfo().then(success => {
                       if (!success)
-                        return displayError(`Could not contact the server. Your ${dataName} data could not be imported.`);
+                        return displayError((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:dataImportConnectionFailed',{dataName:i18next.t(`earlyBattle:dataName.${dataName}`)}):`Could not contact the server. Your ${dataName} data could not be imported.`);
                       Utils.apiPost(`savedata/update?datatype=${dataType}${dataType === GameDataType.SESSION ? `&slot=${slotId}` : ''}`, dataStr)
                         .then(response => response.text())
                         .then(error => {
                           if (error) {
                             console.error(error);
-                            return displayError(`An error occurred while updating ${dataName} data. Please contact the administrator.`);
+                            return displayError((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:dataUpdateFailed',{dataName:i18next.t(`earlyBattle:dataName.${dataName}`)}):`An error occurred while updating ${dataName} data. Please contact the administrator.`);
                           }
                           window.location = window.location;
                         });
@@ -858,7 +859,7 @@ export class GameData {
                     const writing = dataType < GameDataType.SETTINGS ? writeLocalSave(dataKey, dataStr)
                       : Promise.resolve(localStorage.setItem(dataKey, dataStr));
                     writing.then(() => window.location.reload())
-                      .catch(error => { console.error(error); displayError('Local save could not be imported.'); });
+                      .catch(error => { console.error(error); displayError((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:dataImportFailed'):'Local save could not be imported.'); });
                   }
                 }, () => {
                   this.scene.ui.revertMode();
@@ -988,7 +989,7 @@ export class GameData {
 
       if (newCatch && speciesStarters.hasOwnProperty(species.speciesId)) {
         this.scene.playSoundWithoutBgm('level_up_fanfare', 1500);
-        this.scene.ui.showText(`${species.name} has been\nadded as a starter!`, null, () => checkPrevolution(), null, true);
+        this.scene.ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('battle:addedAsAStarter',{pokemonName:species.name}):`${species.name} has been\nadded as a starter!`, null, () => checkPrevolution(), null, true);
       } else
         checkPrevolution();
     });
@@ -1015,7 +1016,7 @@ export class GameData {
       this.starterEggMoveData[speciesId] |= value;
 
       this.scene.playSoundWithoutBgm('level_up_fanfare', 1500);
-      this.scene.ui.showText(`${eggMoveIndex === 3 ? 'Rare ' : ''}Egg Move unlocked: ${allMoves[speciesEggMoves[speciesId][eggMoveIndex]].name}`, null, () => resolve(true), null, true);
+      this.scene.ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t(eggMoveIndex===3?'egg:rareEggMoveUnlock':'egg:eggMoveUnlock',{moveName:allMoves[speciesEggMoves[speciesId][eggMoveIndex]].name}):`${eggMoveIndex === 3 ? 'Rare ' : ''}Egg Move unlocked: ${allMoves[speciesEggMoves[speciesId][eggMoveIndex]].name}`, null, () => resolve(true), null, true);
     });
   }
 

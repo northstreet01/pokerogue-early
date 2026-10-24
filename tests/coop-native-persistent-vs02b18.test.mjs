@@ -108,7 +108,10 @@ for(const seat of [0,1])test(`native full global replacement and original held c
   try{
     // Explicit synthetic tier-two original fallback, matching the frozen M3 case.
     const global=reward(initial,seat,'GOLDEN_POKEBALL',{existing:3,tier:2});
-    const next=(await h.request('native-prepare-action',{checkpoint:global.c,seat,action:global.action})).checkpoint;
+    const result=await h.request('native-prepare-action',{checkpoint:global.c,seat,action:global.action}),next=result.checkpoint;
+    const replacement=result.events.find(e=>e.presentation?.key==='battle:itemStackFull');
+    assert.ok(replacement,'the actual original full-stack callback must publish its translated replacement message');
+    assert.equal(replacement.scope,seat);assert.match(replacement.text,/[\u3400-\u9fff]/u);assert.doesNotMatch(replacement.text,/undefined|\{\{/u);
     assert.equal(api.originalDecisionStateCodec.restore(next).players[seat].modifiers[0].stackCount,3);
     assert.equal(next.players[seat].pokeballCounts[2],global.c.players[seat].pokeballCounts[2]+5);
     const held=reward(json(base.checkpoint),seat,'LUCKY_EGG',{existing:99});const before=canonical(held.c);

@@ -11,7 +11,10 @@ test('one user-authorized forced route completes original Classic waves 1–200 
  const output=process.env.VS22U_OUTPUT??'build/vs02b22u/classic-final';
  const result=await forcedProgressionRoute({untilVictory:true,seed:'learning-natural-2',output,
   restartWaves:restarts,replayWaves:[55,95,100,145,180,190,195,200],
-  onWave:step=>console.log('FORCED_CLASSIC_WAVE',JSON.stringify(step))});
+  onWave:async step=>{
+   console.log('FORCED_CLASSIC_WAVE',JSON.stringify(step));
+   if(step.wave%10===1){const audit=await localizedEventAudit(output+'/events.jsonl');assert.deepEqual(audit.missing,[]);assert.deepEqual(audit.raw,[]);}
+  }});
  assert.equal(result.error,null,JSON.stringify(result.error));
  assert.equal(result.reachedWave,200);
  assert.equal(result.decision,'ended');assert.equal(result.victory,true);

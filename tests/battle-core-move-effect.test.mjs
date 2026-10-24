@@ -7,6 +7,18 @@ import {moveRules} from './helpers/move-execution-model.mjs';
 import {observeRulePromise,createRuleTaskTracker} from '../src/battle-core/rule-task-tracker.mjs';
 import {advanceQueuedMoveEffect} from '../src/battle-core/move-effect-runner.mjs';
 import {copy} from '../src/battle-core/coop-contract.mjs';
+import {originalI18n} from './helpers/localization-model.mjs';
+import {presentationText} from '../src/system/presentation-text.mjs';
+
+test('original ability immunity message carries Chinese translation provenance without changing the rule state',async()=>{
+ const c=effectContext(),before=codec.capture(c),previous=originalI18n.language;
+ try{
+  await originalI18n.changeLanguage('zh-Hans');
+  const message=new damageRules.MoveImmunityAbAttr(()=>true).getTriggerMessage(c.roster.entries[2].pokemon);
+  assert.match(message,/[\u4e00-\u9fff]/);assert.equal(presentationText(message).key,'battle:hitResultNoEffect');
+  assert.deepEqual(codec.capture(c),before);
+ }finally{await originalI18n.changeLanguage(previous);}
+});
 
 test('actual Pokemon damage matches frozen apply for physical/special/fixed/status/immunity/burn and either owner',()=>{
   let cases=0;

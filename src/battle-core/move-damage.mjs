@@ -1,4 +1,5 @@
 // Original Pokemon.apply at 20cd4a3a; formulas/order are unchanged.
+// The status-immunity message uses the existing original translation key.
 // Rule objects and scene services are trusted original providers.
 export function applyPokemonMove(target, source, battlerMove, rules) {
     const { AttackTypeBoosterModifier, BattlerTagType, BlockCritAbAttr, BypassBurnDamageReductionAbAttr, CritOnlyAttr, DamageAchv, DamageMoneyRewardModifier, EnemyDamageBoosterModifier, EnemyDamageReducerModifier, FieldVariableMovePowerAbAttr, FixedDamageAttr, HelpingHandTag, HighCritAttr, HitResult, HitsTagAttr, ModifiedDamageAttr, MoveCategory, MoveImmunityAbAttr, MoveTarget, MultiHitAttr, OneHitKOAttr, PreDefendEndureAbAttr, ReceivedMoveDamageMultiplierAbAttr, StabBoostAbAttr, Stat, StatusEffect, StatusMoveTypeImmunityAttr, TempBattleStat, TempBattleStatBoosterModifier, TerrainType, Type, TypeBoostTag, TypeImmunityAbAttr, TypelessAttr, Utils, VariableAtkAttr, VariableDefAttr, VariableMovePowerAbAttr, VariablePowerAttr, WeakenMoveTypeTag, applyAbAttrs, applyMoveAttrs, applyPreAttackAbAttrs, applyPreDefendAbAttrs, console, getTypeDamageMultiplier, i18next } = rules;
@@ -176,7 +177,7 @@ export function applyPokemonMove(target, source, battlerMove, rules) {
             if (!cancelled.value)
                 applyPreDefendAbAttrs(MoveImmunityAbAttr, target, source, battlerMove, cancelled, typeMultiplier);
             if (!typeMultiplier.value)
-                target.scene.queueMessage(`It doesn\'t affect ${target.name}!`);
+                target.scene.queueMessage(i18next.t('battle:hitResultNoEffect', { pokemonName: target.name }));
             result = cancelled.value || !typeMultiplier.value ? HitResult.NO_EFFECT : HitResult.STATUS;
             break;
     }

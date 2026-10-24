@@ -370,7 +370,7 @@ export class MoveImmunityAbAttr extends PreDefendAbAttr {
   }
 
   getTriggerMessage(pokemon: Pokemon, ...args: any[]): string {
-    return `It doesn\'t affect ${pokemon.name}!`;
+    return i18next.t('battle:hitResultNoEffect', {pokemonName:pokemon.name});
   }
 }
 

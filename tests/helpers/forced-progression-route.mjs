@@ -28,7 +28,7 @@ export async function forcedProgressionRoute({untilWave=56,untilVictory=false,se
    const room=env.server.rooms.get(pair[0].identity.roomId);saved=structuredClone(room.checkpoint);
    const c=saved.nativeCheckpoint,wave=c.battle.waveIndex;
    const step={step:n,wave,kind:c.decision.kind,revision:room.revision};trace.push(step);
-   if(wave!==lastWave){lastWave=wave;onWave(step);await fs.writeFile(join(output,`wave-${wave}.json`),JSON.stringify(saved));}
+   if(wave!==lastWave){lastWave=wave;await onWave(step);await fs.writeFile(join(output,`wave-${wave}.json`),JSON.stringify(saved));}
    if(c.decision.kind==='ended'){
     if(untilVictory&&c.decision.victory===true){
      const tokens=pair.map(client=>client.identity),before=structuredClone(saved);

@@ -129,7 +129,7 @@ export default class CoopPlayPhase extends Phase {
     }
   }
 
-  private leaveSession(): Promise<void> {
+  private leaveSession(reason?:'defeat'): Promise<void> {
     if (this.exitTask) return this.exitTask;
     pauseAutoResume();
     this.stopSession();
@@ -141,7 +141,7 @@ export default class CoopPlayPhase extends Phase {
         new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 500); }),
       ]);
       if (timer) clearTimeout(timer);
-      location.assign(committed ? '/?coopExit=saved' : '/?coopExit=limited');
+      location.assign(reason==='defeat'?'/?coopExit=defeat':committed ? '/?coopExit=saved' : '/?coopExit=limited');
     })();
     return this.exitTask;
   }
@@ -476,6 +476,9 @@ export default class CoopPlayPhase extends Phase {
 
   private async openDecisionInput() {
     if (this.disposed) return;
+    if(this.latest?.personal.decision.kind==='ended'){
+      await this.leaveSession(this.latest.personal.decision.reason==='defeat'?'defeat':undefined);return;
+    }
     if (this.releaseTeamParty) return;
     if (this.latest?.personal.decision.kind === 'capture-choice' || this.latest?.personal.decision.legacyCapture) await this.openCaptureChoice();
     else if (this.latest?.personal.decision.players?.subdecision?.kind === 'learn-move') await this.openLearnMoveMenu();

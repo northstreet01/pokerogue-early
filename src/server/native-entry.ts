@@ -1,12 +1,12 @@
 import BattleScene from '../battle-scene';
 import { Phase } from '../phase';
-import Pokemon, { FieldPosition, HitResult } from '../field/pokemon';
+import Pokemon, { EnemyPokemon, FieldPosition, HitResult } from '../field/pokemon';
 import { NewBattlePhase, EncounterPhase, ShowTrainerPhase, SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase,
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase, BerryPhase, PokemonHealPhase } from '../phases';
 import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase, TrainerVictoryPhase, MoneyRewardPhase, ModifierRewardPhase } from '../phases';
-import { SelectModifierPhase } from '../phases';
+import { SelectModifierPhase, SelectBiomePhase, SwitchBiomePhase, NewBiomeEncounterPhase, PartyHealPhase, LevelCapPhase, WeatherEffectPhase } from '../phases';
 import { preparationItemTarget, isPreparationModifier, isPreparationPersistent } from '../coop/preparation-item';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase } from '../phases';
 import { Mode } from '../ui/ui';
@@ -73,6 +73,8 @@ function nextNativeDecisionId(c) {
   check(Number.isSafeInteger(sequence),'DECISION_SEQUENCE_EXHAUSTED');
   return `native-${c.battle.waveIndex}-${sequence}`;
 }
+const partyWiped=c=>!c.roster.entries.some(e=>e.owner!==null&&e.group==='party'&&!e.pokemon.isFainted(true));
+const defeatDecision=id=>({id,kind:'ended',requiredSeats:[],victory:false,reason:'defeat'});
 
 // Trainer visuals are display-only. Native battle tests have no Phaser
 // Container list; the original encounter/rules still construct the real
@@ -96,6 +98,7 @@ class DisplayTarget {
   setTexture(..._args) { return this; }
   setFrame(..._args) { return this; }
   setPipeline(..._args: any[]) { return this; }
+  setBiome(..._args: any[]) { return this; }
   setScale(..._args) { return this; }
   setAlpha(..._args: any[]) { return this; }
   clearTint() { return this; }
@@ -105,7 +108,7 @@ class DisplayTarget {
 
 const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, EvolutionPhase, EndEvolutionPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, ModifierRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, EvolutionPhase, EndEvolutionPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, ModifierRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase, LevelCapPhase, WeatherEffectPhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
@@ -138,10 +141,20 @@ function installPokemonDisplayPort() {
     this.scene.time.delayedCall(0, callback);
   };
   proto.getSprite = function () { return new DisplayTarget(); };
+  proto.setFrameRate = function () {}; // Status slow-down only changes rendered sprite animations.
   proto.destroy = function () {}; // Renderer disposal only; the original release owns party/modifier changes.
   proto.setFieldPosition = function (position) { this.fieldPosition = position; return Promise.resolve(); };
   for (const name of ['setX', 'setY', 'setPosition', 'setVisible', 'setScale'])
     proto[name] = DisplayTarget.prototype[name];
+  // EnemyPokemon overrides the abstract base display method. Boss encounter
+  // adjustment and original segmented damage call it even in the Worker.
+  (EnemyPokemon.prototype as any).initBattleInfo = function () {
+    this.battleInfo = { updateBossSegments: pokemon => {
+      const view = pokemon.scene.nativePublicPokemon?.(pokemon);
+      if (view) pokemon.scene.nativeEvents.push({kind:'pokemon-hp',scope:'shared',pokemonId:pokemon.id,
+        remainingHp:view.hp,maxHp:view.maxHp,bossSegments:pokemon.bossSegments,bossSegmentIndex:pokemon.bossSegmentIndex});
+    } };
+  };
 }
 
 function bindNativeScene(c: any, identity: any, inputs: any = {}) {
@@ -188,6 +201,21 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     return view;
   });
   root.modifiers = c.players.flatMap(p => p.modifiers);
+  // Original trainers may deliberately reuse one member seed. That can produce
+  // the same generated id (also used by the original IV/shiny rules) twice.
+  // Allocate only the co-op roster identity after construction, before items or
+  // seen/participant references exist. Keep every generated field and RNG draw.
+  const enemyIds = new Set<number>(c.roster.entries.map(e => e.pokemon.id).concat(c.roster.retiredIds));
+  root.addEnemyPokemon = (...args) => {
+    const pokemon = BattleScene.prototype.addEnemyPokemon.apply(root, args);
+    if (enemyIds.has(pokemon.id)) {
+      let id = 0;
+      while (enemyIds.has(id)) id++;
+      pokemon.id = id;
+    }
+    enemyIds.add(pokemon.id);
+    return pokemon;
+  };
   root.nativePublicPokemon = pokemon => {
     const owner = views.indexOf(pokemon.scene), index = owner >= 0 ? parties[owner].indexOf(pokemon) : root.getEnemyParty().indexOf(pokemon);
     if (index < 0 || (owner >= 0 ? index !== 0 : index > 1)) return null;
@@ -196,6 +224,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   };
   for (const { pokemon, owner } of c.roster.entries) {
     pokemon.scene = owner === null ? root : views[owner];
+    if (pokemon instanceof EnemyPokemon && pokemon.isBoss()) pokemon.initBattleInfo();
     // M2 deliberately excludes display position. Reattach display coordinates
     // without replaying a Pokemon constructor or consuming rule randomness.
     pokemon.setPosition(owner === null ? 236 : 106, owner === null ? 84 : 148);
@@ -223,10 +252,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     key ??= root.currentBattle.getBgmOverride(root) || root.arena.bgm || Biome[root.arena.biomeType].toLowerCase();
     events.push({ kind: 'bgm', key, fadeOut: !!fadeOut });
   };
-  root.playSound = root.playSoundWithoutBgm = () => {};
+  root.playSound = root.playSoundWithoutBgm = () => ({totalDuration:0,destroy() {}});
+  root.isBgmPlaying = () => false;
   root.updateFieldScale = root.setFieldScale = () => Promise.resolve();
   root.updateUIPositions = root.updateWaveCountText = root.updateMoneyText = root.updateScoreText = () => {};
   root.trainer = root.arenaPlayer = root.arenaEnemy = root.arenaNextEnemy = new DisplayTarget();
+  root.arenaBg = new DisplayTarget();root.arenaBgTransition = new DisplayTarget();root.arenaPlayerTransition = new DisplayTarget();
   root.showEnemyTrainer = root.hideEnemyTrainer = () => {};
   root.charSprite = { showCharacter: () => Promise.resolve(), hide: () => Promise.resolve() };
   root.showFieldOverlay = root.hideFieldOverlay = () => Promise.resolve();
@@ -256,7 +287,13 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.anims = { generateFrameNames() { return []; }, create() {} };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
   root.validateAchv = (achv) => { intents.push({ kind: 'achievement-check', id: achv.id }); return false; };
-  root.validateVoucher = () => { throw new Error('VOUCHER_POLICY_UNCONFIRMED'); };
+  root.validateVoucher = voucher => {
+    for(const owner of [0,1])intents.push({kind:'voucher-pending',owner,id:voucher.id,
+      voucherType:voucher.voucherType,count:1,fallbackCatalogId:'VOUCHER',resolve:'original-unlock-or-repeat'});
+    // Collection/gacha is explicitly deferred. Save each owned entitlement,
+    // never write a balance or trigger the original repeat-voucher fallback now.
+    return true;
+  };
   root.time = { delayedCall: (delay, fn, args = [], scope = null) => schedule(() => fn.apply(scope, args), delay) };
   root.time.addEvent = config => {
     check(config.repeat !== -1, 'UNSUPPORTED_REPEATING_RULE_TIMER');
@@ -349,6 +386,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.damageNumberHandler = { add: (p, amount, result = HitResult.EFFECTIVE, critical = false) =>
     events.push({ kind: 'damage-display', scope:'shared', pokemonId: p.id, amount, result, critical, remainingHp: p.hp }) };
   root.ui.setModeForceTransition = root.ui.setMode;
+  root.ui.fadeOut = root.ui.fadeIn = () => Promise.resolve();
   BattleAnim.prototype.play = function (scene: any, callback) {
     const animation = this as any;
     const event: any = { kind: 'battle-animation', animation: this.constructor.name,
@@ -439,15 +477,21 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   }
   function validateTrainerReward(p) {
     const type = p.modifierType;
-    check(Object.getPrototypeOf(p) === ModifierRewardPhase.prototype && c.battle.battleType === BattleType.TRAINER
-      && !c.battle.trainer.config.isBoss && preparationItemTarget(type) === 'none'
-      && isPreparationPersistent(type.newModifier()) && c.battle.trainer.config.modifierRewardFuncs.some(factory =>
-        canonical(captureModifierTypeState(factory())) === canonical(captureModifierTypeState(type))),
+    const candidates=(c.battle.trainer?.config.modifierRewardFuncs??[]).map(factory=>factory());
+    // Ask the original aftermath to declare milestone rewards. Never copy its
+    // wave/offsetGym formulas or run experience, loot, or the queued phases.
+    const declaration=Object.create(root);
+    declaration.currentBattle=Object.assign(Object.create(Object.getPrototypeOf(c.battle)),c.battle);
+    declaration.pushPhase=phase=>{if(Object.getPrototypeOf(phase)===ModifierRewardPhase.prototype)candidates.push((phase as any).modifierType);};
+    const aftermath=new VictoryPhase(declaration,2);aftermath.end=()=>{};aftermath.queueAftermath();
+    check(Object.getPrototypeOf(p) === ModifierRewardPhase.prototype && preparationItemTarget(type) === 'none'
+      && isPreparationPersistent(type.newModifier()) && candidates.some(candidate =>
+        canonical(captureModifierTypeState(candidate)) === canonical(captureModifierTypeState(type))),
     'UNSUPPORTED_NATIVE_TRAINER_REWARD');
   }
   function sync() {
     if (c.battle && root.currentBattle !== c.battle) c.roster.retiredIds.push(...c.battle.enemyParty.map(p => p.id));
-    c.battle = root.currentBattle; c.enemyModifiers = root.enemyModifiers;
+    c.battle = root.currentBattle; c.enemyModifiers = root.enemyModifiers;c.arena=root.arena;
     c.roster.entries = parties.flatMap((party, owner) => party.map((pokemon, index) => ({ owner, group: 'party', index, pokemon })))
       .concat(c.roster.entries.filter(e => e.owner !== null && e.group === 'reserve')).concat((root.currentBattle?.enemyParty ?? [])
       .map((pokemon, index) => ({ owner: null, group: 'enemy', index, pokemon })));
@@ -467,7 +511,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         return views.map(view => new ModifierRewardPhase(view, () => restoreModifierTypeState(type)));
       }
       if (!(p instanceof MoneyRewardPhase) || views.includes((p as any).scene)) return [p];
-      check(c.battle.battleType === BattleType.TRAINER && !c.battle.trainer.config.isBoss
+      check(c.battle.battleType === BattleType.TRAINER
         && (p as any).moneyMultiplier === c.battle.trainer.config.moneyMultiplier,'UNSUPPORTED_NATIVE_MONEY_REWARD');
       check(root.phaseQueuePrependSpliceIndex === -1,'UNSAFE_MONEY_QUEUE_SPLIT');
       // One original award becomes two owned original phases. Their persisted
@@ -501,6 +545,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       let captureBallCount: number | null = null;
       let priorParty: Set<Pokemon> | null = null;
       let cancelCapture = false;
+      const captureChecks=[];
+      const captureEventIndex=events.length;
       if (p instanceof AttemptCapturePhase) {
         captureSeat = views.indexOf((p as any).scene);
         check(captureSeat === 0 || captureSeat === 1, 'INVALID_CAPTURE_OWNER');
@@ -527,11 +573,17 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         validateTrainerReward(p);
       }
       if (p instanceof MoneyRewardPhase) check((scope === 0 || scope === 1)
-        && c.battle.battleType === BattleType.TRAINER && !c.battle.trainer.config.isBoss
+        && c.battle.battleType === BattleType.TRAINER
         && (p as any).moneyMultiplier === c.battle.trainer.config.moneyMultiplier,'INVALID_TRAINER_MONEY_SCOPE');
       const changes = [];
       const patch = (object, key, value) => { changes.push([object, key, Object.getOwnPropertyDescriptor(object, key)]);
         Object.defineProperty(object, key, { value, writable: true, configurable: true }); };
+      if(p instanceof AttemptCapturePhase&&!resume){
+        const play=p.playCaptureAnimation;
+        patch(p,'playCaptureAnimation',function(pokemon,checkCapture){
+          return play.call(this,pokemon,count=>{const result=checkCapture(count);captureChecks.push({...result});return result;});
+        });
+      }
       if (p instanceof ModifierRewardPhase) {
         const reward = p.doReward;
         patch(p,'doReward',() => observeRulePromise((p as any).scene,reward.call(p)));
@@ -558,7 +610,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
           try { return summon.call(this); } finally { this.fieldIndex = fieldIndex; }
         });
       }
-      const creating = p instanceof NewBattlePhase || p instanceof EncounterPhase;
+      const creating = p instanceof NewBattlePhase || p instanceof EncounterPhase
+        || p instanceof SelectBiomePhase || p instanceof SwitchBiomePhase || p instanceof PartyHealPhase;
       if (creating) check(c.players.every(player => player.modifiers.every(isPreparationPersistent)), 'UNSUPPORTED_NATIVE_ENCOUNTER_PLAYER_MODIFIERS');
       // Encounter constructs a new enemy list before sync. Original Pokemon
       // methods still use their personal scenes; enemy generation uses root.
@@ -700,11 +753,19 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         // capture RNG, changes inventory, or grants an additional individual.
         const spent = captureBallCount! - c.players[captureSeat].pokeballCounts[(p as any).pokeballType];
         check(spent === 0 || spent === 1, 'INVALID_CAPTURE_CONSUMPTION');
+        if(spent===1)events.splice(captureEventIndex+1,0,{kind:'capture-animation',scope:'shared',seat:captureSeat,
+          targetId:(p as any).coopTargetId,pokeballType:(p as any).pokeballType,checks:captureChecks});
         events.push({ kind: 'capture-result', seat: captureSeat,
           targetId: (p as any).coopTargetId, pokeballType: (p as any).pokeballType,
           outcome: spent === 0 ? 'cancelled' : waiting === 'capture-select' || captureTarget?.hp === 0 ? 'caught' : 'failed' });
       }
-      check(ended === 1 || ended === 0 && waiting, 'INCOMPLETE_NATIVE_PHASE'); root.currentPhase = null; sync();
+      check(ended === 1 || ended === 0 && waiting, 'INCOMPLETE_NATIVE_PHASE');
+      if(partyWiped(c)){
+        for(const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue'])root[key]=[];
+        root.phaseQueuePrependSpliceIndex=-1;
+        events.push({kind:'run-ended',scope:'shared',victory:false,reason:'defeat'});
+      }
+      root.currentPhase = null; sync();
       if (waiting) return { completed: false, suspended: true, pendingTasks: 0, events: [...events], grants: [] };
       return { completed: true, pendingTasks: 0, events: [...events], grants: [] };
     },
@@ -861,6 +922,9 @@ export async function stepNativeEntry(runtime, checkpoint) {
       return { remaining: switchKind(p), decision: switchDecision(id, c, p) };
     },
     finishBoundary(c, p, id) {
+      if(partyWiped(c))return defeatDecision(id);
+      const front=c.continuation.phaseQueuePrepend.at(-1)??c.continuation.phaseQueue[0];
+      if(front?.phase instanceof NewBattlePhase)return {id,kind:'continuing',requiredSeats:[],reason:'next-battle'};
       if (!c.continuation.phaseQueue.length && !c.continuation.phaseQueuePrepend.length)
         populatePhaseQueue(c.continuation, () => ({ kind: 'original-phase', phaseId: Math.max(-1, ...c.continuation.nextCommandPhaseQueue.map(d => d.phaseId)) + 1,
           phase: new TurnInitPhase(undefined), remaining: 'start' }));
@@ -997,6 +1061,7 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
     for (let index = 0; index < 500; index++) {
       const next = binding.root.phaseQueuePrepend.at(-1) ?? binding.root.phaseQueue[0];
       if (next instanceof SelectModifierPhase) return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
+      if(next instanceof NewBattlePhase){c.decision={...c.decision,reason:'next-battle'};return {checkpoint:codec.capture(c),events:binding.events,intents:binding.intents};}
       const p = selectNextPhase(binding.root, () => populatePhaseQueue(binding.root, () => new TurnInitPhase(binding.root))).phase;
       if (p instanceof EvolutionPhase) {
         binding.bindPhase(p); binding.sync();
@@ -1032,6 +1097,10 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
       check(supportsPhase(p), 'UNSUPPORTED_NATIVE_ENTRY_PHASE');
       const result = await binding.execute(p);
       const id = nextNativeDecisionId(c);
+      if(partyWiped(c)){
+        c.decision=defeatDecision(id);
+        return {checkpoint:codec.capture(c),events:binding.events,intents:binding.intents};
+      }
       if (result.suspended) {
         const kind = switchKind(p);
         // Retain the actual current phase, just as the per-phase runner does.
@@ -1403,7 +1472,33 @@ export async function nextNativeBattle(runtime, checkpoint) {
   check(![0,1].some(seat => hasLegacyCaptures(c,seat)), 'LEGACY_CAPTURE_PENDING');
   const fixed = fixedBattles[c.battle.waveIndex + 1];
   check(!fixed || fixed.battleType === BattleType.TRAINER, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
+    let selectedBiome;
     const result = await advanceNextBattle(c, codec, {
+      isBiomeTransition: candidate => candidate.battle.gameMode.isClassic && candidate.battle.waveIndex % 10 === 0,
+      async validateBiomeTransition(before, after) {
+        if(selectedBiome===undefined||after.arena.biomeType!==selectedBiome)return false;
+        const expected=codec.restore(codec.capture(before));expected.battle.waveIndex=after.battle.waveIndex;
+        const binding=bindNativeScene(expected,runtime.scene.gameData);
+        try{
+          for(const entry of expected.roster.entries.filter(e=>e.owner!==null)){
+            entry.pokemon.resetBattleData();
+            if(entry.index===0&&entry.group==='party'){entry.pokemon.resetTurnData();entry.pokemon.resetSummonData();}
+          }
+          await binding.execute(new PartyHealPhase(binding.root,false));
+          const party=value=>value.roster.entries.filter(e=>e.owner!==null).map(e=>{
+            const p=capturePokemonState(e.pokemon);delete p.fields.battleData;return {owner:e.owner,index:e.index,pokemon:p};
+          });
+          const referenceParty=party(expected),actualParty=party(after);
+          for(let i=0;i<referenceParty.length;i++)for(const key of Object.keys(referenceParty[i].pokemon.fields))
+            check(canonical(referenceParty[i].pokemon.fields[key])===canonical(actualParty[i]?.pokemon.fields[key]),'BIOME_PARTY_MISMATCH_'+key.toUpperCase());
+          if(canonical(referenceParty)!==canonical(actualParty))return false;
+          expected.arena=binding.root.newArena(selectedBiome);
+          const reference=codec.capture(expected).arena,actual=codec.capture(after).arena;
+          delete reference.weather;delete actual.weather;
+          for(const key of Object.keys(reference))check(canonical(reference[key])===canonical(actual[key]),'BIOME_ARENA_MISMATCH_'+key.toUpperCase());
+          return canonical(reference)===canonical(actual);
+        }finally{binding.dispose();}
+      },
       phaseKind: p => p.constructor.name,
       validateTrainerTransition(before, after) {
         const expected = codec.restore(codec.capture(before));
@@ -1412,8 +1507,8 @@ export async function nextNativeBattle(runtime, checkpoint) {
           expected.battle.waveIndex = after.battle.waveIndex;
           expected.arena.updatePoolsForTimeOfDay();
           expected.arena.removeAllTags();
-          for (const id of before.roster.field.slice(0, 2)) {
-            const pokemon = expected.roster.entries.find(e => e.pokemon.id === id)?.pokemon;
+          for (const entry of expected.roster.entries.filter(e=>e.owner!==null&&e.group==='party'&&e.index===0)) {
+            const pokemon = entry.pokemon;
             if (pokemon) { pokemon.resetTurnData(); pokemon.resetSummonData(); }
           }
           const reference = codec.capture(expected), actual = codec.capture(after);
@@ -1431,15 +1526,15 @@ export async function nextNativeBattle(runtime, checkpoint) {
       },
       async execute(candidate, p) {
         const binding = bindNativeScene(candidate, runtime.scene.gameData);
-        try { const result = await binding.execute(p); intents.push(...binding.intents); return result; }
+        try { if(p instanceof SwitchBiomePhase)selectedBiome=(p as any).nextBiome;
+          const result = await binding.execute(p); intents.push(...binding.intents); return result; }
         finally { binding.dispose(); }
       },
       validateEnemyModifiers: candidate => candidate.enemyModifiers.every(m => m instanceof PokemonHeldItemModifier
         && candidate.battle.enemyParty.some(p => p.id === m.pokemonId) && m.stackCount > 0 && m.virtualStackCount === 0)
     }, { decisionId: `native-${c.battle.waveIndex + 1}-0` });
-    if (result.context.battle.battleType === BattleType.TRAINER)
-      check(!result.context.battle.trainer.config.isBoss, 'UNSUPPORTED_NATIVE_TRAINER_BOSS');
-    else check(!result.context.battle.enemyParty.some(p => p.isBoss()), 'UNSUPPORTED_NATIVE_ENCOUNTER_BOSS');
+    if (result.context.battle.battleType !== BattleType.TRAINER)check(result.context.battle.enemyParty.every(p => !p.isBoss() || Number.isSafeInteger(p.bossSegments)
+      && p.bossSegments > 0 && p.bossSegmentIndex === p.bossSegments - 1), 'INVALID_NATIVE_ENCOUNTER_BOSS');
     return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 
@@ -1565,6 +1660,7 @@ function publicPokemonView(entry: any) {
     maxHp: pokemon.getMaxHp(),
     gender: pokemon.gender ?? 0,
     shiny: !!pokemon.shiny,
+    ...(pokemon.isBoss() ? {bossSegments:pokemon.bossSegments,bossSegmentIndex:pokemon.bossSegmentIndex} : {}),
   };
 }
 
@@ -1639,6 +1735,7 @@ export function projectNativeSnapshot(runtime, payload) {
       kind: c.decision.kind,
       requiredSeats: [...c.decision.requiredSeats],
       options: c.decision.options?.[payload.seat] ?? null,
+      ...(c.decision.kind==='ended'?{reason:c.decision.reason,victory:c.decision.victory}:{}),
       players: c.decision.kind === 'preparation' ? c.decision.players[payload.seat] : null,
       ...(c.decision.kind === 'preparation' && c.decision.shared ? {sharedMarket: {...c.decision.shared,
         finished:c.decision.players.map(p=>p.ready),rerollLocked:c.decision.players.some(p=>p.rewardResolved)}} : {}),

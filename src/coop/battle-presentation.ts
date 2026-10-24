@@ -15,6 +15,7 @@ import { Biome } from '../data/enums/biome';
 import { animateEncounterScroll, animateBiomeBackground } from '../field/encounter-animation';
 import { presentOriginalEvolution } from './evolution-presentation';
 import {renderPresentationText} from '../system/presentation-text.mjs';
+import {presentOriginalCapture} from './capture-presentation';
 
 export function captureResultText(event: any): string {
   const ball = getPokeballName(event.pokeballType);
@@ -141,7 +142,15 @@ export class CoopBattlePresentation {
         if (this.playedEvents.has(key)) continue;
         try {
           if (event.kind === 'bgm') this.audio.play(event.key);
-          else if (batch && !batch.replay && ['battle-animation', 'damage-display', 'pokemon-hp', 'pokemon-progress', 'level-stats', 'experience-bar', 'evolution-display', 'pokemon-exit', 'pokemon-enter', 'faint-cry', 'showInfo'].includes(event.kind)) continue;
+          else if (batch && !batch.replay && ['capture-animation','battle-animation', 'damage-display', 'pokemon-hp', 'pokemon-progress', 'level-stats', 'experience-bar', 'evolution-display', 'pokemon-exit', 'pokemon-enter', 'faint-cry', 'showInfo'].includes(event.kind)) continue;
+          else if(event.kind==='capture-animation'){
+            const target=this.displayedById.get(event.targetId);
+            if(target){
+              const controller=new AbortController(),cancel=()=>controller.abort();signal.addEventListener('abort',cancel,{once:true});
+              try{await within(presentOriginalCapture(this.scene,target,event,controller.signal),20000,signal);}
+              finally{controller.abort();signal.removeEventListener('abort',cancel);}
+            }
+          }
           else if (event.kind === 'battle-animation') await this.playAnimation(event, signal);
           else if (event.kind === 'phase-start') await this.playPhase(event, signal);
           else if (event.kind === 'damage-display' || event.kind === 'pokemon-hp') await this.playDamage(event, signal);
@@ -246,6 +255,11 @@ export class CoopBattlePresentation {
     if (!target) return;
     if (event.kind === 'damage-display') (this.scene as any).damageNumberHandler?.add(target, event.amount, event.result, event.critical);
     if (typeof event.remainingHp === 'number') {
+      if (Number.isInteger(event.bossSegments)) {
+        (target as EnemyPokemon).bossSegments=event.bossSegments;
+        (target as EnemyPokemon).bossSegmentIndex=event.bossSegmentIndex;
+        (target as any).battleInfo?.updateBossSegments?.(target);
+      }
       if (event.kind === 'pokemon-hp' && target.hp === event.remainingHp && target.getMaxHp() === event.maxHp) return;
       target.hp = event.remainingHp;
       if (typeof event.maxHp === 'number' && event.maxHp !== target.getMaxHp()) {
@@ -439,6 +453,7 @@ export class CoopBattlePresentation {
     const model = Object.create(view.owner === null ? EnemyPokemon.prototype : PlayerPokemon.prototype);
     Object.assign(model, { species: getPokemonSpecies(view.speciesId), formIndex: view.formIndex,
       id: view.id, level: view.level, hp: view.hp, gender: view.gender, shiny: view.shiny, pokeball: view.pokeball,
+      ...(view.bossSegments ? {bossSegments:view.bossSegments,bossSegmentIndex:view.bossSegmentIndex} : {}),
       moveset: [], exp: 0, levelExp: 0,
       // These methods expose public display facts, not invented combat stats,
       // ability, moves, IVs or random state for a teammate/enemy.

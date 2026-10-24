@@ -3243,6 +3243,13 @@ export class AttemptCapturePhase extends PokemonPhase {
     const pokeballMultiplier = getPokeballCatchMultiplier(this.pokeballType);
     const statusMultiplier = pokemon.status ? getStatusEffectCatchRateMultiplier(pokemon.status.effect) : 1;
     const y = getCaptureThreshold(pokemon.getMaxHp(), pokemon.hp, catchRate, pokeballMultiplier, statusMultiplier);
+    this.playCaptureAnimation(pokemon, shakeCount => advanceCaptureCheck(shakeCount, pokemon.species.isObtainable(), pokeballMultiplier, y,
+      range => pokemon.randSeedInt(range)));
+  }
+
+  // Original visual sequence shared by solo rules and verified co-op replay.
+  // Only the supplied check decides shakes; display replay never rolls capture.
+  playCaptureAnimation(pokemon: EnemyPokemon, checkCapture: (count: number) => {outcome:string;shakeCount:number}, visualGaussian?: (stdev:number)=>number) {
     const fpOffset = pokemon.getFieldPositionOffset();
 
     const pokeballAtlasKey = getPokeballAtlasKey(this.pokeballType);
@@ -3300,8 +3307,7 @@ export class AttemptCapturePhase extends PokemonPhase {
                   }
                 },
                 onRepeat: () => {
-                  const result = advanceCaptureCheck(shakeCount, pokemon.species.isObtainable(), pokeballMultiplier, y,
-                    range => pokemon.randSeedInt(range));
+                  const result = checkCapture(shakeCount);
                   shakeCount = result.shakeCount;
                   if (result.outcome === 'failed') {
                     shakeCounter.stop();
@@ -3310,7 +3316,7 @@ export class AttemptCapturePhase extends PokemonPhase {
                     this.scene.playSound('pb_move');
                   else {
                     this.scene.playSound('pb_lock');
-                    addPokeballCaptureStars(this.scene, this.pokeball);
+                    addPokeballCaptureStars(this.scene, this.pokeball, visualGaussian);
                     
                     const pbTint = this.scene.add.sprite(this.pokeball.x, this.pokeball.y, 'pb', 'pb');
                     pbTint.setOrigin(this.pokeball.originX, this.pokeball.originY);

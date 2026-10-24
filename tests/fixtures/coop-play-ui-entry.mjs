@@ -52,6 +52,7 @@ export { animatePokemonSummon } from '../../src/field/pokemon-summon-animation';
 export { animateEncounterScroll, animateBiomeBackground } from '../../src/field/encounter-animation';
 export { bindPresentationPort } from '../../src/battle-core/presentation-port.mjs';
 export { presentOriginalEvolution } from '../../src/coop/evolution-presentation';
+export { presentOriginalCapture } from '../../src/coop/capture-presentation';
 export { default as BattleMessageUiHandler } from '../../src/ui/battle-message-ui-handler';
 export { default as BattleInfo } from '../../src/ui/battle-info';
 export { default as i18next } from '../../src/i18n';

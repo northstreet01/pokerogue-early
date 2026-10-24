@@ -120,7 +120,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       const entry = pokemonId === null ? null
         : checkpoint.roster.entries.find(item => (item.pokemon?.fields?.id ?? item.pokemon?.id) === pokemonId);
       const intent = {
-        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${raw.kind==='achievement-check'&&[0,1].includes(raw.owner)?raw.owner+':':''}${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`,
+        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${['achievement-check','voucher-pending'].includes(raw.kind)&&[0,1].includes(raw.owner)?raw.owner+':':''}${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`,
         owner: [0, 1].includes(raw.owner) ? raw.owner : entry ? entry.owner : null,
         source: 'scene',
         recipient: null,
@@ -398,7 +398,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         events.push(...(result.events ?? []).map(event => scopeEvent(event, checkpoint)));
       };
       if (decision.kind === 'wait-actions') {
-        check(inputs && Object.keys(inputs).sort().join(',') === '0,1', 'INCOMPLETE_COMMAND_INPUTS');
+        check(inputs && canonical(Object.keys(inputs).sort()) === canonical(decision.requiredSeats.map(String).sort()), 'INCOMPLETE_COMMAND_INPUTS');
         await apply('native-submit', { checkpoint, inputs: COPY(inputs) });
       } else if (decision.kind === 'preparation') {
         const seats = Object.keys(inputs ?? {});

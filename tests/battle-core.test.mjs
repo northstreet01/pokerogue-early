@@ -179,7 +179,14 @@ test('actual refactored game methods and capture callback remain wired to equiva
   const to=declarations.findIndex(n=>n.declarationList.declarations[0].name.getText()==='y');
   let repeat;
   function visit(n){if(ts.isPropertyAssignment(n)&&n.name.getText()==='onRepeat'&&n.initializer.getText().includes('advanceCaptureCheck'))repeat=n.initializer.getText();ts.forEachChild(n,visit);}
-  visit(capture);assert.ok(repeat,'original capture phase must use the shared capture check');
+  const animation=sourceMember('phases.ts','AttemptCapturePhase','playCaptureAnimation');
+  function findVisual(n){if(ts.isPropertyAssignment(n)&&n.name.getText()==='onRepeat'&&n.initializer.getText().includes('checkCapture(shakeCount)'))repeat=n.initializer.getText();ts.forEachChild(n,findVisual);}
+  findVisual(animation);assert.ok(repeat,'original capture animation must call its supplied check');
+  const call=capture.body.statements.find(n=>ts.isExpressionStatement(n)&&n.expression.expression?.getText()==='this.playCaptureAnimation').expression;
+  const check=call.arguments[1];assert.equal(check.parameters[0].name.getText(),'shakeCount');
+  assert.ok(check.body.getText().startsWith('advanceCaptureCheck('),'solo must retain the exact shared capture rule');
+  repeat=repeat.replace('checkCapture(shakeCount)',check.body.getText());
+  repeat=repeat.replace('addPokeballCaptureStars(this.scene, this.pokeball, visualGaussian)','addPokeballCaptureStars(this.scene, this.pokeball)');
   const fragments={...original,
     battleRand:sourceMember('battle.ts','Battle','randSeedInt').getText(),
     level:sourceMember('battle.ts','Battle','getLevelForWave').getText(),

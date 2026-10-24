@@ -136,7 +136,7 @@ function doFanOutParticle(scene: BattleScene, trigIndex: integer, x: integer, y:
   return particle;
 }
 
-export function addPokeballCaptureStars(scene: BattleScene, pokeball: Phaser.GameObjects.Sprite): void {
+export function addPokeballCaptureStars(scene: BattleScene, pokeball: Phaser.GameObjects.Sprite, randomGauss = Utils.randGauss): void {
   if (presentOnHost(scene, 'pokeball-capture-stars', {})) return;
   const addParticle = () => {
     const particle = scene.add.sprite(pokeball.x, pokeball.y, 'pb_particles', '4.png');
@@ -160,7 +160,7 @@ export function addPokeballCaptureStars(scene: BattleScene, pokeball: Phaser.Gam
       }
     });
 
-    const dist = Utils.randGauss(25);
+    const dist = randomGauss(25);
     scene.tweens.add({
       targets: particle,
       x: pokeball.x + dist,

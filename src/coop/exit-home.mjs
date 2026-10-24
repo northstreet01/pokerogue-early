@@ -2,7 +2,7 @@
 // Root now offers explicit mode selection.
 export function showCoopExitReturn(doc = document, page = location) {
   const result = new URLSearchParams(page.search).get('coopExit');
-  if (!['saved', 'limited'].includes(result)) return null;
+  if (!['saved', 'limited', 'defeat'].includes(result)) return null;
   if (doc.getElementById('coop-exit-return')) return doc.getElementById('coop-exit-return');
   const notice = doc.createElement('aside'); notice.id = 'coop-exit-return';
   notice.setAttribute('aria-label', '已退出联机');
@@ -10,7 +10,7 @@ export function showCoopExitReturn(doc = document, page = location) {
     padding: '8px 12px', background: '#111b2b', color: '#fff', font: '14px/1.5 system-ui',
     display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' });
   const message = doc.createElement('span'); message.setAttribute('role', 'status');
-  message.textContent = result === 'saved'
+  message.textContent = result === 'defeat'?'双方队伍已全部倒下，本次冒险结束。可以从初始界面开始新的冒险。':result === 'saved'
     ? '已离开当前联机并关闭自动续局。房间与已提交行动保留，个人存档未清除。'
     : '已离开当前联机，但退出记录未确认保存。请从下方入口重开，避免自动续旧房；新建／加入仍需本地存储可用。';
   const link = doc.createElement('a'); link.href = '/coop-play.html?fresh=1';

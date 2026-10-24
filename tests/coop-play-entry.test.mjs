@@ -346,6 +346,19 @@ for (const state of ['battle', 'waiting', 'animation', 'disconnected', 'sync-err
   });
 }
 
+test('committed defeat closes the local session and returns Home without waiting for any old UI callback',async()=>{
+  const {p,sent}=phase(),env=exitEnvironment(p);
+  await p.storage.beginSession(origin,p.session());
+  p.roomId='ABCDEF';p.seat=0;p.token='synthetic-defeat';p.epoch='epoch-1';await p.persistSeat();
+  p.latest={personal:{decision:{kind:'ended',reason:'defeat',victory:false,requiredSeats:[]}}};
+  p.messageChain=new Promise(()=>{});
+  await p.openDecisionInput();
+  assert.equal(p.disposed,true);assert.equal(p.inputReady,false);
+  assert.deepEqual(env.navigations,['/?coopExit=defeat']);
+  assert.equal(await p.storage.loadSeat(origin),null);assert.equal(autoResumePaused(),true);
+  await p.openDecisionInput();assert.equal(env.navigations.length,1);assert.deepEqual(sent,[]);
+});
+
 test('exit bounds stalled IDB and reports failed persistence, even with unavailable browser storage', async () => {
   for (const blocked of [false, true]) {
     const { p } = phase(), env = exitEnvironment(p);
@@ -481,15 +494,15 @@ test('DOM exit remains outside replaced controls with input blocked and hung men
 });
 
 test('return notice offers explicit fresh cooperative entry, explains failed persistence and preserves the solo page', () => {
-  for (const result of ['saved', 'limited', 'unknown', '']) {
+  for (const result of ['saved', 'limited', 'defeat', 'unknown', '']) {
     const dom = new JSDOM('<body><div id="app">original solo</div></body>', { url: `${origin}/?coopExit=${result}` });
     try {
       const notice = showCoopExitReturn(dom.window.document, dom.window.location);
       assert.equal(dom.window.document.getElementById('app').textContent, 'original solo');
-      if (!['saved', 'limited'].includes(result)) { assert.equal(notice, null); continue; }
+      if (!['saved', 'limited', 'defeat'].includes(result)) { assert.equal(notice, null); continue; }
       assert.equal(showCoopExitReturn(dom.window.document, dom.window.location), notice);
       assert.equal(notice.querySelector('a').getAttribute('href'), '/coop-play.html?fresh=1');
-      assert.match(notice.textContent, result === 'limited' ? /未确认保存/ : /未清除/);
+      assert.match(notice.textContent, result === 'defeat' ? /双方队伍已全部倒下.*冒险结束/ : result === 'limited' ? /未确认保存/ : /未清除/);
       notice.querySelector('button').click();
       assert.equal(dom.window.document.getElementById('coop-exit-return'), null);
     } finally { dom.window.close(); }

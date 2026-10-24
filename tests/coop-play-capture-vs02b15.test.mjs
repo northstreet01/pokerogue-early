@@ -578,9 +578,15 @@ for (const seat of [0, 1]) test(`original Command/Ball seat ${seat} reaches real
     assert.equal(phase.latest.personal.resources.pokeballs[0], before.personal.resources.pokeballs[0] - 1);
     assert.ok(phase.latest.events.some(event => event.kind === 'phase-start' && event.phase === 'AttemptCapturePhase'));
     const outcome = phase.latest.events.find(event => event.kind === 'capture-result');
+    const animation=phase.latest.events.find(event=>event.kind==='capture-animation');
+    assert.equal(animation.scope,'shared');assert.equal(animation.seat,seat);
+    assert.equal(animation.targetId,outcome.targetId);assert.ok(animation.checks.length>=1&&animation.checks.length<=4);
+    assert.equal(animation.checks.at(-1).outcome,'failed');
+    assert.ok(phase.latest.events.indexOf(animation)<phase.latest.events.indexOf(outcome));
     assert.equal(outcome.seat, seat); assert.equal(outcome.scope, seat); assert.equal(outcome.outcome, 'failed');
     await until(() => env.peerSnapshot().revision === phase.latest.revision, 'peer final snapshot');
     assert.ok(env.peerSnapshot().events.every(event => event.kind !== 'capture-result'));
+    assert.deepEqual(env.peerSnapshot().events.find(event=>event.kind==='capture-animation'),animation,'both players see one identical committed capture trace');
     assert.equal(phase.latest.personal.decision.kind, 'wait-actions');
     assert.equal(ui.mode, api.Mode.COMMAND);
     assert.match(phase.status.textContent, /捕获失败/);

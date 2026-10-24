@@ -33,14 +33,26 @@ test('natural trainer prize persists owned original phases and cannot regrant se
   }finally{await h.close();}
 });
 
-test('synthetic original boss victory preserves the unconfirmed voucher guard',async()=>{
+test('synthetic original boss victory defers one owned voucher entitlement per player without gacha balances',async()=>{
   const {h,c}=await trainerReserveFixture({trainerType:200}); // original Brock config, not boss gameplay acceptance
   try{
     c.decision={id:'native-5-901',kind:'continuing',requiredSeats:[],reason:'effects'};
     c.continuation={currentPhase:null,standbyPhase:null,phaseQueuePrepend:[],nextCommandPhaseQueue:[],phaseQueuePrependSpliceIndex:-1,
       phaseQueue:[{kind:'original-phase',phaseId:901,remaining:'start',phase:{version:1,type:'TrainerVictoryPhase',scope:null,presentation:{},fields:{}}}]};
     const before=structuredClone(c);
-    await assert.rejects(h.request('native-run-to-boundary',c),/VOUCHER_POLICY_UNCONFIRMED/);
+    const result=await h.request('native-step',c);
+    const claims=result.intents.filter(i=>i.kind==='voucher-pending');
+    assert.equal(claims.length,2);
+    assert.deepEqual(claims.map(i=>i.owner),[0,1]);
+    for(const claim of claims){
+      assert.equal(claim.count,1);assert.equal(claim.id,'BROCK');
+      assert.equal(claim.resolve,'original-unlock-or-repeat');
+      assert.equal(claim.fallbackCatalogId,'VOUCHER');
+      assert.ok(Number.isInteger(claim.voucherType));
+    }
+    assert.deepEqual(result.checkpoint.players,c.players,'pending claims do not credit any wallet or gacha balance');
+    const restored=await h.request('native-step',result.checkpoint);
+    assert.equal(restored.intents.filter(i=>i.kind==='voucher-pending').length,0,'restoring the next original phase cannot regrant');
     assert.deepEqual(c,before);
   }finally{await h.close();}
 });

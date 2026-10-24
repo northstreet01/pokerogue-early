@@ -26,14 +26,22 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
   check([...before.continuation.phaseQueuePrepend,...before.continuation.phaseQueue].length===1
     &&before.continuation.nextCommandPhaseQueue.length===0,'UNSUPPORTED_NEXT_BATTLE_QUEUE');
   driver.validateBranch(c);
+  const biomeTransition=driver.isBiomeTransition?.(c)===true;
   const personalBefore=personalResources(c);
   const events=[];
-  for(const kind of ['NewBattlePhase','NextEncounterPhase']){
+  for(const kind of ['NewBattlePhase',biomeTransition?'NewBiomeEncounterPhase':'NextEncounterPhase']){
     let d=selectNextPhase(state,()=>check(false,'NEXT_BATTLE_QUEUE_EMPTY')).phase;
     let preCount=0;
-    while(kind==='NextEncounterPhase'&&d?.kind==='original-phase'
-      &&['ReturnPhase','ShowTrainerPhase'].includes(driver.phaseKind(d.phase))){
-      check(c.battle.battleType===1&&++preCount<=3&&d.remaining==='start','UNSUPPORTED_NEXT_BATTLE_PHASE');
+    const seen=[];
+    while(kind!=='NewBattlePhase'&&d?.kind==='original-phase'
+      &&['ReturnPhase','ShowTrainerPhase',...(biomeTransition?['SelectBiomePhase','PartyHealPhase','SwitchBiomePhase']:[])].includes(driver.phaseKind(d.phase))){
+      const name=driver.phaseKind(d.phase);seen.push(name);
+      check((c.battle.battleType===1||biomeTransition)&&++preCount<=(biomeTransition?6:3)&&d.remaining==='start','UNSUPPORTED_NEXT_BATTLE_PHASE');
+      if(biomeTransition&&['SelectBiomePhase','PartyHealPhase','SwitchBiomePhase'].includes(name)){
+        check(seen.filter(n=>n===name).length===1,'DUPLICATE_BIOME_PHASE');
+        check(name==='SelectBiomePhase'||seen.includes('SelectBiomePhase'),'INVALID_BIOME_PHASE_ORDER');
+        check(name!=='SwitchBiomePhase'||seen.includes('PartyHealPhase'),'INVALID_BIOME_PHASE_ORDER');
+      }
       const returned=await driver.execute(c,d.phase);
       check(returned?.completed===true&&returned.pendingTasks===0&&Array.isArray(returned.events)
         &&Array.isArray(returned.grants)&&returned.grants.length===0,'INCOMPLETE_NEXT_BATTLE_PHASE');
@@ -42,6 +50,7 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
       d=selectNextPhase(state,()=>check(false,'NEXT_BATTLE_QUEUE_EMPTY')).phase;
     }
     const nextKind=d?.kind==='original-phase'?driver.phaseKind(d.phase):null;
+    if(kind==='NewBiomeEncounterPhase')check(['SelectBiomePhase','PartyHealPhase','SwitchBiomePhase'].every(n=>seen.includes(n)),'INCOMPLETE_BIOME_TRANSITION');
     const unexpected=typeof nextKind==='string'?nextKind.replace(/([a-z])([A-Z])/g,'$1_$2').toUpperCase():null;
     check(d?.kind==='original-phase'&&d.remaining==='start'&&driver.phaseKind(d.phase)===kind,
       unexpected?`UNSUPPORTED_NEXT_BATTLE_PHASE_${unexpected}`:'UNSUPPORTED_NEXT_BATTLE_PHASE');
@@ -62,7 +71,9 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
     &&c.battle.enemyParty.length===2&&c.battle.enemyParty.every(p=>!p.isFainted(true)), 'INVALID_NEXT_BATTLE_RESULT');
   check(canonical(personalBefore)===canonical(personalResources(c))&&canonical(before.eggState??null)===canonical(after.eggState??null),
     'NEXT_BATTLE_RESOURCE_CHANGED');
-  if(c.battle.battleType===1){
+  if(biomeTransition){
+    check(typeof driver.validateBiomeTransition==='function'&&await driver.validateBiomeTransition(context,c)===true,'INVALID_BIOME_TRANSITION');
+  }else if(c.battle.battleType===1){
     check(typeof driver.validateTrainerTransition==='function'
       &&driver.validateTrainerTransition(context,c)===true,'INVALID_TRAINER_TRANSITION');
   }else check(canonical(before.arena)===canonical(after.arena),'NEXT_BATTLE_RESOURCE_CHANGED');
@@ -70,12 +81,17 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
     check(typeof driver.validateEnemyModifiers==='function'&&driver.validateEnemyModifiers.constructor.name!=='AsyncFunction','ENCOUNTER_MODIFIER_VALIDATOR_UNAVAILABLE');
     check(driver.validateEnemyModifiers(c)===true,'INVALID_ENCOUNTER_MODIFIERS');
   }else check(canonical(before.enemyModifiers)===canonical(after.enemyModifiers),'NEXT_BATTLE_RESOURCE_CHANGED');
-  check(c.battle.battleType===1?c.roster.field.slice(0,2).every(id=>id===null)
+  check(c.battle.battleType===1||biomeTransition?c.roster.field.slice(0,2).every(id=>id===null)
     :canonical(c.roster.field.slice(0,2))===canonical(context.roster.field.slice(0,2)),'NEXT_BATTLE_OWNER_CHANGED');
   const party=s=>s.roster.entries.filter(e=>e.owner!==null).map(e=>{
     const entry=copy(e);delete entry.pokemon.fields.battleData;
     // The trainer transition is checked against original resets by the driver.
-    if(c.battle.battleType===1){delete entry.pokemon.fields.summonData;delete entry.pokemon.fields.turnData;}
+    if(c.battle.battleType===1||biomeTransition){delete entry.pokemon.fields.summonData;delete entry.pokemon.fields.turnData;}
+    if(biomeTransition){
+      delete entry.pokemon.fields.hp;delete entry.pokemon.fields.status;
+      entry.pokemon.undefinedFields=entry.pokemon.undefinedFields.filter(key=>key!=='status');
+      for(const move of entry.pokemon.fields.moveset)if(move)delete move.fields.ppUsed;
+    }
     return entry;
   });
   check(canonical(party(before))===canonical(party(after)),'NEXT_BATTLE_PARTY_CHANGED');

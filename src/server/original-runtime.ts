@@ -28,6 +28,7 @@ export { GameData, DexAttr } from '../system/game-data';
 export { Gender } from '../data/gender';
 export { getPokemonSpecies, allSpecies } from '../data/pokemon-species';
 export { allMoves } from '../data/move';
+export { getTypeDamageMultiplier } from '../data/type';
 export { speciesEggMoves } from '../data/egg-moves';
 export { gameModes, GameModes } from '../game-mode';
 export { captureStarterSelection, restoreStarterSelection, validateStarterSelection, starterDexAttrProps } from '../coop/original-starter-selection';

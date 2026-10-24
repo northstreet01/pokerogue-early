@@ -129,7 +129,7 @@ export default class CoopPlayPhase extends Phase {
     }
   }
 
-  private leaveSession(reason?:'defeat'): Promise<void> {
+  private leaveSession(reason?:'defeat'|'victory'): Promise<void> {
     if (this.exitTask) return this.exitTask;
     pauseAutoResume();
     this.stopSession();
@@ -141,7 +141,7 @@ export default class CoopPlayPhase extends Phase {
         new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 500); }),
       ]);
       if (timer) clearTimeout(timer);
-      location.assign(reason==='defeat'?'/?coopExit=defeat':committed ? '/?coopExit=saved' : '/?coopExit=limited');
+      location.assign(reason?`/?coopExit=${reason}`:committed ? '/?coopExit=saved' : '/?coopExit=limited');
     })();
     return this.exitTask;
   }
@@ -477,7 +477,8 @@ export default class CoopPlayPhase extends Phase {
   private async openDecisionInput() {
     if (this.disposed) return;
     if(this.latest?.personal.decision.kind==='ended'){
-      await this.leaveSession(this.latest.personal.decision.reason==='defeat'?'defeat':undefined);return;
+      const reason=this.latest.personal.decision.reason;
+      await this.leaveSession(reason==='defeat'||reason==='victory'?reason:undefined);return;
     }
     if (this.releaseTeamParty) return;
     if (this.latest?.personal.decision.kind === 'capture-choice' || this.latest?.personal.decision.legacyCapture) await this.openCaptureChoice();

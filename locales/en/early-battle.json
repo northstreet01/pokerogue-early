@@ -22,5 +22,20 @@
  "transferItemHelp":"Transfer a held item from one Pokémon to another",
  "countdownPoof":"@d{32}1, @d{15}2, and@d{15}… @d{15}… @d{15}… @d{15}@s{pb_bounce_1}Poof!",
  "berryHeal":"{{pokemonNameWithAffix}}'s {{berryName}}\nrestored its HP!",
- "berryPp":"{{pokemonNameWithAffix}} restored PP to its move {{moveName}}\nusing its {{berryName}}!"
+ "berryPp":"{{pokemonNameWithAffix}} restored PP to its move {{moveName}}\nusing its {{berryName}}!",
+ "finalBoss":{
+ "encounter": "It appears the time has finally come once again.\nYou know why you have come here, do you not?\r\n               $You were drawn here, because you have been here before.\nCountless times.\r\n               $Though, perhaps it can be counted.\nTo be precise, this is in fact your 5,643,853rd cycle.\r\n               $Each cycle your mind reverts to its former state.\nEven so, somehow, remnants of your former selves remain.\r\n               $Until now you have yet to succeed, but I sense a different presence in you this time.\n\r\n               $You are the only one here, though it is as if there is… another.\r\n               $Will you finally prove a formidable challenge to me?\nThe challenge I have longed for for millennia?\r\n               $We begin.",
+ "firstStageWin": "I see. The presence I felt was indeed real.\nIt appears I no longer need to hold back.\r\n                   $Do not disappoint me.",
+ "secondStageWin": "…Magnificent."
+},
+ "finalBossAppeared":"{{pokemonName}} appeared.",
+ "formPrefixYour":"Your ",
+ "formPrefixFoe":"Foe ",
+ "formPrefixWild":"Wild ",
+ "formMega":"{{prefix}}{{preName}} mega-evolved\ninto {{pokemonName}}!",
+ "formGigantamax":"{{prefix}}{{preName}} Gigantamaxed\ninto {{pokemonName}}!",
+ "formEternamax":"{{prefix}}{{preName}} Eternamaxed\ninto {{pokemonName}}!",
+ "formReverted":"{{prefix}}{{pokemonName}} reverted\nto its original form!",
+ "formChanged":"{{prefix}}{{preName}} changed form!",
+ "battleFormName":"{{formName}} {{pokemonName}}"
 }

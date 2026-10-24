@@ -16,6 +16,7 @@ import { animateEncounterScroll, animateBiomeBackground } from '../field/encount
 import { presentOriginalEvolution } from './evolution-presentation';
 import {renderPresentationText} from '../system/presentation-text.mjs';
 import {presentOriginalCapture} from './capture-presentation';
+import {presentOriginalFormChange} from './form-change-presentation';
 
 export function captureResultText(event: any): string {
   const ball = getPokeballName(event.pokeballType);
@@ -142,7 +143,7 @@ export class CoopBattlePresentation {
         if (this.playedEvents.has(key)) continue;
         try {
           if (event.kind === 'bgm') this.audio.play(event.key);
-          else if (batch && !batch.replay && ['capture-animation','battle-animation', 'damage-display', 'pokemon-hp', 'pokemon-progress', 'level-stats', 'experience-bar', 'evolution-display', 'pokemon-exit', 'pokemon-enter', 'faint-cry', 'showInfo'].includes(event.kind)) continue;
+          else if (batch && !batch.replay && ['form-change','capture-animation','battle-animation', 'damage-display', 'pokemon-hp', 'pokemon-progress', 'level-stats', 'experience-bar', 'evolution-display', 'pokemon-exit', 'pokemon-enter', 'faint-cry', 'showInfo'].includes(event.kind)) continue;
           else if(event.kind==='capture-animation'){
             const target=this.displayedById.get(event.targetId);
             if(target){
@@ -167,6 +168,7 @@ export class CoopBattlePresentation {
           else if (event.kind === 'pokemon-progress') await this.playProgress(event, signal);
           else if (event.kind === 'level-stats') await this.playLevelStats(event, signal);
           else if (event.kind === 'evolution-display') await this.playEvolution(event, signal);
+          else if (event.kind === 'form-change') await this.playFormChange(event, signal);
           else if (event.kind === 'capture-result') await this.playMessage({ text: captureResultText(event) }, signal);
         } catch (error) { if (signal.aborted) return; throw error; }
         if (signal.aborted) return;
@@ -268,6 +270,23 @@ export class CoopBattlePresentation {
       }
       await within(Promise.resolve(target.updateInfo?.(false)), 5500, signal);
     }
+  }
+
+  private async playFormChange(event:any,signal:AbortSignal){
+    const target=this.displayedById.get(event.pokemonId),view=event.view;
+    if(!target||!view)return;
+    const controller=new AbortController(),cancel=()=>controller.abort();signal.addEventListener('abort',cancel,{once:true});
+    try{await within(presentOriginalFormChange(this.scene,target,async()=>{
+      if(controller.signal.aborted)return;
+      Object.assign(target,{species:getPokemonSpecies(view.speciesId),formIndex:view.formIndex,hp:view.hp,
+        bossSegments:view.bossSegments,bossSegmentIndex:view.bossSegmentIndex});
+      target.getMaxHp=()=>view.maxHp;target.getTeraType=()=>view.teraType??Type.UNKNOWN;
+      target.name=target.species.getName(target.formIndex);target.setScale(target.getSpriteScale());
+      this.modelKeys.delete(target.id);
+      await within(target.loadAssets(true,controller.signal),5000,controller.signal);
+      if(!controller.signal.aborted)await within(Promise.resolve(target.updateInfo(true)),1200,controller.signal);
+    },controller.signal),10000,signal);}
+    finally{controller.abort();signal.removeEventListener('abort',cancel);}
   }
 
   private async showPokemon(event: any, signal: AbortSignal) {
@@ -457,7 +476,7 @@ export class CoopBattlePresentation {
       moveset: [], exp: 0, levelExp: 0,
       // These methods expose public display facts, not invented combat stats,
       // ability, moves, IVs or random state for a teammate/enemy.
-      getMaxHp: () => view.maxHp, getTeraType: () => Type.UNKNOWN,
+      getMaxHp: () => view.maxHp, getTeraType: () => view.teraType ?? Type.UNKNOWN,
       getDexAttr: () => 0n,
       randSeedInt: () => { throw new Error('CLIENT_RULE_RNG_FORBIDDEN'); },
     });

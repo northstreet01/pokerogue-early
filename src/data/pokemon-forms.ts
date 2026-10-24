@@ -7,6 +7,7 @@ import { Species } from "./enums/species";
 import { StatusEffect } from "./status-effect";
 import { MoveCategory, allMoves } from "./move";
 import { Abilities } from "./ability";
+import i18next from '../i18n';
 
 export enum FormChangeItem {
   NONE,
@@ -302,16 +303,9 @@ export function getSpeciesFormChangeMessage(pokemon: Pokemon, formChange: Specie
   const isGmax = formChange.formKey.indexOf(SpeciesFormKey.GIGANTAMAX) > -1;
   const isEmax = formChange.formKey.indexOf('eternamax') > -1;
   const isRevert = !isMega && formChange.formKey === pokemon.species.forms[0].formKey;
-  const prefix = !pokemon.isPlayer() ? pokemon.hasTrainer() ? 'Foe ' : 'Wild ' : 'Your ';
-  if (isMega)
-    return `${prefix}${preName} mega-evolved\ninto ${pokemon.name}!`;
-  if (isGmax)
-    return `${prefix}${preName} Gigantamaxed\ninto ${pokemon.name}!`;
-  if (isEmax)
-    return `${prefix}${preName} Eternamaxed\ninto ${pokemon.name}!`;
-  if (isRevert)
-    return `${prefix}${pokemon.name} reverted\nto its original form!`;
-  return `${prefix}${preName} changed form!`;
+  const prefixKey=pokemon.isPlayer()?'formPrefixYour':pokemon.hasTrainer()?'formPrefixFoe':'formPrefixWild';
+  const key=isMega?'formMega':isGmax?'formGigantamax':isEmax?'formEternamax':isRevert?'formReverted':'formChanged';
+  return i18next.t(`earlyBattle:${key}`,{prefix:i18next.t(`earlyBattle:${prefixKey}`),preName,pokemonName:pokemon.name});
 }
 
 interface PokemonFormChanges {

@@ -12,6 +12,7 @@ import { speciesEggMoves } from './egg-moves';
 import { PartyMemberStrength } from "./enums/party-member-strength";
 import { GameMode } from '../game-mode';
 import { catalogName } from '../system/localized-catalog';
+import i18next from '../i18n';
 
 export enum Region {
   NORMAL,
@@ -413,6 +414,11 @@ export default class PokemonSpecies extends PokemonSpeciesForm {
   getName(formIndex?: integer): string {
     if (formIndex !== undefined && this.forms.length) {
       const form = this.forms[formIndex];
+      if((i18next.resolvedLanguage??i18next.language)==='zh-Hans'){
+        const key=({mega:'mega','mega-x':'megaX','mega-y':'megaY',primal:'primal',eternamax:'eternamax'})[form.formKey]
+          ??(form.formKey.includes(SpeciesFormKey.GIGANTAMAX)?'gigantamax':null);
+        if(key)return i18next.t('earlyBattle:battleFormName',{formName:i18next.t(`pokemonForm:battleForm.${key}`),pokemonName:this.name});
+      }
       switch (form.formKey) {
         case SpeciesFormKey.MEGA:
         case SpeciesFormKey.PRIMAL:

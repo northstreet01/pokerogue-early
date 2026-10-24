@@ -494,15 +494,15 @@ test('DOM exit remains outside replaced controls with input blocked and hung men
 });
 
 test('return notice offers explicit fresh cooperative entry, explains failed persistence and preserves the solo page', () => {
-  for (const result of ['saved', 'limited', 'defeat', 'unknown', '']) {
+  for (const result of ['saved', 'limited', 'defeat', 'victory', 'unknown', '']) {
     const dom = new JSDOM('<body><div id="app">original solo</div></body>', { url: `${origin}/?coopExit=${result}` });
     try {
       const notice = showCoopExitReturn(dom.window.document, dom.window.location);
       assert.equal(dom.window.document.getElementById('app').textContent, 'original solo');
-      if (!['saved', 'limited', 'defeat'].includes(result)) { assert.equal(notice, null); continue; }
+      if (!['saved', 'limited', 'defeat', 'victory'].includes(result)) { assert.equal(notice, null); continue; }
       assert.equal(showCoopExitReturn(dom.window.document, dom.window.location), notice);
       assert.equal(notice.querySelector('a').getAttribute('href'), '/coop-play.html?fresh=1');
-      assert.match(notice.textContent, result === 'defeat' ? /双方队伍已全部倒下.*冒险结束/ : result === 'limited' ? /未确认保存/ : /未清除/);
+      assert.match(notice.textContent, result === 'victory' ? /第200波通关.*权益已记录/ : result === 'defeat' ? /双方队伍已全部倒下.*冒险结束/ : result === 'limited' ? /未确认保存/ : /未清除/);
       notice.querySelector('button').click();
       assert.equal(dom.window.document.getElementById('coop-exit-return'), null);
     } finally { dom.window.close(); }

@@ -29,6 +29,8 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
   const biomeTransition=driver.isBiomeTransition?.(c)===true;
   const personalBefore=personalResources(c);
   const events=[];
+  const finalEncounter=()=>driver.isFinalEncounter?.(context,c)===true;
+  const resetsEncounter=()=>c.battle.battleType===1||biomeTransition||finalEncounter();
   for(const kind of ['NewBattlePhase',biomeTransition?'NewBiomeEncounterPhase':'NextEncounterPhase']){
     let d=selectNextPhase(state,()=>check(false,'NEXT_BATTLE_QUEUE_EMPTY')).phase;
     let preCount=0;
@@ -36,7 +38,7 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
     while(kind!=='NewBattlePhase'&&d?.kind==='original-phase'
       &&['ReturnPhase','ShowTrainerPhase',...(biomeTransition?['SelectBiomePhase','PartyHealPhase','SwitchBiomePhase']:[])].includes(driver.phaseKind(d.phase))){
       const name=driver.phaseKind(d.phase);seen.push(name);
-      check((c.battle.battleType===1||biomeTransition)&&++preCount<=(biomeTransition?6:3)&&d.remaining==='start','UNSUPPORTED_NEXT_BATTLE_PHASE');
+      check(resetsEncounter()&&++preCount<=(biomeTransition?6:3)&&d.remaining==='start','UNSUPPORTED_NEXT_BATTLE_PHASE');
       if(biomeTransition&&['SelectBiomePhase','PartyHealPhase','SwitchBiomePhase'].includes(name)){
         check(seen.filter(n=>n===name).length===1,'DUPLICATE_BIOME_PHASE');
         check(name==='SelectBiomePhase'||seen.includes('SelectBiomePhase'),'INVALID_BIOME_PHASE_ORDER');
@@ -67,13 +69,13 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
       &&c.battle.double===true&&c.battle.turn===1&&c.battle.trainer&&c.battle.enemyParty.length>0
       &&c.battle.enemyParty.every(p=>!p.isFainted(true)), 'INVALID_NEXT_BATTLE_RESULT');
   } else check(c.battle.waveIndex===context.battle.waveIndex+1&&c.battle.double===true
-    &&c.battle.battleType===0&&c.battle.battleSpec===0&&c.battle.turn===1
+    &&c.battle.battleType===0&&(c.battle.battleSpec===0||finalEncounter())&&c.battle.turn===1
     &&c.battle.enemyParty.length===2&&c.battle.enemyParty.every(p=>!p.isFainted(true)), 'INVALID_NEXT_BATTLE_RESULT');
   check(canonical(personalBefore)===canonical(personalResources(c))&&canonical(before.eggState??null)===canonical(after.eggState??null),
     'NEXT_BATTLE_RESOURCE_CHANGED');
   if(biomeTransition){
     check(typeof driver.validateBiomeTransition==='function'&&await driver.validateBiomeTransition(context,c)===true,'INVALID_BIOME_TRANSITION');
-  }else if(c.battle.battleType===1){
+  }else if(c.battle.battleType===1||finalEncounter()){
     check(typeof driver.validateTrainerTransition==='function'
       &&driver.validateTrainerTransition(context,c)===true,'INVALID_TRAINER_TRANSITION');
   }else if(driver.validateWildTransition){
@@ -83,12 +85,12 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
     check(typeof driver.validateEnemyModifiers==='function'&&driver.validateEnemyModifiers.constructor.name!=='AsyncFunction','ENCOUNTER_MODIFIER_VALIDATOR_UNAVAILABLE');
     check(driver.validateEnemyModifiers(c)===true,'INVALID_ENCOUNTER_MODIFIERS');
   }else check(canonical(before.enemyModifiers)===canonical(after.enemyModifiers),'NEXT_BATTLE_RESOURCE_CHANGED');
-  check(c.battle.battleType===1||biomeTransition?c.roster.field.slice(0,2).every(id=>id===null)
+  check(resetsEncounter()?c.roster.field.slice(0,2).every(id=>id===null)
     :canonical(c.roster.field.slice(0,2))===canonical(context.roster.field.slice(0,2)),'NEXT_BATTLE_OWNER_CHANGED');
   const party=s=>s.roster.entries.filter(e=>e.owner!==null).map(e=>{
     const entry=copy(e);delete entry.pokemon.fields.battleData;
     // The trainer transition is checked against original resets by the driver.
-    if(c.battle.battleType===1||biomeTransition){delete entry.pokemon.fields.summonData;delete entry.pokemon.fields.turnData;}
+    if(resetsEncounter()){delete entry.pokemon.fields.summonData;delete entry.pokemon.fields.turnData;}
     if(biomeTransition){
       delete entry.pokemon.fields.hp;delete entry.pokemon.fields.status;
       entry.pokemon.undefinedFields=entry.pokemon.undefinedFields.filter(key=>key!=='status');

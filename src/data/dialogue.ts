@@ -545,6 +545,17 @@ export const battleSpecDialogue = {
   }
 };
 
+// Keep the original phase call sites and page/control markers. Resolve at
+// display time so a restored native event carries its translation provenance.
+for (const messages of Object.values(battleSpecDialogue)) {
+  for (const [stage, text] of Object.entries(messages)) {
+    Object.defineProperty(messages, stage, {
+      enumerable: true, configurable: true,
+      get: () => i18next.t(`earlyBattle:finalBoss.${stage}`, { defaultValue: text })
+    });
+  }
+}
+
 export function getCharVariantFromDialogue(message: string): string {
   const variantMatch = /@c\{(.*?)\}/.exec(message);
   if (variantMatch)

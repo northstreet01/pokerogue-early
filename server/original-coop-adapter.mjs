@@ -120,7 +120,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       const entry = pokemonId === null ? null
         : checkpoint.roster.entries.find(item => (item.pokemon?.fields?.id ?? item.pokemon?.id) === pokemonId);
       const intent = {
-        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${['achievement-check','voucher-pending'].includes(raw.kind)&&[0,1].includes(raw.owner)?raw.owner+':':''}${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`,
+        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${['achievement-check','voucher-pending','completion-pending'].includes(raw.kind)&&[0,1].includes(raw.owner)?raw.owner+':':''}${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`,
         owner: [0, 1].includes(raw.owner) ? raw.owner : entry ? entry.owner : null,
         source: 'scene',
         recipient: null,
@@ -139,7 +139,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
     return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
   function scopeEvent(event, checkpoint) {
-    if (event.scope === 'shared' && ['damage-display','pokemon-hp','faint-cry','pokemon-enter','pokemon-exit','showInfo'].includes(event.kind)) return {...event};
+    if (event.scope === 'shared' && ['damage-display','pokemon-hp','faint-cry','pokemon-enter','pokemon-exit','showInfo','form-change'].includes(event.kind)) return {...event};
     if (event.kind === 'message' && [0,1].includes(event.scope)) return { ...event };
     if (['preparation-open', 'legacy-capture-choice', 'capture-result'].includes(event.kind) && (event.seat === 0 || event.seat === 1))
       return { ...event, scope: event.seat };

@@ -22,5 +22,20 @@
  "transferItemHelp":"将携带道具从一只宝可梦转移给另一只宝可梦。",
  "countdownPoof":"@d{32}１，@d{15}２，@d{15}……@d{15}……@d{15}……@d{15}@s{pb_bounce_1}空！",
  "berryHeal":"{{pokemonNameWithAffix}}的{{berryName}}\n回复了HP！",
- "berryPp":"{{pokemonNameWithAffix}}用{{berryName}}\n回复了招式{{moveName}}的PP！"
+ "berryPp":"{{pokemonNameWithAffix}}用{{berryName}}\n回复了招式{{moveName}}的PP！",
+ "finalBoss":{
+ "encounter": "看来，那个时刻终于又一次到来了。\n你知道自己为何来到这里，对吧？$你受到指引来到这里，是因为你曾经来过。\n无数次。$不过，或许次数还是数得清的。\n准确来说，这是你的第5,643,853次轮回。$每次轮回，你的心智都会回到最初的状态。\n即便如此，不知为何，过去的你仍留下了一些痕迹。$直到现在，你还从未成功过。\n但这一次，我在你身上感受到了不同的存在。$这里明明只有你，却仿佛还有……另一个人。$你终于能成为令我认真以对的对手了吗？\n成为我等待了数千年的挑战者？$开始吧。",
+ "firstStageWin": "原来如此。我感受到的存在，确实是真的。\n看来，我已经不必再有所保留了。$别让我失望。",
+ "secondStageWin": "……精彩。"
+},
+ "finalBossAppeared":"{{pokemonName}}出现了！",
+ "formPrefixYour":"我方的",
+ "formPrefixFoe":"对手的",
+ "formPrefixWild":"野生的",
+ "formMega":"{{prefix}}{{preName}}超级进化为\n{{pokemonName}}！",
+ "formGigantamax":"{{prefix}}{{preName}}超极巨化为\n{{pokemonName}}！",
+ "formEternamax":"{{prefix}}{{preName}}无极巨化为\n{{pokemonName}}！",
+ "formReverted":"{{prefix}}{{pokemonName}}\n恢复了原来的形态！",
+ "formChanged":"{{prefix}}{{preName}}改变了形态！",
+ "battleFormName":"{{formName}}{{pokemonName}}"
 }

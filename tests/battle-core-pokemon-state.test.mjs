@@ -7,6 +7,32 @@ import { pokemon, species, parse, evaluate, originalPokemon } from './helpers/or
 const wire = value => JSON.parse(JSON.stringify(value));
 const { capturePokemonState: capture, restorePokemonState: restore } = pokemon;
 
+test('original signed damage records survive JSON without accepting nonfinite, fractional or unsafe values', () => {
+ const original=originalPokemon(100);
+ original.turnData.damageDealt=-1;original.turnData.attacksReceived[0].damage=-1;
+ const saved=capture(original),restored=restore(wire(saved));
+ assert.equal(restored.turnData.damageDealt,-1);assert.equal(restored.turnData.attacksReceived[0].damage,-1);
+ assert.deepEqual(capture(restored),saved);
+ for(const value of [NaN,Infinity,-Infinity,0.5,Number.MAX_SAFE_INTEGER+1]){
+  original.turnData.damageDealt=value;assert.throws(()=>capture(original),/damageDealt/);
+  original.turnData.damageDealt=-1;original.turnData.attacksReceived[0].damage=value;assert.throws(()=>capture(original),/damage/);
+  original.turnData.attacksReceived[0].damage=-1;
+ }
+});
+
+test('original early-exit hit counter retains its NaN sentinel through JSON, with a closed wire shape',()=>{
+ const original=originalPokemon(100);original.turnData.hitsLeft=NaN;
+ const saved=capture(original),restored=restore(wire(saved));
+ assert.equal(Number.isNaN(restored.turnData.hitsLeft),true);assert.deepEqual(capture(restored),saved);
+ for(const invalid of [Infinity,-Infinity,0.5,Number.MAX_SAFE_INTEGER+1]){
+  original.turnData.hitsLeft=invalid;assert.throws(()=>capture(original),/hitsLeft/);
+ }
+ for(const invalid of [{nan:false},{nan:true,extra:1},{}]){
+  const changed=wire(saved);changed.fields.turnData.fields.hitsLeft=invalid;
+  assert.throws(()=>restore(changed),/hitsLeft/);
+ }
+});
+
 test('Pokemon state manifest covers every original declared field and nested record', () => {
   const source = parse('field/pokemon.ts');
   for (const [name, schema] of Object.entries(pokemonStateFields)) {
@@ -62,6 +88,16 @@ test('checkpoint preserves actual early PP Up arithmetic and the exhausted Boss 
   assert.equal(restore(wire(capture(original))).getMoveset()[0].ppUp, 4);
   const enemy = originalPokemon(200, true); enemy.hp = 0; enemy.bossSegmentIndex = -1;
   assert.equal(restore(wire(capture(enemy))).bossSegmentIndex, -1);
+});
+
+test('original Eternamax Recover ppUp=-4 survives; other negative PP boosts remain invalid',()=>{
+ const generated={species:{speciesId:890},formIndex:1};
+ pokemon.EnemyPokemon.prototype.generateAndPopulateMoveset.call(generated,1);
+ const recover=generated.moveset.find(move=>move.moveId===105);assert.equal(recover.ppUp,-4);
+ const enemy=originalPokemon(200,true);enemy.moveset=generated.moveset;
+ const restored=restore(wire(capture(enemy)));assert.equal(restored.moveset[3].ppUp,-4);
+ for(const value of [-5,-3,-1]){recover.ppUp=value;assert.throws(()=>capture(enemy),/ppUp/);}
+ recover.ppUp=-4;recover.moveId=33;assert.throws(()=>capture(enemy),/ppUp/);
 });
 test('summon primer preserves shared references; display fields do not affect rule state', () => {
   const original = originalPokemon(); original.primeSummonData(original.summonData);

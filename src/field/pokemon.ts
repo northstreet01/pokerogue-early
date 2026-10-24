@@ -2553,6 +2553,8 @@ const pokemonStateCodec = createPokemonStateCodec({
   constructors: { PlayerPokemon, EnemyPokemon, PokemonMove, PokemonSummonData,
     PokemonBattleData, PokemonBattleSummonData, PokemonTurnData },
   getSpecies: getPokemonSpecies, getMove: (id: number) => allMoves[id],
+  // Original Eternamax moveset deliberately gives Recover one effective PP.
+  allowNegativePpUp: (moveId: number, ppUp: number) => moveId === Moves.RECOVER && ppUp === -4,
   getAbility: (id: number) => allAbilities[id],
   captureTag: captureBattlerTagState, restoreTag: restoreBattlerTagState,
   captureStatus: captureStatusState, restoreStatus: restoreStatusState

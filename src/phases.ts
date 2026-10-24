@@ -66,6 +66,7 @@ import { GameDataType, PlayerGender, SessionSaveData } from "./system/game-data"
 import { addPokeballCaptureStars, addPokeballOpenParticles } from "./field/anims";
 import { SpeciesFormChangeActiveTrigger, SpeciesFormChangeManualTrigger, SpeciesFormChangeMoveLearnedTrigger, SpeciesFormChangePostMoveTrigger, SpeciesFormChangePreMoveTrigger } from "./data/pokemon-forms";
 import { battleSpecDialogue, getCharVariantFromDialogue } from "./data/dialogue";
+import { deferCoopGameOver } from './battle-core/coop-game-over.mjs';
 import ModifierSelectUiHandler, { SHOP_OPTIONS_ROW_LIMIT } from "./ui/modifier-select-ui-handler";
 import { Setting } from "./system/settings";
 import { Tutorial, handleTutorial } from "./tutorial";
@@ -746,7 +747,7 @@ export class EncounterPhase extends BattlePhase {
     const enemyField = this.scene.getEnemyField();
 
     if (this.scene.currentBattle.battleSpec === BattleSpec.FINAL_BOSS)
-      return `${enemyField[0].name} appeared.`;
+      return i18next.t('earlyBattle:finalBossAppeared', {pokemonName:enemyField[0].name});
 
     if (this.scene.currentBattle.battleType === BattleType.TRAINER)
       return (i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('battle:trainerAppeared',{trainerName:this.scene.currentBattle.trainer.getName(TrainerSlot.NONE,true)}):`${this.scene.currentBattle.trainer.getName(TrainerSlot.NONE, true)}\nwould like to battle!`;
@@ -2797,6 +2798,8 @@ export class GameOverPhase extends BattlePhase {
 
   start() {
     super.start();
+
+    if (deferCoopGameOver(this)) return;
 
     this.scene.gameData.tryClearSession(this.scene, this.scene.sessionSlotId).then((success: boolean | [boolean, boolean]) => {
       this.scene.time.delayedCall(1000, () => {

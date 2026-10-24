@@ -32,6 +32,34 @@ function initialize(storage) {
   loadTs('src/i18n.ts', { i18next: { default: instance }, './system/language.mjs': language,'./system/presentation-text.mjs':presentationText }, { localStorage: storage });
   return instance;
 }
+
+test('final Boss dialogue keeps all original pages and resolves the active language after restore', async () => {
+ const i18n=initialize(storage('zh-Hans'));
+ const {battleSpecDialogue,trainerTypeDialogue}=loadTs('src/data/dialogue.ts',{
+  './trainer-config':{trainerConfigs:{}},'./enums/trainer-type':{TrainerType:new Proxy({},{get:(_target,key)=>key})},
+  '../enums/battle-spec':{BattleSpec:{FINAL_BOSS:1}},'../i18n':{default:i18n},
+  '../system/presentation-text.mjs':presentationText
+ });
+ for(const type of ['RIVAL_4','RIVAL_5','RIVAL_6'])for(const [variant,messages]of trainerTypeDialogue[type].entries()){
+  for(const stage of ['encounter','victory'])for(const [index,original]of messages[stage].entries()){
+   const key=`${type}.${variant}.${stage}.${index}`,translated=i18n.getResource('zh-Hans','earlyDialogue',key);
+   assert.equal(typeof translated,'string',key);
+   assert.equal(translated.split('$').length,original.split('$').length,key);
+   assert.deepEqual([...translated.matchAll(/@[a-z]\{[^}]*\}/g)].map(m=>m[0]),[...original.matchAll(/@[a-z]\{[^}]*\}/g)].map(m=>m[0]),key);
+  }
+ }
+ const messages=battleSpecDialogue[1];
+ for(const stage of ['encounter','firstStageWin','secondStageWin']){
+  const text=messages[stage],key=`earlyBattle:finalBoss.${stage}`;
+  assert.match(text,/[\u4e00-\u9fff]/);
+  assert.equal(text.split('$').length,bundledLocales['../locales/en/early-battle.json'].finalBoss[stage].split('$').length);
+  assert.equal(presentationText.presentationText(text).key,key);
+  assert.equal(presentationText.renderPresentationText(presentationText.presentationText(text),i18n.t.bind(i18n),()=>null),text);
+ }
+ await i18n.changeLanguage('en');
+ assert.match(messages.encounter,/5,643,853rd cycle/);
+ assert.equal(messages.secondStageWin,'…Magnificent.');
+});
 const storage = value => ({ value, getItem(key) { assert.equal(key, 'prLang'); return this.value; }, setItem(key, value) { assert.equal(key, 'prLang'); this.value = value; } });
 
 // Follow Phaser's Text/TextStyle boundary: setStyle does not update the Text

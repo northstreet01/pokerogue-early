@@ -10,6 +10,7 @@ import {checkMoveHit} from '../../src/battle-core/move-hit-check.mjs';
 import {queueFaintContinuation} from '../../src/battle-core/faint-queue.mjs';
 import {queueVictoryExperience} from '../../src/battle-core/victory-experience.mjs';
 import {presentOnHost} from '../../src/battle-core/presentation-port.mjs';
+import {deferCoopGameOver} from '../../src/battle-core/coop-game-over.mjs';
 import {eggs} from './egg-model.mjs';
 import {originalI18n,originalLocalizedPokemonMessage} from './localization-model.mjs';
 
@@ -17,6 +18,7 @@ const declarations=file=>parse(file).statements.filter(n=>ts.isClassDeclaration(
 const dependencies=file=>Object.fromEntries(parse(file).statements.filter(ts.isImportDeclaration).map(n=>[n.moduleSpecifier.text,{}]));
 class Phase{constructor(scene){this.scene=scene;}start(){}end(){this.scene.shiftPhase();}}
 const deps=dependencies('phases.ts');
+deps['./battle-core/coop-game-over.mjs']={deferCoopGameOver};
 deps['./i18n']={default:originalI18n};
 deps['./messages'].getLocalizedPokemonMessage=originalLocalizedPokemonMessage((...args)=>deps['./messages'].getPokemonMessage(...args),p=>p.name);
 // Keep the legacy isolated rule tests wired to the actual extracted visual

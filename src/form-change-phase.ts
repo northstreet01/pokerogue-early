@@ -185,10 +185,17 @@ export class QuietFormChangePhase extends BattlePhase {
 
     const preName = this.pokemon.name;
 
+    this.playFormChangeAnimation(() => this.pokemon.changeForm(this.formChange), () => {
+      this.scene.ui.showText(getSpeciesFormChangeMessage(this.pokemon, this.formChange, preName), null, () => this.end(), 1500);
+    });
+  }
+
+  // The rule mutation and phase completion stay in start/end. The native host
+  // replaces only this display sequence, invoking both original callbacks.
+  playFormChangeAnimation(changeForm: () => Promise<void>, onComplete: () => void): void {
+
     if (!this.pokemon.isOnField()) {
-      this.pokemon.changeForm(this.formChange).then(() => {
-        this.scene.ui.showText(getSpeciesFormChangeMessage(this.pokemon, this.formChange, preName), null, () => this.end(), 1500);
-      });
+      changeForm().then(onComplete);
       return;
     }
 
@@ -229,7 +236,7 @@ export class QuietFormChangePhase extends BattlePhase {
       ease: 'Cubic.easeIn',
       onComplete: () => {
         this.pokemon.setVisible(false);
-        this.pokemon.changeForm(this.formChange).then(() => {
+        changeForm().then(() => {
           pokemonFormTintSprite.setScale(0.01);
           pokemonFormTintSprite.play(this.pokemon.getBattleSpriteKey()).stop();
           pokemonFormTintSprite.setVisible(true);
@@ -257,7 +264,7 @@ export class QuietFormChangePhase extends BattlePhase {
                 duration: 1000,
                 onComplete: () => {
                   pokemonTintSprite.setVisible(false);
-                  this.scene.ui.showText(getSpeciesFormChangeMessage(this.pokemon, this.formChange, preName), null, () => this.end(), 1500);
+                  onComplete();
                 }
               });
             }

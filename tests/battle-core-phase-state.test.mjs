@@ -21,6 +21,17 @@ function make(type,c){
   if(type==='EggHatchPhase'){phase.pokemon=originalPokemon(900);phase.eggMoveIndex=0;}
   phase.scene={unexpected:'renderer excluded'};return phase;
 }
+
+test('original delayed MoveEffect retains a known departed source, while unknown and nonvirtual phase users are rejected',()=>{
+ const c=initialDecision(),phase=make('MoveEffectPhase',c);c.roster.retiredIds.push(9876);
+ phase.battlerIndex=9876;phase.player=false;phase.fieldIndex=0;
+ const originalMove=c.roster.entries[0].pokemon.moveset[0];
+ phase.move=Object.assign(Object.create(Object.getPrototypeOf(originalMove)),originalMove,{virtual:true});
+ const saved=phaseCodec.capture(phase,c,null),restored=phaseCodec.restore(copy(saved),c,()=>({}));
+ assert.equal(restored.battlerIndex,9876);assert.equal(restored.move.virtual,true);
+ phase.battlerIndex=9877;assert.throws(()=>phaseCodec.capture(phase,c,null),/UNKNOWN_PHASE_POKEMON/);
+ phase.battlerIndex=9876;phase.move.virtual=false;assert.throws(()=>phaseCodec.capture(phase,c,null),/UNKNOWN_PHASE_POKEMON/);
+});
 test('explicit manifest covers every original Phase declaration, inherited fields and exclusions',()=>{
   const names=[];
   for(const file of ['phases.ts','evolution-phase.ts','form-change-phase.ts','egg-hatch-phase.ts'])for(const c of parse(file).statements.filter(ts.isClassDeclaration)){

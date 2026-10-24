@@ -13,6 +13,35 @@ before(async()=>{
   rollupOptions:{external:isBuiltin,output:{format:'cjs',entryFileNames:'entry.cjs'}}}});
  api=createRequire(import.meta.url)('../build/coop-capture-animation-test/entry.cjs');api.describeOriginalCatalogs();
 });
+function formFixture(){
+ const f=evolutionDisplayFixture(api),listeners=new Set(),objects=[];
+ const actor=f.before,actorSprite={x:0,y:0,pipelineData:{},on(_name,listener){listeners.add(listener);return this;},off(_name,listener){listeners.delete(listener);return this;}};
+ const add=f.scene.addPokemonSprite;f.scene.addPokemonSprite=(...args)=>{const sprite=add(...args);objects.push(sprite);return sprite;};
+ f.scene.field={add(){}};
+ Object.assign(actor,{scene:f.scene,x:236,y:84,visible:true,isOnField:()=>true,getSprite:()=>actorSprite,
+  getBattleSpriteKey:()=> 'eternatus',getTeraType:()=>-1,getSpriteScale:()=>1.5,
+  setVisible(value){this.visible=value;return this;},changeForm(){assert.fail('display cannot run form rules');}});
+ return {...f,actor,listeners,objects};
+}
+test('original Boss transformation uses its flash and scale sequence around one committed view update',async()=>{
+ const f=formFixture(),controller=new AbortController();let applied=0,settled=false;
+ const getter=f.actor.getSprite;
+ const task=api.presentOriginalFormChange(f.scene,f.actor,async()=>{applied++;},controller.signal).finally(()=>settled=true);task.catch(()=>{});
+ for(let n=0;n<200&&!settled;n++)await f.advance();assert.equal(settled,true);await task;
+ assert.equal(applied,1);assert.ok(f.sounds.some(s=>s.key==='PRSFX- Transform'));
+ assert.ok(f.tweenConfigs.some(c=>c.scale===0.01));assert.ok(f.tweenConfigs.some(c=>c.scale===1.5));
+ assert.ok(f.objects.every(o=>o.destroyed));assert.equal(f.listeners.size,0);
+ assert.equal(f.actor.scene,f.scene);assert.equal(f.actor.getSprite,getter);assert.equal(f.actor.visible,true);
+});
+for(const after of [false,true])test(`exit ${after?'after':'before'} committed form view cancels original callbacks and removes temporary sprites/listeners`,async()=>{
+ const f=formFixture(),controller=new AbortController();let applied=0;
+ const task=api.presentOriginalFormChange(f.scene,f.actor,async()=>{applied++;},controller.signal);task.catch(()=>{});
+ if(after)for(let n=0;n<100&&!applied;n++)await f.advance();
+ controller.abort();await task;const count=applied;
+ for(const callback of f.callbacks)callback?.();for(let n=0;n<30;n++)await f.advance();
+ assert.equal(applied,count);assert.equal(applied,after?1:0);
+ assert.ok(f.objects.every(o=>o.destroyed));assert.equal(f.listeners.size,0);assert.equal(f.actor.scene,f.scene);
+});
 function fixture(){
  const f=evolutionDisplayFixture(api),objects=[],moves=[];
  const sprite=f.scene.add.sprite;

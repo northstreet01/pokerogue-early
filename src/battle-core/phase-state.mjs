@@ -180,7 +180,10 @@ export function createPhaseStateCodec({constructors, evolution, formChange, modi
     }
     if(values.player!==undefined)check(typeof values.player==='boolean','INVALID_PHASE_FIELD');
     if(values.battlerIndex!==undefined)check(Number.isSafeInteger(values.battlerIndex)&&(values.battlerIndex>=0&&values.battlerIndex<=3
-      ||context.roster.entries.some(e=>e.pokemon.id===values.battlerIndex)),'UNKNOWN_PHASE_POKEMON');
+      ||context.roster.entries.some(e=>e.pokemon.id===values.battlerIndex)
+      // Original delayed attacks retain their source id across encounters.
+      // MoveEffectPhase.start explicitly ends when that user has departed.
+      ||type==='MoveEffectPhase'&&values.move?.virtual===true&&context.roster.retiredIds.includes(values.battlerIndex)),'UNKNOWN_PHASE_POKEMON');
     if(values.targets)check(values.targets.length<=4&&values.targets.every(n=>n>=-1&&n<=3),'INVALID_PHASE_TARGET');
     if(values.slotIndex!==undefined)check(Number.isInteger(values.slotIndex)&&values.slotIndex>=-1&&values.slotIndex<6,'INVALID_PHASE_SLOT');
   }

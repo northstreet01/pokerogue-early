@@ -13,14 +13,14 @@ export const pokemonStateFields = Object.freeze({
   Pokemon: Object.freeze(base),
   PlayerPokemon: Object.freeze({ compatibleTms: 'moveIds' }),
   EnemyPokemon: Object.freeze({ trainerSlot: 'trainerSlot', aiType: 'aiType', bossSegments: '?uint', bossSegmentIndex: '?bossIndex' }),
-  PokemonMove: Object.freeze({ moveId: 'moveId', ppUsed: 'uint', ppUp: 'uint', virtual: 'bool' }),
+  PokemonMove: Object.freeze({ moveId: 'moveId', ppUsed: 'uint', ppUp: 'int', virtual: 'bool' }),
   PokemonSummonData: Object.freeze({ battleStats: 'stages', moveQueue: 'queue', disabledMove: 'moveId', disabledTurns: 'uint', tags: 'tags', speciesForm: '?form', fusionSpeciesForm: '?form', ability: 'ability', gender: '?gender', fusionGender: '?gender', stats: '?stats', moveset: '?moves', types: '?types' }),
   PokemonBattleData: Object.freeze({ hitCount: 'uint', revived: 'bool', maxRevived: 'bool' }),
   PokemonBattleSummonData: Object.freeze({ turnCount: 'uint', moveHistory: 'history' }),
-  PokemonTurnData: Object.freeze({ flinched: '?bool', hitCount: '?uint', hitsLeft: '?uint', damageDealt: 'uint', attacksReceived: 'attacks' }),
+  PokemonTurnData: Object.freeze({ flinched: '?bool', hitCount: '?uint', hitsLeft: '?remainingHits', damageDealt: 'int', attacksReceived: 'attacks' }),
   TurnMove: Object.freeze({ move: 'moveId', targets: '?targets', result: 'moveResult', virtual: '?bool', turn: '?uint' }),
   QueuedMove: Object.freeze({ move: 'moveId', targets: 'targets', ignorePP: '?bool' }),
-  AttackMoveResult: Object.freeze({ move: 'moveId', result: 'hitResult', damage: 'uint', critical: 'bool', sourceId: 'uint32' })
+  AttackMoveResult: Object.freeze({ move: 'moveId', result: 'hitResult', damage: 'int', critical: 'bool', sourceId: 'uint32' })
 });
 // These declared fields are display state. Other Container-owned fields are also
 // excluded; an AST coverage test guards every Pokemon declaration, including private.
@@ -46,7 +46,7 @@ function array(value, path, max = 10000) {
   return Array.from({ length: value.length }, (_, index) => data(value, String(index), path));
 }
 function integer(value, min, max, path) {
-  if (!Number.isSafeInteger(value) || value < min || value > max) fail(path);
+  if (!Number.isSafeInteger(value) || value < min || value > max) fail(typeof value==='number'?`${path} (${String(value)})`:path);
   return value;
 }
 function assignOwn(target, key, value) {
@@ -86,7 +86,7 @@ function equivalent(a, b) {
 }
 
 /** All functions/prototypes/catalog entries are trusted imports, never wire data. */
-export function createPokemonStateCodec({ constructors, getSpecies, getMove, getAbility, captureTag, restoreTag, captureStatus, restoreStatus }) {
+export function createPokemonStateCodec({ constructors, getSpecies, getMove, getAbility, captureTag, restoreTag, captureStatus, restoreStatus, allowNegativePpUp }) {
   const schemas = { ...pokemonStateFields, PlayerPokemon: { ...base, ...pokemonStateFields.PlayerPokemon }, EnemyPokemon: { ...base, ...pokemonStateFields.EnemyPokemon } };
   const prototypes = new Map();
   for (const [type, ctor] of Object.entries(constructors)) {
@@ -108,6 +108,16 @@ export function createPokemonStateCodec({ constructors, getSpecies, getMove, get
   }
   function value(input, rule, restoring, path) {
     if (rule.startsWith('?')) { if (input === undefined || input === null) return input; rule = rule.slice(1); }
+    // Original MoveEffectPhase.end decrements an uninitialized counter when
+    // an override (e.g. failed Focus Punch) ends before hit initialization.
+    // Preserve that exact NaN sentinel through JSON; never coerce it to zero.
+    if(rule==='remainingHits'){
+      if(!restoring&&Number.isNaN(input))return {nan:true};
+      if(restoring&&input&&typeof input==='object'){
+        keys(input,['nan'],path);if(input.nan!==true)fail(path);return NaN;
+      }
+      return integer(input,Number.MIN_SAFE_INTEGER,Number.MAX_SAFE_INTEGER,path);
+    }
     const ranges = { int: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER], uint: [0, Number.MAX_SAFE_INTEGER], positive: [1, Number.MAX_SAFE_INTEGER], uint32: [0, 4294967295], gender: [-1, 1], ball: [0, 5], nature: [0, 24], abilityIndex: [0, 2], bossIndex: [-1, Number.MAX_SAFE_INTEGER], fieldPosition: [0, 2], trainerSlot: [0, 2], aiType: [0, 2], moveResult: [0, 4], hitResult: [1, 10] };
     if (ranges[rule]) return integer(input, ...ranges[rule], path);
     if (rule === 'bool') { if (typeof input !== 'boolean') fail(path); return input; }
@@ -161,6 +171,7 @@ export function createPokemonStateCodec({ constructors, getSpecies, getMove, get
     });
   }
   function verify(values, type) {
+    if(type==='PokemonMove'&&values.ppUp<0&&allowNegativePpUp?.(values.moveId,values.ppUp)!==true)fail('ppUp');
     if (type === 'PlayerPokemon' || type === 'EnemyPokemon') {
       const root = values.species; form(root.speciesId, values.formIndex);
       if (values.hp > values.stats[0]) fail('hp exceeds maximum');

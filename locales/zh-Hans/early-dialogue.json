@@ -33,4 +33,59 @@
    "victory":["@c{shock}付出了这么多……还是不够吗……？\n这样下去，你永远都不会回来了……"]
   }
  }
+,
+ "RIVAL_4":{
+ "0": {
+  "encounter": [
+   "@c{neutral}嘿。$我就不绕弯子，也不跟你客套了。\n@c{neutral_eclosed}我来这里只为获胜，就这么简单。$@c{serious_mhalf_fists}我把所有时间都投入训练，学会了如何发挥自己的全部潜力。$@c{smile}省去那些没必要的睡眠和社交，就能多出很多时间。$@c{serious_mopen_fists}在我获胜之前，那些都不重要了。$@c{neutral_eclosed}我甚至已经不会再输了。\n@c{smile_eclosed}看来，你的想法也没那么错。$@c{angry_mhalf}只有弱者才会输，而我已经不再弱小。$@c{serious_mopen_fists}做好准备吧。"
+  ],
+  "victory": [
+   "@c{neutral}什么……@d{64}你究竟是什么人？"
+  ]
+ },
+ "1": {
+  "encounter": [
+   "@c{neutral}是我！你不会又把我忘了……吧？$@c{smile}你能走到这里，应该感到骄傲。恭喜！\n不过，看来你的旅程也到此为止了。$@c{smile_eclosed}你唤醒了我内心从未察觉的东西。\n现在，我似乎只剩下训练这一件事了。$@c{smile_ehalf}我几乎不吃不睡，整天训练宝可梦，每一次都变得更强。$@c{neutral}说真的，我……都快认不出自己了。$而现在，我终于达到了最强的状态。\n我不觉得还有谁能打败我。$你知道吗？这一切都是因为你。\n@c{smile_ehalf}我不知道该感谢你，还是该恨你。$@c{angry_mopen}做好准备吧。"
+  ],
+  "victory": [
+   "@c{neutral}什么……@d{64}你究竟是什么人？"
+  ]
+ }
+},
+ "RIVAL_5":{
+ "0": {
+  "encounter": [
+   "@c{neutral}……"
+  ],
+  "victory": [
+   "@c{neutral}……"
+  ]
+ },
+ "1": {
+  "encounter": [
+   "@c{neutral}……"
+  ],
+  "victory": [
+   "@c{neutral}……"
+  ]
+ }
+},
+ "RIVAL_6":{
+ "0": {
+  "encounter": [
+   "@c{smile_eclosed}我们又见面了。$@c{neutral}我花了些时间，想清楚了这些事。\n这一切如此奇怪，是有原因的。$@c{neutral_eclosed}你的梦想，我想打败你的执念……\n它们都是某件更宏大的事情的一部分。$@c{serious}这关乎的已经不只是你我……而是这个世界，@c{serious_mhalf_fists}而我的使命，就是将你推向极限。$@c{neutral_eclosed}我不知道自己是否完成了使命，但我已经竭尽全力。$@c{neutral}我们最后来到的这个地方，令人恐惧……但不知为何，我却很平静，仿佛以前来过这里。$@c{serious_mhalf_fists}你也有同样的感觉，对吧？$@c{serious}……仿佛这里有什么在对我说话。\n很久以来，这就是这个世界所知道的一切。$那些仿佛就在不久前、我们共同珍惜的时光，其实早已成了遥远的记忆。$@c{neutral_eclosed}谁又能说，那些记忆是否真的存在过呢。$@c{serious_mopen_fists}你必须继续前进，否则这一切永远不会结束。只有你能做到。$@c{serious_smile_fists}我几乎不明白这一切意味着什么，只知道它是真的。$@c{serious_mopen_fists}如果你现在连我都无法打败，就不会有任何胜算。"
+  ],
+  "victory": [
+   "@c{smile_eclosed}看来，我的使命已经完成了。$我想让你答应我一件事。\n@c{smile}当你拯救了这个世界，请回家吧。"
+  ]
+ },
+ "1": {
+  "encounter": [
+   "@c{smile_ehalf}又只剩下我们两个了。$@c{smile_eclosed}你知道吗，我一直在脑海里反复思考……$@c{smile_ehalf}这一切一定有某种含义，为什么现在所有事情都这么奇怪……$@c{smile}你有你的梦想，而我心中也有这股执念……$我总觉得，我们两个所做的一切，都有着更重要的目的。$@c{smile_eclosed}我想，我的使命是推动你……直到你的极限。$@c{smile_ehalf}我不知道自己做得够不够好，但直到现在，我都已经尽力了。$在这个陌生而可怕的地方……一切却显得如此清晰……$很久以来……这就是这个世界所知道的一切。$@c{smile_eclosed}那些我们曾经共同珍惜的回忆，我仿佛已经快记不起来了。$@c{smile_ehalf}那些真的存在过吗？现在，它们似乎已经那么遥远……$@c{angry_mopen}你必须继续前进，否则这一切永远不会结束。只有你能做到。$我……不知道这意味着什么……但我感觉它是真的。$如果你现在连我都无法打败，就不会有任何胜算。"
+  ],
+  "victory": [
+   "@c{smile_ehalf}我……我想，我已经完成了使命……$@c{smile_eclosed}答应我……当你拯救了这个世界……请……平安回家。$@c{smile_ehalf}……谢谢你。"
+  ]
+ }
+}
 }

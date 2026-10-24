@@ -60,7 +60,7 @@ import { recoverVictoryParties } from '../battle-core/victory-aftermath-runner.m
 import { EvolutionPhase, EndEvolutionPhase } from '../evolution-phase';
 import { evolutionReferenceCodec } from '../original-phase-checkpoints';
 import { advancePreparationGrowth } from '../battle-core/preparation-growth-runner.mjs';
-import { presentationText } from '../system/presentation-text.mjs';
+import { presentationText, resetPresentationText } from '../system/presentation-text.mjs';
 import i18next from '../i18n';
 
 // Progression choices append a safe sequence suffix. Keep the legacy native
@@ -282,6 +282,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       schedule(() => { if (!counter.stopped) config.onComplete?.(); }, (repeats + 1) * ((config.duration ?? 0) + (config.repeatDelay ?? 0)));
       return counter;
     } };
+  let messageHasPages=false;
   root.ui = { getMessageHandler: () => ({ promptLevelUpStats: (index, previous) => {
     const phase = root.currentPhase, owner = views.indexOf(phase?.scene);
     check(phase instanceof LevelUpPhase && (owner === 0 || owner === 1), 'INVALID_LEVEL_DISPLAY_OWNER');
@@ -340,7 +341,10 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         messageKey: 'battle:switchQuestion', pokemonId: views[owner].getPlayerField()[(phase as any).fieldIndex].id,
         useName: !!(phase as any).useName,
       } : {};
-      events.push({ kind: 'message', text, presentation:presentationText(text), ...question, ...metadata, ...(owner >= 0 ? {scope:owner} : {}) }); schedule(callback);
+      const source=phase instanceof MessagePhase
+        ?((phase as any).textPresentation?JSON.parse((phase as any).textPresentation):null):presentationText(text);
+      const presentation=source&&messageHasPages?{kind:'message-fragment',source,part:'head'}:source??null;
+      events.push({ kind: 'message', text, presentation, ...question, ...metadata, ...(owner >= 0 ? {scope:owner} : {}) }); schedule(callback);
     } };
   root.damageNumberHandler = { add: (p, amount, result = HitResult.EFFECTIVE, critical = false) =>
     events.push({ kind: 'damage-display', scope:'shared', pokemonId: p.id, amount, result, critical, remainingHp: p.hp }) };
@@ -384,6 +388,15 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     } finally { if (fixed) fixed.double = oldDouble; }
   };
   function bindPhase(p, existingScope?: number) {
+    if(p instanceof MessagePhase&&!Object.prototype.hasOwnProperty.call(p,'textPresentation')){
+      const source:any=root.currentPhase;
+      const page=source instanceof MessagePhase?(source as any).text?.indexOf('$'):-1;
+      const descriptor=page>=0&&source!==p&&(p as any).text===(source as any).text.slice(page+1)&&source.textPresentation
+        ?{kind:'message-fragment',source:JSON.parse(source.textPresentation),part:'tail'}:presentationText((p as any).text);
+      // Original display fields remain scalar-only; persist the descriptor as
+      // display JSON without admitting objects into the Phase rule schema.
+      (p as any).textPresentation=descriptor?JSON.stringify(descriptor):null;
+    }
     // Capture is personal, but its Victory starts the shared encounter/EXP
     // lifecycle. Do not let the catcher's temporary reserve view own it.
     if (p instanceof VictoryPhase && views.includes((p as any).scene)) (p as any).scene = root;
@@ -457,6 +470,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       if (failure?.status === 'rejected') throw failure.reason;
     },
     async execute(p, resume?) {
+      // Provenance is phase-local; warming a Worker or evicting an older name
+      // must not change event metadata after a checkpoint restart. Queued
+      // MessagePhase metadata travels with its existing display-only fields.
+      resetPresentationText();
+      for(const entry of c.roster.entries)entry.pokemon.generateName?.();
+      messageHasPages=p instanceof MessagePhase&&(p as any).text?.includes('$');
       ended = 0; waiting = null;
       const completed = new Promise<void>(resolve => { completePhase = resolve; });
       let captureSeat: number | null = null, captureParty: Pokemon[] | null = null;

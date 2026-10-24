@@ -11,12 +11,13 @@ import {queueFaintContinuation} from '../../src/battle-core/faint-queue.mjs';
 import {queueVictoryExperience} from '../../src/battle-core/victory-experience.mjs';
 import {presentOnHost} from '../../src/battle-core/presentation-port.mjs';
 import {eggs} from './egg-model.mjs';
-import {originalLocalizedPokemonMessage} from './localization-model.mjs';
+import {originalI18n,originalLocalizedPokemonMessage} from './localization-model.mjs';
 
 const declarations=file=>parse(file).statements.filter(n=>ts.isClassDeclaration(n)||ts.isEnumDeclaration(n)||ts.isImportDeclaration(n)).map(n=>n.getText()).join('\n');
 const dependencies=file=>Object.fromEntries(parse(file).statements.filter(ts.isImportDeclaration).map(n=>[n.moduleSpecifier.text,{}]));
 class Phase{constructor(scene){this.scene=scene;}start(){}end(){this.scene.shiftPhase();}}
 const deps=dependencies('phases.ts');
+deps['./i18n']={default:originalI18n};
 deps['./messages'].getLocalizedPokemonMessage=originalLocalizedPokemonMessage((...args)=>deps['./messages'].getPokemonMessage(...args),p=>p.name);
 // Keep the legacy isolated rule tests wired to the actual extracted visual
 // helpers. Rendering ports stay in their existing scenes; no replacement rules.

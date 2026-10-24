@@ -118,10 +118,13 @@ test('old captured Enemy instance stays distinct from the Player with the same i
 
 test('queued original text is restored for presentation but language cannot change the rule projection',()=>{
   const c=initialDecision(),phase=new phaseConstructors.MessagePhase({},'你好',5,true,10);
+  phase.textPresentation=JSON.stringify({kind:'translation',key:'battle:attackFailed',values:{}});
   const queues=createOriginalQueueStateCodec(phaseCodec);
   c.continuation=queues.capture({phaseQueue:[phase],phaseQueuePrepend:[],nextCommandPhaseQueue:[],phaseQueuePrependSpliceIndex:-1,currentPhase:null,standbyPhase:null},c,
     {scopeForPhase:()=>null,remainingForPhase:()=>null});
   const saved=codec.capture(c),restored=codec.restore(saved);assert.equal(restored.continuation.phaseQueue[0].phase.text,'你好');
+  assert.equal(restored.continuation.phaseQueue[0].phase.textPresentation,phase.textPresentation);
   restored.continuation.phaseQueue[0].phase.text='Hello';
+  restored.continuation.phaseQueue[0].phase.textPresentation=JSON.stringify({kind:'translation',key:'battle:attackMissed',values:{}});
   assert.deepEqual(checkpointRuleProjection(codec.capture(restored)),checkpointRuleProjection(saved));
 });

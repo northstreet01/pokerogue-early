@@ -2372,6 +2372,9 @@ export class PostTurnStatusEffectPhase extends PokemonPhase {
 
 export class MessagePhase extends Phase {
   private text: string;
+  // Optional cooperative display metadata. The native host fills it when a
+  // message is queued; declare emits no field/constructor behavior in solo.
+  declare private textPresentation?: string;
   private callbackDelay: integer;
   private prompt: boolean;
   private promptDelay: integer;

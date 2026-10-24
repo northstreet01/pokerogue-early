@@ -3,7 +3,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import {originalI18n as i18n} from './helpers/localization-model.mjs';
-import {presentationText,rememberPresentationText,renderPresentationText} from '../src/system/presentation-text.mjs';
+import {presentationText,rememberPresentationText,renderPresentationText,resetPresentationText} from '../src/system/presentation-text.mjs';
+
+test('queued display JSON retains each original message page after the phase provenance cache is reset',async()=>{
+ i18n.addResource('en','testDisplay','pages','First $ Second $ Third');
+ i18n.addResource('zh-Hans','testDisplay','pages','第一段 $ 第二段 $ 第三段');
+ const text=i18n.t('testDisplay:pages',{lng:'en'}),source=structuredClone(presentationText(text));assert.ok(source);
+ const stored=JSON.stringify(source);resetPresentationText();assert.equal(presentationText(text),null);
+ const translated=(value,lng)=>renderPresentationText(value,(key,options)=>i18n.t(key,{...options,lng}),()=>undefined);
+ const head={kind:'message-fragment',source:JSON.parse(stored),part:'head'},tail={kind:'message-fragment',source:JSON.parse(stored),part:'tail'};
+ assert.equal(translated(head,'en'),'First');assert.equal(translated(head,'zh-Hans'),'第一段');
+ assert.equal(translated({kind:'message-fragment',source:tail,part:'head'},'zh-Hans'),'第二段');
+ assert.equal(translated({kind:'message-fragment',source:{kind:'message-fragment',source:tail,part:'tail'},part:'head'},'en'),'Third');
+});
 
 test('early catalog translations retain source hashes, exact English guards and the bundled source license',()=>{
  const read=path=>JSON.parse(fs.readFileSync(new URL('../'+path,import.meta.url),'utf8'));

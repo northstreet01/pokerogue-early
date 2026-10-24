@@ -218,8 +218,10 @@ test('default route splits the original trainer prize, prepares and naturally fi
     assert.equal(c.battle.waveIndex,6);assert.equal(c.battle.battleType,0);
     assert.deepEqual(c.players.map(p=>p.money),awardedMoney);
     assert.equal(events.filter(e=>e.kind==='phase-start'&&e.phase==='MoneyRewardPhase').length,2);
-    assert.equal(events.filter(e=>e.kind==='message'&&e.scope===0).length,1);
-    assert.equal(events.filter(e=>e.kind==='message'&&e.scope===1).length,1);
+    // Personal switch/EXP/level messages now also have their correct owner.
+    // Count the two original money awards by their original localization key.
+    assert.equal(events.filter(e=>e.kind==='message'&&e.scope===0&&e.presentation?.key==='battle:moneyWon').length,1);
+    assert.equal(events.filter(e=>e.kind==='message'&&e.scope===1&&e.presentation?.key==='battle:moneyWon').length,1);
     const submitted=(await progressDefault(h,c)).checkpoint;
     const round=await h.request('native-run-to-boundary',submitted);
     assert.ok(round.events.some(e=>e.kind==='phase-start'&&e.phase==='MoveEffectPhase'));

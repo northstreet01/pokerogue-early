@@ -2,6 +2,7 @@
 // the original i18next call at the moment it produces text; do not parse or
 // reverse-translate English sentences received from the rule host.
 const texts=new Map(),limit=1024;
+export function resetPresentationText(){texts.clear();}
 const clone=value=>JSON.parse(JSON.stringify(value));
 export function presentationText(text){return typeof text==='string'?texts.get(text)??null:null;}
 export function rememberPresentationText(text,value){
@@ -44,6 +45,10 @@ export function renderPresentationText(value,translate,pokemonName,depth=0){
   return value.affix?translate(`battle:${value.affix}`,{pokemonName:name}):name;
  }
  if(value?.kind==='translation-page')return translate(value.key).split('$')[value.index]?.trim()??'';
+ if(value?.kind==='message-fragment'){
+  const pages=String(renderPresentationText(value.source,translate,pokemonName,depth+1)).split('$');
+  return value.part==='head'?pages[0].trim():pages.slice(1).join('$');
+ }
  if(value?.kind==='joined')return value.parts.map(v=>renderPresentationText(v,translate,pokemonName,depth+1)).join('');
  throw Error('INVALID_PRESENTATION_TEXT');
 }

@@ -373,6 +373,7 @@ export const phaseStateFields = Object.freeze({
     "required": [],
     "display": [
       "text",
+      "textPresentation",
       "callbackDelay",
       "prompt",
       "promptDelay"

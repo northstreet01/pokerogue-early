@@ -5,7 +5,7 @@ import { NewBattlePhase, EncounterPhase, ShowTrainerPhase, SummonPhase, SummonMi
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
 import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase,
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase, BerryPhase, PokemonHealPhase } from '../phases';
-import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase, TrainerVictoryPhase, MoneyRewardPhase } from '../phases';
+import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase, TrainerVictoryPhase, MoneyRewardPhase, ModifierRewardPhase } from '../phases';
 import { SelectModifierPhase } from '../phases';
 import { preparationItemTarget, isPreparationModifier, isPreparationPersistent } from '../coop/preparation-item';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase } from '../phases';
@@ -105,7 +105,7 @@ class DisplayTarget {
 
 const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, EvolutionPhase, EndEvolutionPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, EvolutionPhase, EndEvolutionPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, ModifierRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
@@ -333,7 +333,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       schedule(callback);
     },
     showText: (text, _delay, callback, _callbackDelay?, _prompt?, _promptDelay?, metadata?) => {
-      const owner = root.currentPhase instanceof MoneyRewardPhase || root.currentPhase instanceof CheckSwitchPhase
+      const owner = root.currentPhase instanceof MoneyRewardPhase || root.currentPhase instanceof ModifierRewardPhase || root.currentPhase instanceof CheckSwitchPhase
         || root.currentPhase instanceof ExpPhase || root.currentPhase instanceof LevelUpPhase || root.currentPhase instanceof LearnMovePhase
         ? views.indexOf(root.currentPhase.scene) : -1;
       const phase = root.currentPhase;
@@ -437,6 +437,14 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     ids.set(p, c.continuation.currentPhase.phaseId);
     nextId = Math.max(nextId, c.continuation.currentPhase.phaseId + 1);
   }
+  function validateTrainerReward(p) {
+    const type = p.modifierType;
+    check(Object.getPrototypeOf(p) === ModifierRewardPhase.prototype && c.battle.battleType === BattleType.TRAINER
+      && !c.battle.trainer.config.isBoss && preparationItemTarget(type) === 'none'
+      && isPreparationPersistent(type.newModifier()) && c.battle.trainer.config.modifierRewardFuncs.some(factory =>
+        canonical(captureModifierTypeState(factory())) === canonical(captureModifierTypeState(type))),
+    'UNSUPPORTED_NATIVE_TRAINER_REWARD');
+  }
   function sync() {
     if (c.battle && root.currentBattle !== c.battle) c.roster.retiredIds.push(...c.battle.enemyParty.map(p => p.id));
     c.battle = root.currentBattle; c.enemyModifiers = root.enemyModifiers;
@@ -448,6 +456,16 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     for (const key of ['seed', 'waveSeed', 'waveCycleOffset', 'offsetGym', 'score']) c.scene[key] = root[key];
     if (Object.prototype.hasOwnProperty.call(root, 'lastEnemyTrainer')) c.scene.lastEnemyTrainer = root.lastEnemyTrainer;
     for (const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue']) root[key] = root[key].flatMap(p => {
+      if (p instanceof ModifierRewardPhase) {
+        validateTrainerReward(p);
+        if (views.includes(p.scene)) return [p];
+        check(root.phaseQueuePrependSpliceIndex === -1,'UNSAFE_TRAINER_REWARD_QUEUE_SPLIT');
+        const type = captureModifierTypeState((p as any).modifierType);
+        // Fixed trainer progression rewards belong to each personal party.
+        // Persist one owned original phase per seat; recovery never reruns the
+        // trainer victory or copies the already completed seat's grant.
+        return views.map(view => new ModifierRewardPhase(view, () => restoreModifierTypeState(type)));
+      }
       if (!(p instanceof MoneyRewardPhase) || views.includes((p as any).scene)) return [p];
       check(c.battle.battleType === BattleType.TRAINER && !c.battle.trainer.config.isBoss
         && (p as any).moneyMultiplier === c.battle.trainer.config.moneyMultiplier,'UNSUPPORTED_NATIVE_MONEY_REWARD');
@@ -504,12 +522,20 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         captureBallCount = root.pokeballCounts[(p as any).pokeballType];
       }
       const scope = bindPhase(p); root.currentPhase = p;
+      if (p instanceof ModifierRewardPhase) {
+        check(scope === 0 || scope === 1,'INVALID_TRAINER_REWARD_SCOPE');
+        validateTrainerReward(p);
+      }
       if (p instanceof MoneyRewardPhase) check((scope === 0 || scope === 1)
         && c.battle.battleType === BattleType.TRAINER && !c.battle.trainer.config.isBoss
         && (p as any).moneyMultiplier === c.battle.trainer.config.moneyMultiplier,'INVALID_TRAINER_MONEY_SCOPE');
       const changes = [];
       const patch = (object, key, value) => { changes.push([object, key, Object.getOwnPropertyDescriptor(object, key)]);
         Object.defineProperty(object, key, { value, writable: true, configurable: true }); };
+      if (p instanceof ModifierRewardPhase) {
+        const reward = p.doReward;
+        patch(p,'doReward',() => observeRulePromise(p.scene,reward.call(p)));
+      }
       if (p instanceof MoneyRewardPhase) patch((p as any).scene,'getWaveMoneyAmount',multiplier => {
         const total = BattleScene.prototype.getWaveMoneyAmount.call(root,multiplier);
         check(Number.isSafeInteger(total) && total >= 0 && total % 2 === 0,'INVALID_TRAINER_MONEY_TOTAL');

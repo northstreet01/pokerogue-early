@@ -211,3 +211,25 @@ test('a queued capture cannot retarget a replacement instance or spend a ball af
     assert.equal(reserves(result.checkpoint).length, 0);
   } finally { await h.close(); }
 });
+
+
+test('remote seat-0 BALL cannot overwrite seat-1 FIGHT with the solo double skip',async()=>{
+ const {h,c}=await open();try{
+ const ball=c.decision.options[0].find(o=>o.kind==='ball'&&o.pokeballType===0),fight=offensive(c,1);
+ const submitted=(await h.request('native-submit',{checkpoint:c,inputs:{0:ball,1:fight}})).checkpoint;
+ assert.equal(submitted.battle.turnCommands[1].object.command.value,0);assert.notEqual(submitted.battle.turnCommands[1].object.skip?.value,true);
+ const r=await h.request('native-run-to-boundary',submitted);
+ assert.ok(r.events.some(e=>e.kind==='capture-result'&&e.seat===0));
+ if(r.events.some(e=>e.kind==='capture-result'&&e.outcome==='failed'))assert.equal(pp(r.checkpoint,1)[fight.cursor].fields.ppUsed,pp(c,1)[fight.cursor].fields.ppUsed+1);
+ }finally{await h.close();}
+});
+test('remote both BALL intents survive command collection and a failed throw does not suppress its partner',async()=>{
+ const {h,c}=await open();try{
+ const inputs=Object.fromEntries([0,1].map(seat=>[seat,c.decision.options[seat].find(o=>o.kind==='ball'&&o.pokeballType===0)]));
+ const submitted=(await h.request('native-submit',{checkpoint:c,inputs})).checkpoint;
+ for(const seat of [0,1]){assert.equal(submitted.battle.turnCommands[seat].object.command.value,1);assert.notEqual(submitted.battle.turnCommands[seat].object.skip?.value,true);}
+ const r=await h.request('native-run-to-boundary',submitted),results=r.events.filter(e=>e.kind==='capture-result');
+ assert.equal(results.length,2);assert.deepEqual(results.map(e=>e.seat).sort(),[0,1]);
+ for(const result of results)if(result.outcome!=='cancelled')assert.equal(r.checkpoint.players[result.seat].pokeballCounts[0],c.players[result.seat].pokeballCounts[0]-1);
+ }finally{await h.close();}
+});

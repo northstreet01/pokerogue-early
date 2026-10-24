@@ -514,7 +514,8 @@ type PokemonFunc = (pokemon: Pokemon) => void;
 
 export abstract class FieldPhase extends BattlePhase {
   getOrder(): BattlerIndex[] {
-    return getFieldOrder(this.scene.getPlayerField(), this.scene.getEnemyField(), {
+    return getFieldOrder(this.scene.getPlayerField(), (this.scene as any).nativeIndependentCommands
+      ? this.scene.getEnemyField().filter(p => p.isActive(true)) : this.scene.getEnemyField(), {
       getSpeed: pokemon => pokemon?.getBattleStat(Stat.SPD),
       randomInt: range => this.scene.currentBattle.randSeedInt(range),
       isReversed: () => {
@@ -1419,7 +1420,7 @@ export class CommandPhase extends FieldPhase {
   start() {
     super.start();
 
-    if (this.fieldIndex) {
+    if (this.fieldIndex && !(this.scene as any).nativeIndependentCommands) {
       const allyCommand = this.scene.currentBattle.turnCommands[this.fieldIndex - 1];
       if (allyCommand?.command === Command.BALL || allyCommand?.command === Command.RUN)
         this.scene.currentBattle.turnCommands[this.fieldIndex] = { command: allyCommand.command, skip: true };

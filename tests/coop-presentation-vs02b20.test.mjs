@@ -162,3 +162,13 @@ test('an incoming original display starts with its entry HP before a same-turn a
     assert.equal(scene.getField()[slot].hp,incoming.hp);assert.equal(model.hp,initial);
   }
 });
+
+
+test('remote first encounter loads all battlers together and reveals none until all assets are ready',async()=>{
+ const f=presentationFixture(api),gates=[],displays=[],make=f.p.container.bind(f.p);
+ f.p.container=(...args)=>{const p=make(...args);p.loadAssets=()=>new Promise(resolve=>gates.push(resolve));displays.push(p);return p;};
+ const second={...f.snapshot.shared.pokemon[0],id:f.model.id+1,owner:1};f.snapshot.shared.field[1]=second.id;f.snapshot.shared.pokemon.push(second);
+ const loading=f.p.apply(f.snapshot,f.applied);await Promise.resolve();assert.equal(gates.length,2,'both loads start before either completes');
+ assert.ok(displays.every(p=>p.visible===false));gates[0]();await Promise.resolve();assert.ok(displays.every(p=>p.visible===false));
+ gates[1]();await loading;assert.ok(displays.every(p=>p.visible===true));f.p.clear();
+});

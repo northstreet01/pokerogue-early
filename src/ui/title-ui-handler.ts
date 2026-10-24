@@ -11,6 +11,8 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
   private titleContainer: Phaser.GameObjects.Container;
   private dailyRunScoreboard: DailyRunScoreboard;
   private playerCountLabel: Phaser.GameObjects.Text;
+  private titleLogo: Phaser.GameObjects.Image;
+  private homeHeading: Phaser.GameObjects.Text;
   private splashMessage: Phaser.GameObjects.Text;
 
   private playerCountTimer;
@@ -30,7 +32,10 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
 
     const logo = this.scene.add.image((this.scene.game.canvas.width / 6) / 2, 8, 'logo');
     logo.setOrigin(0.5, 0);
+    this.titleLogo = logo;
     this.titleContainer.add(logo);
+    this.homeHeading = addTextObject(this.scene, 160, 16, '宝可梦肉鸽 · 初始界面', TextStyle.MESSAGE);
+    this.homeHeading.setOrigin(0.5, 0); this.homeHeading.setVisible(false); this.titleContainer.add(this.homeHeading);
 
     this.splashMessage = addTextObject(this.scene, logo.x + 64, logo.y + logo.displayHeight - 8, '', TextStyle.MONEY, { fontSize: '54px' });
     this.splashMessage.setOrigin(0.5, 0.5);
@@ -73,6 +78,9 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
 
       this.dailyRunScoreboard.setVisible(false);
 
+      this.titleLogo?.setVisible(!this.config?.contextLabel);
+      this.splashMessage.setVisible(!this.config?.contextLabel);
+      this.homeHeading?.setVisible(!!this.config?.contextLabel);
       this.updatePlayerCount();
 
       this.playerCountTimer = setInterval(() => this.updatePlayerCount(), 10000);

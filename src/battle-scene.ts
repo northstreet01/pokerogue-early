@@ -1,5 +1,6 @@
 import { addFaintedEnemyScore } from './battle-core/faint-score.mjs';
 import Phaser from 'phaser';
+import { beginLoading } from './coop/loading-screen.mjs';
 import { pushPhase, prependPhase, selectNextPhase, populatePhaseQueue } from './battle-core/phase-queue.mjs';
 import { ruleSeedOffset } from './battle-core/random-context.mjs';
 import { getMaxExpLevel as calculateMaxExpLevel } from './battle-core/levels.mjs';
@@ -255,6 +256,17 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	preload() {
+		if (typeof document !== 'undefined') {
+			const screen = beginLoading('正在加载冒险初始界面', this.load);
+			const missing: string[] = [];
+			const failed = (file: any) => { if (['plains_bg', 'window_1', 'statuses'].includes(file.key)) missing.push(file.key); };
+			this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, failed);
+			this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+				this.load.off(Phaser.Loader.Events.FILE_LOAD_ERROR, failed);
+				if (missing.length) screen.fail('必要素材未下载完成：' + missing.join('、')); else screen.complete();
+			});
+		}
+
 		// Load menu images
 		this.loadImage('bg', 'ui');
 		this.loadImage('command_fight_labels', 'ui');

@@ -57,6 +57,7 @@ export default class CoopPlayPhase extends Phase {
   private messageChain = Promise.resolve();
   private replayedEpoch: string | null = null;
   private inputReady = false;
+  private online: boolean[] = [false, false];
   private resuming = false;
   private battleSignature = '';
   private battleInputActive = false;
@@ -190,6 +191,12 @@ export default class CoopPlayPhase extends Phase {
     if (this.roomId && this.latest?.personal.decision.kind !== 'lobby' && this.latest) return;
     if (this.roomId) {
       const row = document.createElement('div'); row.className = 'row';
+      if (!this.inputReady) {
+        const waiting = document.createElement('span'); waiting.id = 'coop-waiting-room';
+        waiting.textContent = this.online.map((online, seat) => '玩家' + (seat + 1) + '：' + (online ? '已加入' : '等待加入')).join(' ｜ ')
+          + '。双方到齐并同步后开放选队与准备。';
+        row.append(waiting); this.controls.append(row); return;
+      }
       const ready = !!this.latest?.shared.ready?.[this.seat!];
       row.append(this.button(ready ? '取消准备' : '提交准备', () => this.sendProfile(!ready)),
         this.button('重新选队', async () => {
@@ -286,6 +293,7 @@ export default class CoopPlayPhase extends Phase {
       if (message.type === 'syncStatus') {
         if (this.latest && message.roomId === this.roomId && message.runId === this.runId
           && message.revision === this.latest.revision) {
+          if (Array.isArray(message.online)) this.online = [...message.online];
           this.inputReady = !message.blocked;
           this.submitted = !!message.submitted?.[this.seat!];
           if ((this.submitted || !this.inputReady) && !(this.latest.personal.decision.kind === 'preparation'
@@ -305,6 +313,9 @@ export default class CoopPlayPhase extends Phase {
           if (this.latest.personal.decision.kind === 'lobby' && this.inputReady && this.lastProfile && !this.actionId)
             this.setStatus(this.latest.shared.ready?.[this.seat!] ? '已准备，等待队友…' : '选队已保留，可以提交准备');
           if (this.latest.personal.decision.kind === 'lobby') {
+            this.renderLobbyControls();
+            if (this.inputReady && !this.latest.personal.profile && !this.lastProfile && !this.starterOpen)
+              void this.openStarterSelect().catch(error => this.setStatus('选队界面失败：' + error.message, true));
             await this.flushLobbyDraft();
             this.renderDraftStatus();
           }
@@ -331,6 +342,13 @@ export default class CoopPlayPhase extends Phase {
           this.renderDraftStatus(); this.renderLobbyControls();
           return;
         }
+        if (!message.accepted && ['STALE_DECISION', 'SYNC_BLOCKED', 'SHARED_ITEM_UNAVAILABLE'].includes(message.code)) {
+          this.clearTeamParty(); this.submitted = false; this.preparationSignature = '';
+          this.setStatus(message.code === 'SHARED_ITEM_UNAVAILABLE' ? '该道具已被队友领取，请重新选择' : '房间已更新，正在恢复可用菜单…', true);
+          this.send({ type: 'requestSnapshot', roomId: this.roomId, runId: this.runId,
+            knownRevision: this.latest?.revision ?? 0, reason: 'USER_RETRY' });
+          await this.openDecisionInput(); return;
+        }
         // A replayed durable receipt can belong to an earlier decision after
         // reconnect. Clear its outbox entry without locking the new menu.
         if (message.revision !== this.latest?.revision || message.decisionId !== this.latest?.decisionId) {
@@ -338,6 +356,7 @@ export default class CoopPlayPhase extends Phase {
           return;
         }
         if (!message.accepted) {
+          this.clearTeamParty(); this.submitted = false;
           this.setStatus(`操作被拒绝：${message.code}`, true);
           this.renderLobbyControls();
           this.battleInputActive = false; await this.openDecisionInput();
@@ -414,7 +433,7 @@ export default class CoopPlayPhase extends Phase {
           + `（${player.total}/10）`).join(' ｜ ');
       }
       if (!this.profileDirty) this.lastProfile = snapshot.personal.profile ?? this.lastProfile;
-      if (!snapshot.personal.profile && !this.lastProfile && !this.starterOpen)
+      if (this.inputReady && !snapshot.personal.profile && !this.lastProfile && !this.starterOpen)
         void this.openStarterSelect().catch(error => this.setStatus(`选队界面失败：${error?.message ?? error}`, true));
       else if (snapshot.personal.profile) this.setStatus('已导入选队，等待队友…');
       this.renderLobbyControls();
@@ -541,6 +560,7 @@ export default class CoopPlayPhase extends Phase {
     this.scene.updateMoneyText?.();
     this.controls.replaceChildren();
     {
+      if (!player.rewardResolved) this.controls.append(this.button('跳过免费奖励', () => this.confirmSkipPreparation()));
       const rewards = player.rewards.map((option: any) =>
         new ModifierTypeOption(restoreModifierTypeState(option.type), 0, 0));
       if (!rewards.length) throw new Error('PERSONAL_REWARD_MENU_EMPTY');
@@ -598,6 +618,22 @@ export default class CoopPlayPhase extends Phase {
     if (this.isPersonalInputCurrent(snapshot, epoch)) { this.preparationSignature = signature; this.preparationViewKey = viewKey; }
   }
 
+  private async confirmSkipPreparation() {
+    const snapshot = this.latest, epoch = this.epoch;
+    if (!this.isPersonalInputCurrent(snapshot, epoch) || snapshot.personal.decision.players.rewardResolved) return;
+    this.clearTeamParty();
+    let active = true;
+    this.releaseTeamParty = () => { active = false; this.scene.ui.getHandler?.(Mode.CONFIRM)?.clear(); };
+    const finish = async (accept: boolean) => {
+      if (!active || !this.isPersonalInputCurrent(snapshot, epoch)) return;
+      this.clearTeamParty(); await this.scene.ui.setMode(Mode.MESSAGE);
+      if (accept) await this.sendPreparation('skip-reward', snapshot, epoch);
+      else { this.preparationSignature = ''; await this.openPreparationMenu(); }
+    };
+    this.setStatus('是否跳过本次免费奖励？跳过后将结束本人购物。');
+    await this.scene.ui.setMode(Mode.CONFIRM, () => finish(true), () => finish(false));
+  }
+
   private async showOriginalPreparationMenu(...args:any[]) {
     const ui=this.scene.ui;
     const handler=ui.getHandler?.(Mode.MODIFIER_SELECT);
@@ -613,6 +649,12 @@ export default class CoopPlayPhase extends Phase {
     const action = { kind: 'preparation', operation, optionId: option.id,
       pokemonId: null, moveIndex: null, fusionId: null };
     const targetKind = preparationItemTarget(type);
+    const availableParty = this.model.applied?.personal?.party;
+    if (targetKind === 'party' && /POTION/.test(option.type.catalogId) && availableParty?.length
+      && !availableParty.some(entry => type.selectFilter(entry.pokemon) === null)) {
+      this.preparationSignature = ''; await this.openPreparationMenu();
+      this.setStatus('当前队伍没有可使用该道具的目标，请改选或跳过免费奖励', true); return;
+    }
     if (targetKind === 'none') {
       await Promise.resolve(); // A same-turn leave can invalidate this gesture without fading the shop.
       if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
@@ -637,6 +679,11 @@ export default class CoopPlayPhase extends Phase {
         await this.sendAction(action, '本人道具目标已提交…');
       }, type.selectFilter, targetKind === 'move' ? [PartyOption.MOVE_1, PartyOption.MOVE_2, PartyOption.MOVE_3, PartyOption.MOVE_4, PartyOption.SUMMARY]
         : [PartyOption.APPLY, PartyOption.SUMMARY], targetKind === 'move' ? type.moveSelectFilter : undefined);
+      if (this.releaseTeamParty && this.isPersonalInputCurrent(snapshot, epoch))
+        this.controls.replaceChildren(this.button('取消使用／返回商店', async () => {
+          this.clearTeamParty(); this.preparationSignature = '';
+          await this.scene.ui.setMode(Mode.MESSAGE); await this.openPreparationMenu();
+        }));
       return;
     }
     this.setStatus('该道具机制尚未接入，可返回改选；免费奖励也可跳过', true);

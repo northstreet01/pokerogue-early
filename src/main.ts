@@ -11,6 +11,7 @@ import BBCodeText from 'phaser3-rex-plugins/plugins/bbcodetext';
 const config: Phaser.Types.Core.GameConfig = {
 	type: Phaser.WEBGL,
 	parent: 'app',
+	loader: { maxParallelDownloads: 8 },
 	scale: {
 		width: 1920,
 		height: 1080,

@@ -14,9 +14,15 @@ const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
     const path = resolve(root, '.' + decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname));
     if (!path.startsWith(root + sep) || !['GET', 'HEAD'].includes(request.method)) { response.writeHead(403); response.end(); return; }
-    if (!(await stat(path)).isFile()) throw new Error('Not a file');
+    const file = await stat(path);
+    if (!file.isFile()) throw new Error('Not a file');
+    const etag = 'W/"' + file.size.toString(16) + '-' + Math.floor(file.mtimeMs).toString(16) + '"';
+    response.setHeader('ETag', etag);
+    const immutable = /[\\/]assets[\\/][^\\/]+-[a-f0-9]{8,}\.(?:js|css)$/.test(path);
+    response.setHeader('Cache-Control', immutable ? 'public, max-age=31536000, immutable' : 'no-cache');
+    if (request.headers['if-none-match'] === etag) { response.writeHead(304); response.end(); return; }
     response.setHeader('Content-Type', types[extname(path)] ?? 'application/octet-stream');
-    response.setHeader('X-Content-Type-Options', 'nosniff'); response.setHeader('Cache-Control', 'no-cache');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
     if (request.method === 'HEAD') response.end(); else createReadStream(path).pipe(response);
   } catch { response.writeHead(404); response.end('Not found'); }
 });

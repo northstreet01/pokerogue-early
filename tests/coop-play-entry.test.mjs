@@ -35,7 +35,8 @@ function phase() {
   const sent = [], errors = [];
   p.send = message => sent.push(structuredClone(message));
   p.setStatus = (message, error) => { if (error) errors.push(message); };
-  p.controls = { replaceChildren() {} };
+  globalThis.document = new JSDOM('<!doctype html><body></body>').window.document;
+  p.controls = document.createElement('div');
   p.renderLobbyControls = () => {};
   p.updateLobbyView = () => {};
   p.model = api.createOriginalClientModel({ restorePokemonState: () => { throw new Error('NO_PARTY_EXPECTED'); },
@@ -1110,6 +1111,7 @@ function personalPotionPhase() {
   const state = preparationPhase(), { p } = state;
   const runtime = api.createOriginalRuntime('personal-party-menu', { trainerId: 1, secretId: 2 });
   const pokemon = api.constructOriginalPokemon(runtime, 1, 5);
+  pokemon.hp = Math.max(1, pokemon.getMaxHp() - 1);
   const entry = { id: pokemon.id, pokemon };
   p.model = { applied: { personal: { party: [entry] } } };
   p.scene.party = ['original-public-field'];
@@ -1757,4 +1759,40 @@ test('capture RELEASE permits the original current-front choice without locally 
  await p.openDecisionInput();await modes.at(-1)[1]();await modes.at(-1)[3](0,api.PartyOption.RELEASE);
  assert.equal(modes.at(-1)[0],api.Mode.CONFIRM);await modes.at(-1)[1]();
  assert.equal(sent.length,1);assert.deepEqual(sent[0].action,{kind:'capture-choice',releaseId:front});assert.deepEqual(ruleState(p),before);
+});
+
+
+test('remote full-health Potion returns to shop with explicit skip and no inventory action',async()=>{
+ const {p,entry,modes,sent}=personalPotionPhase();entry.pokemon.hp=entry.pokemon.getMaxHp();
+ await p.choosePreparationReward(rewardOption('POTION'),p.latest,p.epoch);
+ assert.equal(modes.at(-1)[0],api.Mode.MODIFIER_SELECT);assert.equal(sent.length,0);
+ assert.match(p.controls.textContent,/跳过免费奖励/);
+ await p.confirmSkipPreparation();assert.equal(modes.at(-1)[0],api.Mode.CONFIRM);
+ await modes.at(-1)[2]();assert.equal(modes.at(-1)[0],api.Mode.MODIFIER_SELECT);assert.equal(sent.length,0);
+});
+test('remote target Party has an explicit cancel button that restores the shop and fences stale targets',async()=>{
+ const {p,modes,sent}=personalPotionPhase();await p.choosePreparationReward(rewardOption('POTION'),p.latest,p.epoch);
+ const stale=modes.at(-1)[3];assert.match(p.controls.textContent,/返回商店/);
+ p.controls.querySelector('button').click();await tick();await tick();
+ assert.equal(modes.at(-1)[0],api.Mode.MODIFIER_SELECT);await stale(0,api.PartyOption.APPLY);assert.equal(sent.length,0);
+});
+test('remote shared-stock rejection releases every target view and explicitly requests authoritative recovery',async()=>{
+ const {p,modes,sent}=personalPotionPhase();await p.choosePreparationReward(rewardOption('POTION'),p.latest,p.epoch);
+ p.actionId='sold';p.pendingAction={action:{kind:'preparation'}};p.submitted=true;
+ await p.onMessage({type:'actionReceipt',roomId:p.roomId,actionId:'sold',accepted:false,code:'SHARED_ITEM_UNAVAILABLE',revision:p.latest.revision,decisionId:p.latest.decisionId});
+ assert.equal(p.actionId,null);assert.equal(p.submitted,false);assert.equal(p.releaseTeamParty,null);
+ assert.ok(sent.some(m=>m.type==='requestSnapshot'));assert.equal(modes.at(-1)[0],api.Mode.MODIFIER_SELECT);
+});
+test('public teammate and enemy display retain visible status and clear it on the next view',()=>{
+ const p=new api.CoopBattlePresentation({});for(const effect of [1,2,3,4,5,6]){
+ const m=p.publicModel({id:7,owner:null,speciesId:1,formIndex:0,status:effect});assert.equal(m.status.effect,effect);
+ }assert.equal(p.publicModel({id:7,owner:1,speciesId:1,formIndex:0,status:0}).status,undefined);
+});
+
+
+test('waiting room exposes both seats and no ready/edit actions until both models are acknowledged',async()=>{
+ const {p}=phase();await p.onMessage(welcome);await p.onMessage(await snapshot());p.inputReady=false;p.online=[true,false];
+ api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.match(p.controls.textContent,/玩家2：等待加入/);assert.equal(p.controls.querySelectorAll('button').length,0);
+ p.online=[true,true];p.inputReady=true;api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.match(p.controls.textContent,/提交准备/);assert.match(p.controls.textContent,/重新选队/);
+ p.inputReady=false;api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.equal(p.controls.querySelectorAll('button').length,0);
 });

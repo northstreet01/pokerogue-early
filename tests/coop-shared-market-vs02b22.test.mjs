@@ -1,4 +1,6 @@
 import test,{before} from 'node:test';
+import {createRequire} from 'node:module';
+import {openPreparationRoom,request,until} from './helpers/native-preparation-ws.mjs';
 import assert from 'node:assert/strict';
 import {buildCoopRuntime} from '../scripts/build-coop-runtime.mjs';
 import {defaultTrainerRoute,progressDefault} from './helpers/native-default-trainer.mjs';
@@ -69,4 +71,32 @@ test('free shared reward is claimed once and auto finishes only its recipient',a
  assert.deepEqual(projected.personal.decision.sharedMarket.finished,[true,false]);
  assert.equal(projected.personal.decision.sharedMarket.rerollLocked,true);
  assert.equal(projected.personal.decision.players.rewardResolved,false);
+});
+
+
+test('remote both players use separate shared candies and retain independent original growth through restore',async()=>{
+ let c=await open();const api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');
+ const type=api.captureModifierTypeState(api.modifierTypes.RARE_CANDY().withIdFromFunc(api.modifierTypes.RARE_CANDY));
+ for(const player of c.decision.players)player.rewards=[0,1].map(i=>({id:'candy-'+i,type:structuredClone(type),cost:0}));
+ const levels=[0,1].map(seat=>member(c,seat).level);
+ for(const seat of [0,1]){
+ c=(await act(JSON.parse(JSON.stringify(c)),seat,{kind:'preparation',operation:'reward',optionId:'candy-'+seat,pokemonId:member(c,seat).id,moveIndex:null,fusionId:null})).checkpoint;
+ }
+ assert.deepEqual([0,1].map(seat=>member(c,seat).level),levels.map(n=>n+1));
+ if(c.decision.kind==='preparation')assert.equal(c.decision.shared.rewardClaims.length,2);
+ else assert.equal(c.decision.reason,'next-battle');
+});
+test('remote concurrent claim accepts only one owner, rejects the stale peer, then lets the peer finish and advance',async()=>{
+ const c=await open(),api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');
+ const env=await openPreparationRoom({api,checkpoint:c,stage:'preparation',provisioning:{seed:'learning-natural-2',identities:route.profiles.map(p=>p.trainer),sharedPreparation:true}});
+ try{const pair=env.pair;const option=pair[0].latest.personal.decision.players.rewards.find(o=>['POKEBALL','GREAT_BALL','ULTRA_BALL','NUGGET','BIG_NUGGET'].includes(o.type.catalogId));assert.ok(option);
+ const a={kind:'preparation',operation:'reward',optionId:option.id,pokemonId:null,moveIndex:null,fusionId:null};
+ const messages=pair.map(client=>request(client,a));pair.forEach((client,i)=>client.send(messages[i]));
+ const receipts=await Promise.all(pair.map((client,i)=>client.wait(m=>m.type==='actionReceipt'&&m.actionId===messages[i].actionId)));
+ assert.equal(receipts.filter(r=>r.accepted).length,1);assert.ok(['STALE_DECISION','SYNC_BLOCKED','SHARED_ITEM_UNAVAILABLE'].includes(receipts.find(r=>!r.accepted).code));
+ await until(()=>pair.every(p=>p.ready&&p.latest.revision>0),'both models recovered after contested stock');
+ assert.deepEqual(env.failures,[]);const loser=receipts.findIndex(r=>!r.accepted),message=request(pair[loser],{kind:'preparation',operation:'skip-reward'});pair[loser].send(message);
+ assert.equal((await pair[loser].wait(m=>m.type==='actionReceipt'&&m.actionId===message.actionId)).accepted,true);
+ await until(()=>pair.every(p=>p.ready&&p.latest.shared.waveIndex===2),'next encounter after peer recovery');assert.deepEqual(env.failures,[]);
+ }finally{await env.close();}
 });

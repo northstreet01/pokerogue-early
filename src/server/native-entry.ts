@@ -80,6 +80,9 @@ function nextNativeDecisionId(c) {
   return `native-${c.battle.waveIndex}-${sequence}`;
 }
 const partyWiped=c=>!c.roster.entries.some(e=>e.owner!==null&&e.group==='party'&&!e.pokemon.isFainted(true));
+const departedWildEncounter=c=>c.battle.battleType===BattleType.WILD && c.battle.battleSpec===BattleSpec.DEFAULT
+  && c.battle.enemyParty.some(p=>p.hp>0)
+  && c.battle.enemyParty.every(p=>p.isFainted(true)||!c.roster.field.includes(p.id));
 const defeatDecision=id=>({id,kind:'ended',requiredSeats:[],victory:false,reason:'defeat'});
 const victoryDecision=id=>({id,kind:'ended',requiredSeats:[],victory:true,reason:'victory'});
 
@@ -149,6 +152,7 @@ function installPokemonDisplayPort() {
   };
   proto.getSprite = function () { return new DisplayTarget(); };
   proto.setFrameRate = function () {}; // Status slow-down only changes rendered sprite animations.
+  proto.updateFusionPalette = function () {}; // Shader palette only; resetSummonData still runs unchanged.
   proto.updateSpritePipelineData = function () { this.updateInfo(true); }; // Tera shader only; the original modifier owns the type/rules.
   proto.destroy = function () {}; // Renderer disposal only; the original release owns party/modifier changes.
   proto.setFieldPosition = function (position) { this.fieldPosition = position; return Promise.resolve(); };
@@ -169,7 +173,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   installPokemonDisplayPort();
   const root: any = createOriginalRuntime(c.scene.seed, identity).scene;
   Object.assign(root, c.scene, { arena: c.arena, currentBattle: c.battle, enemyModifiers: c.enemyModifiers,
-    nativeEvents: [], enableTutorials: false });
+    nativeEvents: [], nativeIndependentCommands: true, enableTutorials: false });
   const events = root.nativeEvents, intents = [], callbacks = [];
   let tick = 0, order = 0, ended = 0, waiting = null, nextId = 0;
   let completePhase: (() => void) | undefined;
@@ -178,6 +182,9 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   const schedule = (callback, delay = 0) => { if (callback) callbacks.push({ callback, tick: tick + delay, order: order++ }); };
   const parties = [0, 1].map(seat => c.roster.entries.filter(e => e.owner === seat && e.group === 'party')
     .sort((a, b) => a.index - b.index).map(e => e.pokemon));
+  const originalGetField = root.getField;
+  root.getField = (active = false) => active ? originalGetField.call(root, false).filter(p => p?.isActive(true))
+    : originalGetField.call(root, false);
   root.party = [parties[0][0], parties[1][0], ...parties[0].slice(1), ...parties[1].slice(1)].filter(Boolean);
   root.getParty = () => [parties[0][0], parties[1][0], ...parties[0].slice(1), ...parties[1].slice(1)].filter(Boolean);
   root.field = { list: [], add(p) { this.list.push(p); return this; },
@@ -510,6 +517,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     c.roster.field = root.getField().map((p, slot) => p && !(p as any).__coopCaptured && (root.field.getIndex(p) >= 0
       || p.isFainted() && c.roster.field[slot] === p.id) ? p.id : null);
     for (const key of ['seed', 'waveSeed', 'waveCycleOffset', 'offsetGym', 'score']) c.scene[key] = root[key];
+    // A living escaped enemy has no field command; preserve its HP and rules.
+    for (const slot of [2, 3]) if (c.roster.field[slot] === null) c.battle.turnCommands[slot] = null;
     if (Object.prototype.hasOwnProperty.call(root, 'lastEnemyTrainer')) c.scene.lastEnemyTrainer = root.lastEnemyTrainer;
     for (const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue']) root[key] = root[key].flatMap(p => {
       if (p instanceof ModifierRewardPhase) {
@@ -705,6 +714,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
             // Same original phase once per personal inventory, in the room's
             // established order. Its original hatch phases retain their owner.
             for (const scene of views) { ended = 0; new EggLapsePhase(scene).start(); }
+          } else if (p instanceof EnemyCommandPhase && !root.getEnemyField()[(p as any).fieldIndex]?.isActive(true)) {
+            c.battle.turnCommands[(p as any).fieldIndex + 2] = null; Phase.prototype.end.call(p);
           } else p.start();
         } catch (error) { failure = error; }
         let idle = 0;
@@ -1292,6 +1303,7 @@ export async function submitNativeActions(runtime, payload) {
 export async function openNativePreparation(runtime, checkpoint, sharedMarket = false) {
   const c = codec.restore(checkpoint);
   const result = await openPreparation(c, codec, {
+    isClearedEncounter:ctx=>departedWildEncounter(ctx)&&ctx.battle.enemyParty.some(p=>p.isFainted(true)),
     openPersonalMenu: (candidate, _queued, { seat }) => openNativePersonalMenu(candidate, runtime, seat, null, sharedMarket),
     copySharedMenu(candidate, template, {seat}) {
       const binding = bindNativeScene(candidate, runtime.scene.gameData);
@@ -1524,6 +1536,7 @@ export async function nextNativeBattle(runtime, checkpoint) {
   check(!fixed || fixed.battleType === BattleType.TRAINER, 'UNSUPPORTED_NATIVE_NEXT_BATTLE');
     let selectedBiome;
     const result = await advanceNextBattle(c, codec, {
+      isEscapedEncounter:departedWildEncounter,
       isFinalEncounter:(before,after)=>before.battle.gameMode.isClassic&&after.battle.battleType===BattleType.WILD
         &&after.battle.battleSpec===BattleSpec.FINAL_BOSS&&after.battle.gameMode.isWaveFinal(after.battle.waveIndex)
         &&after.battle.waveIndex===before.battle.waveIndex+1,
@@ -1725,6 +1738,7 @@ function publicPokemonView(entry: any) {
     maxHp: pokemon.getMaxHp(),
     gender: pokemon.gender ?? 0,
     shiny: !!pokemon.shiny,
+    status: pokemon.status?.effect ?? 0,
     teraType: pokemon.getTeraType(),
     ...(pokemon.isBoss() ? {bossSegments:pokemon.bossSegments,bossSegmentIndex:pokemon.bossSegmentIndex} : {}),
   };

@@ -22,7 +22,8 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
   };
   check(c.decision.kind==='continuing'&&c.decision.reason==='next-battle'&&state.currentPhase===null
     &&state.standbyPhase===null&&c.pendingEffects.length===0,'UNSAFE_NEXT_BATTLE_BOUNDARY');
-  check(c.battle?.enemyParty.length>0&&c.battle.enemyParty.every(p=>p.isFainted(true)),'BATTLE_NOT_WON');
+  check(c.battle?.enemyParty.length>0&&(c.battle.enemyParty.every(p=>p.isFainted(true))
+    || driver.isEscapedEncounter?.(c)===true),'BATTLE_NOT_WON');
   check([...before.continuation.phaseQueuePrepend,...before.continuation.phaseQueue].length===1
     &&before.continuation.nextCommandPhaseQueue.length===0,'UNSUPPORTED_NEXT_BATTLE_QUEUE');
   driver.validateBranch(c);

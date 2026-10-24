@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { beginLoading } from './loading-screen.mjs';
 import i18next from '../i18n';
 import type BattleScene from '../battle-scene';
 import Pokemon, { PlayerPokemon, EnemyPokemon, FieldPosition, capturePokemonState, restorePokemonState } from '../field/pokemon';
@@ -296,7 +297,7 @@ export class CoopBattlePresentation {
     if (!entry && event.view) {
       const model = this.model(event.view, batch.applied), display = this.container(model, event.view.owner !== null, event.view.fieldIndex);
       display.init(); this.scene.field.add(display); this.displayed.push(display);
-      await within(display.loadAssets(true, signal), 5000, signal);
+      await within(display.loadAssets(true, signal), 60000, signal);
       if (signal.aborted) return;
       entry = { display, model, view: event.view, key: '' }; // May leave again before the final field snapshot.
       batch.entries.set(event.pokemonId, entry);
@@ -473,6 +474,7 @@ export class CoopBattlePresentation {
     Object.assign(model, { species: getPokemonSpecies(view.speciesId), formIndex: view.formIndex,
       id: view.id, level: view.level, hp: view.hp, gender: view.gender, shiny: view.shiny, pokeball: view.pokeball,
       ...(view.bossSegments ? {bossSegments:view.bossSegments,bossSegmentIndex:view.bossSegmentIndex} : {}),
+      status: view.status ? { effect: view.status } : undefined,
       moveset: [], exp: 0, levelExp: 0,
       // These methods expose public display facts, not invented combat stats,
       // ability, moves, IVs or random state for a teammate/enemy.
@@ -546,11 +548,13 @@ export class CoopBattlePresentation {
     const continuous = !!this.lastSnapshot && this.lastSnapshot.runId === snapshot.runId
       && this.lastSnapshot.connectionEpoch === snapshot.connectionEpoch;
     const replay = !!options.replay && continuous;
+    const loading = !continuous ? beginLoading('正在加载战斗场景，等待双方就绪', this.scene.load) : null;
     const entries = new Map<number, any>();
     const batch = { snapshot, applied, entries, field: [] as (Pokemon | null)[], replay, preserveFieldBinding: !!options.preserveFieldBinding };
     this.pending = batch;
     try {
       if (!options.preserveFieldBinding) this.attachField(this.field, shared);
+      const assetTasks: Promise<void>[] = [];
       for (const view of shared.pokemon) {
         if (!shared.field.includes(view.id)) continue;
         const look = JSON.stringify([view.speciesId, view.formIndex, view.gender, view.shiny]);
@@ -561,19 +565,23 @@ export class CoopBattlePresentation {
           display = this.container(model, view.owner !== null, shared.field.indexOf(view.id));
           this.displayed.push(display);
           display.init(); this.scene.field.add(display);
-          await within(display.loadAssets(true, signal), 5000, signal);
-          if (signal.aborted) return;
-          // Original immediate setFieldPosition does not resolve its Promise.
-          const slot = shared.field.indexOf(view.id);
-          void display.setFieldPosition(slot % 2 ? FieldPosition.RIGHT : FieldPosition.LEFT);
-          await within(Promise.resolve(display.updateInfo(true)), 1200, signal);
-          display.setVisible(!replay && display.hp > 0);
-          (display as any).battleInfo.setVisible(!replay && display.hp > 0);
-          this.looks.set(view.id, look);
-          this.modelKeys.set(view.id, key);
+          display.setVisible(false); (display as any).battleInfo?.setVisible(false);
+          const loadedDisplay = display;
+          assetTasks.push((async () => {
+            await within(loadedDisplay.loadAssets(true, signal), 60000, signal);
+            if (signal.aborted) return;
+            if (this.scene.textures?.exists && !this.scene.textures.exists(loadedDisplay.getBattleSpriteKey()))
+              throw new Error('精灵素材下载失败，请重试加载');
+            const slot = shared.field.indexOf(view.id);
+            void loadedDisplay.setFieldPosition(slot % 2 ? FieldPosition.RIGHT : FieldPosition.LEFT);
+            await within(Promise.resolve(loadedDisplay.updateInfo(true)), 1200, signal);
+            this.looks.set(view.id, look); this.modelKeys.set(view.id, key);
+          })());
         }
         entries.set(view.id, { display, model, key, view });
       }
+      if (assetTasks.length) await Promise.all(assetTasks);
+      if (signal.aborted) { loading?.complete(); return; }
       batch.field = shared.field.map((id: number | null) => id === null ? null : entries.get(id)?.display ?? null);
       if (!replay) this.attachField(batch.field, shared);
       const sceneChanged = !this.lastSnapshot || this.lastSnapshot.shared.biome !== shared.biome
@@ -589,16 +597,19 @@ export class CoopBattlePresentation {
         this.scene.trainer.setVisible(false); this.trainerSprite = null;
         if (trainer?.spriteKey) {
           if (!this.scene.textures.exists(trainer.spriteKey))
-            await within(trainerConfigs[trainer.type].loadAssets(this.scene, trainer.variant), 2000, signal);
+            await within(trainerConfigs[trainer.type].loadAssets(this.scene, trainer.variant), 60000, signal);
           if (signal.aborted) return;
           this.scene.trainer.setTexture(trainer.spriteKey).setFrame(0).setPosition(106, 80).setVisible(true);
           this.trainerSprite = this.scene.trainer;
         }
       }
       if (!replay) await this.finish(batch, signal);
+      loading?.complete();
       return batch.field;
     } catch (error) {
-      if (signal.aborted) return;
+      if (signal.aborted) { loading?.complete(); return; }
+      this.lifetime.abort();
+      loading?.fail(error instanceof Error ? error.message : String(error));
       throw error;
     }
   }

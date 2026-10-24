@@ -14,7 +14,8 @@ export async function openPreparation(context,codec,driver,{decisionId,sharedMar
   const c=codec.restore(codec.capture(context)),state=c.continuation;
   check(c.decision.kind==='continuing'&&c.decision.reason==='effects'&&state.currentPhase===null
     &&state.standbyPhase===null&&c.pendingEffects.length===0,'UNSAFE_PREPARATION_BOUNDARY');
-  check(c.battle?.enemyParty.length>0&&c.battle.enemyParty.every(p=>p.isFainted(true)),'BATTLE_NOT_WON');
+  check(c.battle?.enemyParty.length>0&&(c.battle.enemyParty.every(p=>p.isFainted(true))
+    || driver.isClearedEncounter?.(c)===true),'BATTLE_NOT_WON');
   check(c.roster.entries.some(e=>e.owner!==null&&e.group==='party'&&!e.pokemon.isFainted()),'UNCONFIRMED_SIMULTANEOUS_WIPE');
   const before=codec.capture(c),d=selectNextPhase(state,()=>check(false,'REWARD_QUEUE_EMPTY')).phase;
   const record=[...before.continuation.phaseQueuePrepend,...before.continuation.phaseQueue].find(p=>p.phaseId===d?.phaseId);

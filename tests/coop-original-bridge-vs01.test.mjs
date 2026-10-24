@@ -49,7 +49,7 @@ test('VS-02B-12R equal trainer prize: durable winning-turn retry, owned messages
     assert.equal(state.sa.personal.decision.kind,'preparation');
     for(const [seat,snapshot]of [state.sa,state.sb].entries()){
       assert.equal(snapshot.personal.resources.money,initial[seat].personal.resources.money+55);
-      assert.equal(snapshot.events.filter(e=>e.kind==='message'&&e.scope===seat).length,1);
+      assert.equal(snapshot.events.filter(e=>e.kind==='message'&&e.scope===seat&&e.presentation?.key==='battle:moneyWon').length,1);
       assert.ok(snapshot.events.every(e=>e.scope==='shared'||e.scope===seat));
     }
     const stable=canonical(env.service.rooms.get(room.roomId).checkpoint);
@@ -345,7 +345,7 @@ async function applyAndAck(env, client, snapshot) {
 
 function requiresInput(snapshot) {
   const decision = snapshot.personal.decision;
-  return ['lobby', 'wait-actions', 'preparation', 'switch-confirm', 'switch-select', 'wait-switch', 'capture-choice', 'learn-move'].includes(decision.kind)
+  return ['lobby', 'wait-actions', 'preparation', 'switch-confirm', 'switch-select', 'wait-switch', 'capture-choice', 'learn-move', 'evolution'].includes(decision.kind)
     && decision.requiredSeats.length > 0;
 }
 

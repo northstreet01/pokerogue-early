@@ -24,11 +24,22 @@ async function diff(initial,{stop=c=>c.decision.kind==='wait-actions',options={}
 }
 const berry=(c,seat)=>inventory(c,seat).find(m=>m instanceof modifiers.BerryModifier);
 const resource=(c,seat)=>({...c.players[seat],modifiers:c.players[seat].modifiers.map(modifierCodec.capture)});
-test('transfer methods remain original and modifier source only observes its existing final Promise',()=>{
+test('transfer rules retain the exact original body with one localized display call and the observed final Promise',()=>{
   const frozen=JSON.parse(fs.readFileSync(new URL('./fixtures/early-transfer-revive-reference.json',import.meta.url),'utf8'));
   const scene=parse('battle-scene.ts').statements.find(n=>n.name?.text==='BattleScene');
   const norm=s=>s.replace(/\r\n/g,'\n').trim();
-  for(const [name,body]of Object.entries(frozen.scene))assert.equal(norm(scene.members.find(n=>n.name?.getText()===name).getText()),norm(body));
+  for(const [name,body]of Object.entries(frozen.scene)){
+    let expected=body;
+    if(name==='addModifier'){
+      // This one display call is localized; every other original statement
+      // and every other transfer method remains an exact source comparison.
+      const originalMessage="this.queueMessage(`The stack for this item is full.\\n You will receive ${defaultModifierType.name} instead.`, null, true);";
+      const localizedMessage="this.queueMessage((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('battle:itemStackFull',\n            {fullItemName:modifier.type.getDisplayName(),itemName:defaultModifierType.getDisplayName()})\n            :`The stack for this item is full.\\n You will receive ${defaultModifierType.name} instead.`, null, true);";
+      assert.equal(body.split(originalMessage).length,2);
+      expected=body.replace(originalMessage,localizedMessage);
+    }
+    assert.equal(norm(scene.members.find(n=>n.name?.getText()===name).getText()),norm(expected));
+  }
   const source=parse('modifier/modifier.ts').statements.find(n=>n.name?.text==='HeldItemTransferModifier').members.find(n=>n.name?.getText()==='apply').getText();
   assert.equal(norm(source).replace('observeRulePromise(pokemon.scene, Promise.all(heldItemTransferPromises).then','Promise.all(heldItemTransferPromises).then')
     .replace(/    \}\)\);(?=\s+return !!transferredModifierTypes)/,'    });'),norm(frozen.transferApply));

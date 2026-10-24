@@ -994,7 +994,7 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
           // that removal before saving it as current, otherwise decline would
           // reopen the very same learning choice after recovery.
           binding.sync();
-          const id = `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`;
+          const id = nextNativeDecisionId(c);
           phases.capture(p, c, seat);
           c.continuation.currentPhase = { kind: 'original-phase', phaseId: Math.max(-1,
             ...Object.values(c.continuation).flat().filter((d: any) => d?.phaseId !== undefined).map((d: any) => d.phaseId)) + 1,
@@ -1005,7 +1005,7 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
       }
       check(supportsPhase(p), 'UNSUPPORTED_NATIVE_ENTRY_PHASE');
       const result = await binding.execute(p);
-      const id = `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`;
+      const id = nextNativeDecisionId(c);
       if (result.suspended) {
         const kind = switchKind(p);
         // Retain the actual current phase, just as the per-phase runner does.
@@ -1452,7 +1452,7 @@ export async function chooseNativeSwitch(runtime, payload) {
         releaseNativePartyMember(c, binding, seat, index, () => phase.finishCatch(true));
       });
       c.continuation.currentPhase = null;
-      c.decision = { id: `native-${c.battle.waveIndex}-${Number(c.decision.id.split('-').at(-1)) + 1}`,
+      c.decision = { id: nextNativeDecisionId(c),
         kind: 'continuing', requiredSeats: [], reason: 'effects' };
       return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
     } finally { binding.dispose(); }

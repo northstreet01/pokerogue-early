@@ -8,10 +8,10 @@ export async function until(predicate,label){
   for(let n=0;n<2400;n++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,5));}
   throw Error(`WAIT_TIMEOUT: ${label}`);
 }
-export async function openPreparationRoom({api,checkpoint,store,old=null,stage='preparation',provisioning:suppliedProvisioning,intents=[]}){
+export async function openPreparationRoom({api,checkpoint,store,old=null,stage='preparation',provisioning:suppliedProvisioning,intents=[],hostFactory}){
   const seed=checkpoint.scene.seed,identities=[{trainerId:1,secretId:2},{trainerId:3,secretId:4}];
   const provisioning=suppliedProvisioning??{seed,identities,...(checkpoint.decision.shared?{sharedPreparation:true}:{})};
-  const original=createOriginalCoopAdapter({fixture:{...provisioning,parties:[[909,7],[906,7]],eggState:{players:[[],[]]}}});
+  const original=createOriginalCoopAdapter({fixture:{...provisioning,parties:[[909,7],[906,7]],eggState:{players:[[],[]]}},...(hostFactory?{hostFactory}:{})});
   // Explicit trusted checkpoint injection. Never claim this is a natural draw
   // or an end-to-end browser lobby; all subsequent effects use the real Worker.
   const failures=[],groups=[];

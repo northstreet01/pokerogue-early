@@ -1500,12 +1500,24 @@ export async function nextNativeBattle(runtime, checkpoint) {
         }finally{binding.dispose();}
       },
       phaseKind: p => p.constructor.name,
+      validateWildTransition(before,after) {
+        const expected=codec.restore(codec.capture(before));
+        const binding=bindNativeScene(expected,runtime.scene.gameData);
+        try {
+          expected.battle.waveIndex=after.battle.waveIndex;
+          // Original newBattle refreshes the time-of-day pool at each xx5.
+          // Compare the complete original Arena result, including unchanged
+          // weather, terrain and tags; never omit pool fields from validation.
+          if(after.battle.waveIndex%10===5)expected.arena.updatePoolsForTimeOfDay();
+          return canonical(codec.capture(expected).arena)===canonical(codec.capture(after).arena);
+        }finally{binding.dispose();}
+      },
       validateTrainerTransition(before, after) {
         const expected = codec.restore(codec.capture(before));
         const binding = bindNativeScene(expected, runtime.scene.gameData);
         try {
           expected.battle.waveIndex = after.battle.waveIndex;
-          expected.arena.updatePoolsForTimeOfDay();
+          if(after.battle.waveIndex%10===5)expected.arena.updatePoolsForTimeOfDay();
           expected.arena.removeAllTags();
           for (const entry of expected.roster.entries.filter(e=>e.owner!==null&&e.group==='party'&&e.index===0)) {
             const pokemon = entry.pokemon;

@@ -76,6 +76,8 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
   }else if(c.battle.battleType===1){
     check(typeof driver.validateTrainerTransition==='function'
       &&driver.validateTrainerTransition(context,c)===true,'INVALID_TRAINER_TRANSITION');
+  }else if(driver.validateWildTransition){
+    check(typeof driver.validateWildTransition==='function'&&driver.validateWildTransition(context,c)===true,'INVALID_WILD_TRANSITION');
   }else check(canonical(before.arena)===canonical(after.arena),'NEXT_BATTLE_RESOURCE_CHANGED');
   if(driver.validateEnemyModifiers){
     check(typeof driver.validateEnemyModifiers==='function'&&driver.validateEnemyModifiers.constructor.name!=='AsyncFunction','ENCOUNTER_MODIFIER_VALIDATOR_UNAVAILABLE');

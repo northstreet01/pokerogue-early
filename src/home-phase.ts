@@ -86,6 +86,11 @@ export class HomePhase extends Phase {
   }
 
   showHome(): Promise<void> {
+    // Root creates a battle backdrop before an adventure. Home shows only menus.
+    for (const object of [this.scene.field, this.scene.fieldUI, this.scene.arenaBg,
+      this.scene.arenaBgTransition, this.scene.arenaPlayer, this.scene.arenaEnemy,
+      this.scene.arenaNextEnemy, this.scene.arenaPlayerTransition, this.scene.trainer,
+      this.scene.modifierBar, this.scene.enemyModifierBar]) object?.setVisible(false);
     const epoch = ++this.epoch;
     return this.menu(epoch, [
       ['单人冒险', () => this.navigate('/?solo=1')],

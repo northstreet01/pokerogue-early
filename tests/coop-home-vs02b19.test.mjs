@@ -268,3 +268,13 @@ test('legacy personal data keeps original defaults; structurally corrupt JSON is
   await p.browse(api.Mode.STARTER_SELECT);assert.match(modes.at(-1)[1].options[0].label,/读取失败/);
   assert.deepEqual(await rawRecords(),before);
 });
+
+
+test('returning home hides the battle backdrop, combatants and HUD while preserving menu and explicit solo navigation',async t=>{
+ const {scene,p,modes,assigned}=home(t);const view=()=>({visible:true,setVisible(value){this.visible=value;}});
+ scene.field=view();scene.fieldUI=view();scene.arenaBg=view();scene.uiContainer=view();
+ await p.showHome();await settle(p);
+ assert.equal(scene.field.visible,false);assert.equal(scene.fieldUI.visible,false);assert.equal(scene.arenaBg.visible,false);
+ assert.equal(scene.uiContainer.visible,true);assert.equal(modes.at(-1)[0],api.Mode.TITLE);
+ modes.at(-1)[1].options[0].handler();assert.deepEqual(assigned,['/?solo=1']);
+});

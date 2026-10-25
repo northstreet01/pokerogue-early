@@ -660,9 +660,12 @@ for (const [seed, catalogId] of [['mvp-native-entry', 'GREAT_BALL'], ['potion-d'
     const fixture = { seed, identity: { trainerId: 1, secretId: 2 },
       parties: [[1, 4, 7], [906, 909, 912]], eggState: { players: [[], []] } };
     try {
-      let rejectRevision = null;
+      let rejectRevisionFloor = null;
       const store = { load: () => disk.store.load(), save: room => {
-        if (room.revision === rejectRevision) throw Error('reward candidate disk failure');
+        if (rejectRevisionFloor !== null && room.revision >= rejectRevisionFloor) {
+          rejectRevisionFloor = null;
+          throw Error('reward candidate disk failure');
+        }
         return disk.store.save(room);
       } };
       env = await startEnv({ fixture, store });
@@ -682,7 +685,7 @@ for (const [seed, catalogId] of [['mvp-native-entry', 'GREAT_BALL'], ['potion-d'
         decisionId: snapshot.decisionId, expectedRevision: snapshot.revision, actionId: `reward-${catalogId}`, action };
       const before = canonical(env.service.rooms.get(room.roomId).checkpoint);
       const tokens = [room.a, room.b].map(c => c.messages.find(m => m.type === 'welcome' && m.roomId).resumeToken);
-      rejectRevision = snapshot.revision + 1;
+      rejectRevisionFloor = snapshot.revision + 1;
       const failure = room.a.next(m => m.type === 'error');
       room.a.send(envelope);
       const receipt = await room.a.wait(m => m.type === 'actionReceipt' && m.actionId === envelope.actionId);
@@ -691,7 +694,7 @@ for (const [seed, catalogId] of [['mvp-native-entry', 'GREAT_BALL'], ['potion-d'
       assert.equal(failed.revision, snapshot.revision); assert.equal(canonical(failed.checkpoint), before);
       assert.deepEqual(failed.inputs, { 0: action });
       assert.equal(room.a.latestSnapshot().revision, snapshot.revision);
-      rejectRevision = null;
+      rejectRevisionFloor = null;
       const counts = [room.a.snapshots.length, room.b.snapshots.length];
       room.a.send({ type: 'requestSnapshot', roomId: room.roomId, runId: room.runId,
         knownRevision: snapshot.revision, reason: 'retry-reward-save' });

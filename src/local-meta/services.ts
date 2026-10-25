@@ -24,9 +24,9 @@ export function localProfileError(error:any):string {
 export async function prepareProfileGameData(scene:any) {
   if(scene.gameData.localProfileId)return;
   const repository=profileRepository(),index=await repository.list();
-  if(!index.activeProfileId)return; // Explicit legacy compatibility; no migration.
   const requested=new URLSearchParams(location.search).get('profile');
   if(requested&&requested!==index.activeProfileId)throw Object.assign(new Error('LOCAL_PROFILE_CHANGED'),{code:'LOCAL_PROFILE_CHANGED'});
+  if(!index.activeProfileId)return; // Explicit legacy compatibility; no migration.
   const mode=(globalThis as any).window?.__COOP_PLAY__?'coop':'solo';
   let io:any;
   const data=scene.gameData;

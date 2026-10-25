@@ -163,6 +163,9 @@ test('terminal disk failure preserves slot and statistics until a successful ret
   const saved=await r.read(p.profileId);assert.equal(saved.soloRuns.length,0);assert.equal(saved.originalSystem.gameStats.sessionsWon,1);
 });
 test('selected profile binding is used by login preparation, prevents a second writer and leaves an escape on failure',async t=>{
+  location.search='?profile=missing-profile';
+  await assert.rejects(api.prepareProfileGameData({gameData:{}}),/LOCAL_PROFILE_CHANGED/);
+  location.search='';
   const {r,p}=await created();await r.setActive(p.profileId);const h=home(t);
   const runtime=api.createOriginalRuntime('profile-login',{trainerId:12,secretId:34});
   h.scene.trainer={texture:{key:'trainer_m'},setTexture(){}};

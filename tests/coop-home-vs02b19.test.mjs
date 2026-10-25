@@ -120,11 +120,17 @@ test('cancel during real IDB load cannot attach its data or cover a newer home s
 
 test('queued original UI transitions serialize and obsolete navigation stays inert after return',async t=>{
   const {p,scene,modes}=home(t);await settle(p);
-  const old=modes.at(-1)[1].options;let finish;
-  scene.ui.setMode=(...args)=>new Promise(resolve=>{modes.push(args);finish=resolve;});
+  const old=modes.at(-1)[1].options,waiting=[];
+  scene.ui.setMode=(...args)=>new Promise(resolve=>{modes.push(args);waiting.push(resolve);});
+  const finishNext=async()=>{
+    for(let i=0;!waiting.length;i++){assert.ok(i<500,'original UI transition must become pending');await new Promise(r=>setTimeout(r,10));}
+    waiting.shift()();
+  };
   const pending=p.showPersonal();await new Promise(r=>setTimeout(r,0));
-  const returning=p.showHome();old[0].handler();finish();await pending;
-  await new Promise(r=>setTimeout(r,0));finish();await new Promise(r=>setTimeout(r,0));finish();await returning;
+  const returning=p.showHome();old[0].handler();await finishNext();await pending;
+  // The new home first reads the active profile from IDB. Resolve each actual
+  // transition, rather than assuming that read finishes in one timer tick.
+  await finishNext();await finishNext();await returning;
   assert.equal(modes.at(-1)[1].options[0].label,'单人冒险');
 });
 

@@ -363,8 +363,8 @@ export default class CoopPlayPhase extends Phase {
           return;
         }
         if (action?.kind === 'fight') this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'capture-choice', 'switch', 'ball', 'learn-move', 'evolution'].includes(action?.kind)) this.submitted = true;
-        if (['preparation', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball', 'learn-move', 'evolution'].includes(action?.kind))
+        if (['preparation', 'target', 'switch-confirm', 'switch-select', 'forced-switch', 'capture-choice', 'switch', 'ball', 'learn-move', 'evolution'].includes(action?.kind)) this.submitted = true;
+        if (['preparation', 'target', 'switch-confirm', 'switch-select', 'forced-switch', 'switch', 'ball', 'learn-move', 'evolution'].includes(action?.kind))
           await this.scene.ui.setMode(Mode.MESSAGE);
         if (!current()) return;
         if (action?.kind === 'profile-ready') this.profileDirty = false;
@@ -500,7 +500,8 @@ export default class CoopPlayPhase extends Phase {
       await this.leaveSession(reason==='defeat'||reason==='victory'?reason:undefined);return;
     }
     if (this.releaseTeamParty) return;
-    if (this.latest?.personal.decision.kind === 'capture-choice' || this.latest?.personal.decision.legacyCapture) await this.openCaptureChoice();
+    if (this.latest?.personal.decision.kind === 'wait-target') await this.openForcedTarget();
+    else if (this.latest?.personal.decision.kind === 'capture-choice' || this.latest?.personal.decision.legacyCapture) await this.openCaptureChoice();
     else if (this.latest?.personal.decision.players?.subdecision?.kind === 'learn-move') await this.openLearnMoveMenu();
     else if (this.latest?.personal.decision.players?.subdecision?.kind === 'evolution') await this.openEvolutionMenu();
     else if (this.latest?.personal.decision.kind === 'preparation') await this.openPreparationMenu();
@@ -807,6 +808,20 @@ export default class CoopPlayPhase extends Phase {
     if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return;
     this.preparationSignature = ''; this.switchSignature = ''; this.battleInputActive = false;
     await this.openDecisionInput();
+  }
+
+  private async openForcedTarget() {
+    const snapshot = this.latest, epoch = this.epoch, decision = snapshot?.personal.decision;
+    if (decision?.kind !== 'wait-target' || !decision.requiredSeats.includes(this.seat) || !this.isPersonalInputCurrent(snapshot, epoch)) return;
+    if (this.battleInputActive) return;
+    this.battleInputActive = true;
+    this.setStatus('请选择本人续招目标；队友已确认的行动会保留');
+    await this.scene.ui.setMode(Mode.TARGET_SELECT, this.seat!, decision.target.moveId, async (target:number) => {
+      if (!this.isPersonalInputCurrent(snapshot, epoch)) return;
+      const action = decision.options.find((option:any) => option.target === target);
+      if (!action) return;
+      await this.sendAction(action, '目标已提交，等待结算…');
+    }, decision.options.map((option:any) => option.target));
   }
 
   private async openCaptureChoice() {

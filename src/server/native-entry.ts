@@ -1,5 +1,8 @@
+import { readStoredCommandIntent } from '../battle-core/stored-command.mjs';
 import BattleScene from '../battle-scene';
 import { Phase } from '../phase';
+import { prepareQueuedFight, selectEncoreFight } from '../battle-core/forced-command.mjs';
+import { createTargetDecision, resolveTargetIntent } from '../battle-core/target-command.mjs';
 import Pokemon, { EnemyPokemon, FieldPosition, HitResult } from '../field/pokemon';
 import { NewBattlePhase, EncounterPhase, ShowTrainerPhase, SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase,
   TurnInitPhase, CommandPhase, MessagePhase, ShinySparklePhase } from '../phases';
@@ -116,13 +119,14 @@ class DisplayTarget {
   destroy() {}
 }
 
-const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
+const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, CommandPhase, SelectTargetPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
   FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, EvolutionPhase, EndEvolutionPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, ModifierRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase, LevelCapPhase, WeatherEffectPhase, QuietFormChangePhase, GameOverPhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
-const switchKind = p => p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
+const switchKind = p => p instanceof SelectTargetPhase ? 'wait-target' : p instanceof CommandPhase ? 'wait-actions' : p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
-const switchDecision = (id, c, p) => p instanceof AttemptCapturePhase
+const switchDecision = (id, c, p) => p instanceof SelectTargetPhase ? createTargetDecision(id, c, (p as any).fieldIndex, getMoveTargets)
+  : p instanceof CommandPhase ? actionDecision(c, (p as any).scene, id, (p as any).fieldIndex) : p instanceof AttemptCapturePhase
   ? createCaptureChoice(id, c, phases.capture(p, c).scope) : switchKind(p) === 'wait-switch'
   ? createForcedSwitchDecision(id, c, [p.fieldIndex])
   : createPreBattleSwitchDecision(id, c, p.fieldIndex, switchKind(p));
@@ -170,12 +174,14 @@ function installPokemonDisplayPort() {
 }
 
 function bindNativeScene(c: any, identity: any, inputs: any = {}) {
+  inputs = { ...inputs };
   installPokemonDisplayPort();
   const root: any = createOriginalRuntime(c.scene.seed, identity).scene;
   Object.assign(root, c.scene, { arena: c.arena, currentBattle: c.battle, enemyModifiers: c.enemyModifiers,
     nativeEvents: [], nativeIndependentCommands: true, enableTutorials: false });
   const events = root.nativeEvents, intents = [], callbacks = [];
   let tick = 0, order = 0, ended = 0, waiting = null, nextId = 0;
+  const suppliedTargets = new Set<number>();
   let completePhase: (() => void) | undefined;
   const ids = new WeakMap();
   const phaseScopes = new WeakMap();
@@ -350,9 +356,15 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     if (mode === Mode.COMMAND) {
       check(root.currentPhase instanceof CommandPhase, 'NATIVE_UI_DECISION_REQUIRED');
       const p = root.currentPhase, action = inputs[seat];
+      if (!action || action.kind === 'target') { waiting = 'wait-actions'; return; }
+      if ((p as any).nativeIntent !== undefined) {
+        if (action.kind === 'fight') resolveFightIntent(root.getPlayerField()[seat], seat, action, {fightCommand:Command.FIGHT, noneMove:Moves.NONE, struggleMove:Moves.STRUGGLE, getMoveTargets, getEncoreTag:p=>p.getTag(EncoreTag)});
+        else if (action.kind === 'ball') validateCaptureIntent(c, {root,views}, seat, action);
+        else validateActiveSwitch(c, {root,views}, seat, action);
+      }
       if (action?.kind === 'fight') {
         check(Number.isInteger(action.cursor), 'NATIVE_UI_DECISION_REQUIRED');
-        schedule(() => check(p.handleCommand(Command.FIGHT, action.cursor, false), 'NATIVE_COMMAND_REJECTED'));
+        schedule(() => { if (!p.checkFightOverride()) check(p.handleCommand(Command.FIGHT, action.cursor, false), 'NATIVE_COMMAND_REJECTED'); });
       } else if (action?.kind === 'ball') {
         root.pokeballCounts = c.players[seat].pokeballCounts;
         schedule(() => {
@@ -374,7 +386,9 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         schedule(() => check(p.handleCommand(Command.POKEMON, cursor, false), 'NATIVE_COMMAND_REJECTED'));
       }
     } else if (mode === Mode.TARGET_SELECT) {
-      check(inputs[seat]?.kind === 'fight' && Number.isInteger(inputs[seat].target), 'NATIVE_UI_DECISION_REQUIRED');
+      if (!inputs[seat] || suppliedTargets.has(seat)) { waiting = 'wait-target'; return; }
+      check(['fight', 'target'].includes(inputs[seat]?.kind) && Number.isInteger(inputs[seat].target), 'NATIVE_UI_DECISION_REQUIRED');
+      if (inputs[seat].kind === 'target') suppliedTargets.add(seat);
       schedule(() => callback(inputs[seat].target));
     } else if (mode === Mode.CONFIRM && root.currentPhase instanceof AttemptCapturePhase) waiting = 'capture-select';
     else if (mode === Mode.CONFIRM && root.currentPhase instanceof CheckSwitchPhase) waiting = 'switch-confirm';
@@ -483,6 +497,16 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       const scope = phases.capture(d.phase, c).scope; bindPhase(d.phase, scope);
       ids.set(d.phase, d.phaseId); nextId = Math.max(nextId, d.phaseId + 1); return d.phase;
     });
+  }
+  // A target stop can precede a partner's already accepted CommandPhase.
+  // Persist that owner's narrow intent on the original queued phase, not a UI callback.
+  for (const p of [...root.phaseQueue, ...root.phaseQueuePrepend, ...root.nextCommandPhaseQueue,
+    ...(c.continuation.currentPhase ? [c.continuation.currentPhase.phase] : [])]) {
+    if (p instanceof CommandPhase && (p as any).nativeIntent !== undefined) {
+      const seat = (p as any).fieldIndex;
+      check([0,1].includes(seat) && typeof (p as any).nativeIntent === 'string', 'INVALID_STORED_COMMAND');
+      if (!Object.prototype.hasOwnProperty.call(inputs, seat)) inputs[seat] = readStoredCommandIntent((p as any).nativeIntent, c, seat);
+    }
   }
   root.phaseQueuePrependSpliceIndex = c.continuation.phaseQueuePrependSpliceIndex;
   root.currentPhase = null; root.standbyPhase = null;
@@ -834,12 +858,13 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   };
 }
 
-function actionDecision(c, root, id) {
+function actionDecision(c, root, id, onlySeat?: number) {
   const saved = c.battle.captureRandomState();
   try {
     const seats = [0, 1].filter(seat => {
       const pokemon = root.getPlayerField()[seat];
-      return pokemon && pokemon.isActive(true) && pokemon.hp > 0;
+      return pokemon && pokemon.isActive(true) && pokemon.hp > 0
+        && (onlySeat === undefined || onlySeat === seat) && !withOriginalRules(c, () => prepareQueuedFight(pokemon));
     });
     const options = withOriginalRules({ ...c, sceneRandom: new SceneRandom(c.sceneRandom.capture()) }, () => Object.fromEntries(seats.map(seat => {
       const pokemon = root.getPlayerField()[seat];
@@ -854,10 +879,11 @@ function actionDecision(c, root, id) {
           .filter(ball => (c.players[seat].pokeballCounts[ball] ?? 0) > 0)
           .map(ball => ({ kind: 'ball', pokeballType: ball, targetId: activeEnemies[0].id }))
         : [];
+      const encore = selectEncoreFight(pokemon, p => p.getTag(EncoreTag));
       const hasUsableMove = pokemon.getMoveset().some(move => move.isUsable(pokemon));
       return [seat, [
         ...pokemon.getMoveset().flatMap((move, cursor) => {
-          if (hasUsableMove && !move.isUsable(pokemon)) return [];
+          if (encore && cursor !== encore.cursor || hasUsableMove && !move.isUsable(pokemon)) return [];
           // Original CommandPhase selects Struggle when no move is usable.
           // Keep a legal original cursor; never synthesize a rule command here.
           const targets = getMoveTargets(pokemon, hasUsableMove ? move.moveId : Moves.STRUGGLE);
@@ -872,7 +898,8 @@ function actionDecision(c, root, id) {
         ...captureOptions,
       ]];
     })));
-    return { id, kind: 'wait-actions', requiredSeats: seats, options };
+    return seats.length ? { id, kind: 'wait-actions', requiredSeats: seats, options }
+      : { id, kind: 'continuing', requiredSeats: [], reason: 'effects' };
   } finally { c.battle.restoreRandomState(saved); }
 }
 
@@ -1189,8 +1216,7 @@ async function runOpenedToInput(runtime, opened) {
     for (let index = 0; index < 100; index++) {
       const selected = selectNextPhase(binding.root, () => populatePhaseQueue(binding.root, () => new TurnInitPhase(binding.root)));
       const p = selected.phase;
-      check([SummonPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, MessagePhase, ShinySparklePhase]
-        .some(ctor => Object.getPrototypeOf(p) === ctor.prototype), 'UNSUPPORTED_NATIVE_ENTRY_PHASE');
+      check(supportsPhase(p), 'UNSUPPORTED_NATIVE_ENTRY_PHASE');
       await binding.execute(p);
       if (p instanceof TurnInitPhase) {
         c.decision = actionDecision(c, binding.root, `native-${c.battle.waveIndex}-${index + 1}`);
@@ -1248,6 +1274,7 @@ export function validateNativeAction(runtime, payload) {
   const binding = bindNativeScene(c, runtime.scene.gameData);
   const saved = c.battle.captureRandomState();
   try {
+    if (c.decision.kind === 'wait-target') return withOriginalRules(c, () => resolveTargetIntent(c, payload.seat, payload.action, getMoveTargets));
     if (payload.action.kind === 'switch') {
       validateActiveSwitch(c, binding, payload.seat, payload.action);
       return true;
@@ -1265,11 +1292,13 @@ export async function submitNativeActions(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'checkpoint,inputs', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
   let intents = [];
+  const decisionId = nextNativeDecisionId(c);
   const result = await advanceCollectedFightCommands(c, payload.inputs, codec, {
     validateInput(candidate, seat, action) {
       const binding = bindNativeScene(candidate, runtime.scene.gameData);
       const saved = candidate.battle.captureRandomState();
       try {
+        if (candidate.decision.kind === 'wait-target') return withOriginalRules(candidate, () => resolveTargetIntent(candidate, seat, action, getMoveTargets));
         if (action.kind === 'switch') { validateActiveSwitch(candidate, binding, seat, action); return true; }
         if (action.kind === 'ball') { validateCaptureIntent(candidate, binding, seat, action); return true; }
         return withOriginalRules({ ...candidate, sceneRandom: new SceneRandom(candidate.sceneRandom.capture()) }, () =>
@@ -1283,11 +1312,29 @@ export async function submitNativeActions(runtime, payload) {
     async executeCollected(candidate, inputs) {
       const binding = bindNativeScene(candidate, runtime.scene.gameData, inputs);
       try {
+        for (const phase of [...binding.root.phaseQueue, ...binding.root.phaseQueuePrepend,
+          ...(candidate.continuation.currentPhase ? [candidate.continuation.currentPhase.phase] : [])]) {
+          const seat = (phase as any).fieldIndex, action = inputs[seat];
+          if (phase instanceof CommandPhase && action && ['fight','switch','ball'].includes(action.kind))
+            (phase as any).nativeIntent = canonical(action);
+        }
         for (let budget = 0; budget < 10; budget++) {
-          const next = binding.root.phaseQueuePrepend.at(-1) ?? binding.root.phaseQueue[0];
+          const active = candidate.continuation.currentPhase;
+          const next = active?.phase ?? binding.root.phaseQueuePrepend.at(-1) ?? binding.root.phaseQueue[0];
           if (!(next instanceof CommandPhase || next instanceof SelectTargetPhase)) break;
-          const p = selectNextPhase(binding.root, () => { throw new Error('NATIVE_COMMAND_QUEUE_EMPTY'); }).phase;
-          await binding.execute(p);
+          const p = active?.phase ?? selectNextPhase(binding.root, () => { throw new Error('NATIVE_COMMAND_QUEUE_EMPTY'); }).phase;
+          candidate.continuation.currentPhase = null;
+          const result = await binding.execute(p);
+          if (result.suspended) {
+            const kind = switchKind(p);
+            check(['wait-actions', 'wait-target'].includes(kind), 'UNSUPPORTED_COMMAND_SUSPENSION');
+            const phaseId = Math.max(-1, ...Object.values(candidate.continuation).flat()
+              .filter((d:any) => d?.phaseId !== undefined).map((d:any) => d.phaseId)) + 1;
+            candidate.continuation.currentPhase = {kind:'original-phase', phaseId, phase:p, remaining:kind};
+            candidate.decision = switchDecision(decisionId, candidate, p);
+            intents = binding.intents;
+            return {completed:true, suspended:true, pendingTasks:0, events:binding.events, grants:[]};
+          }
         }
         const inputSeats = Object.keys(inputs).map(Number);
         check(inputSeats.every(seat => [Command.FIGHT, Command.POKEMON, Command.BALL].includes(candidate.battle.turnCommands[seat]?.command)),
@@ -1296,7 +1343,7 @@ export async function submitNativeActions(runtime, payload) {
         return { completed: true, pendingTasks: 0, events: binding.events, grants: [] };
       } finally { binding.dispose(); }
     }
-  }, { decisionId: nextNativeDecisionId(c), allowSwitch: true });
+  }, { decisionId, allowSwitch: true });
   return { checkpoint: codec.capture(result.context), events: result.events, intents };
 }
 

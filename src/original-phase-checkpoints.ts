@@ -56,6 +56,7 @@ export const originalSafeDecisionCodec = createSafeDecisionCodec({
   hasBiome: id => Number.isInteger(id) && typeof Biome[id] === 'string'
 });
 export const originalDecisionStateCodec = createDecisionStateCodec({
+  queuedCommands: true,
   roster: createRosterStateCodec({ capturePokemonState, restorePokemonState }),
   effects: { captureWeatherState, restoreWeatherState, captureTerrainState, restoreTerrainState, captureArenaTagState, restoreArenaTagState },
   Battle, Arena, getGameMode: id => gameModes[id], hasMove: id => !!allMoves[id],

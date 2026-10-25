@@ -1796,3 +1796,15 @@ test('waiting room exposes both seats and no ready/edit actions until both model
  p.online=[true,true];p.inputReady=true;api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.match(p.controls.textContent,/提交准备/);assert.match(p.controls.textContent,/重新选队/);
  p.inputReady=false;api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.equal(p.controls.querySelectorAll('button').length,0);
 });
+
+
+test('original target UI submits only the owned forced-target intent and fences duplicate or late callbacks',async()=>{
+ const {p,modes,sent,entry}=personalPotionPhase();p.latest.personal.decision={id:'forced-target',kind:'wait-target',requiredSeats:[0],target:{moveId:130,pokemonId:entry.id,fieldIndex:0,targets:[2,3]},options:[2,3,-1].map(target=>({kind:'target',pokemonId:entry.id,target}))};
+ await p.openDecisionInput();assert.equal(modes.at(-1)[0],api.Mode.TARGET_SELECT);assert.deepEqual(modes.at(-1)[4],[2,3,-1]);
+ const select=modes.at(-1)[3];await select(3);assert.equal(sent.length,1);assert.deepEqual(sent[0].action,{kind:'target',pokemonId:entry.id,target:3});
+ await select(2);assert.equal(sent.length,1);p.stopSession();await select(-1);assert.equal(sent.length,1);
+});
+test('a partner target decision opens no target UI and cannot manufacture an action',async()=>{
+ const {p,modes,sent}=personalPotionPhase();p.latest.personal.decision={id:'partner-target',kind:'wait-target',requiredSeats:[1],target:{moveId:130},options:[]};
+ await p.openDecisionInput();assert.deepEqual(modes,[]);assert.deepEqual(sent,[]);
+});

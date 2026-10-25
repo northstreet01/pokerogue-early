@@ -1,3 +1,4 @@
+import {readStoredCommandIntent} from './stored-command.mjs';
 import { captureModifierPoolState, restoreModifierPoolState } from './modifier-pool-state.mjs';
 import { createForcedSwitchDecision,createPreBattleSwitchDecision } from './switch-command.mjs';
 import { createLearnDecision } from './learn-command.mjs';
@@ -38,7 +39,7 @@ export class SceneRandom {
 
 /** Explicit safe-boundary assembly. Trusted component codecs must fail closed
  * for every trainer/modifier they do not support; no ModifierData constructors. */
-export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGameMode, components, hasMove, safeDecisions, phaseState, arenaPools }) {
+export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGameMode, components, hasMove, safeDecisions, phaseState, arenaPools, queuedCommands = false }) {
   const encodeRaw = (kind, value) => {
     if (value === null) return null;
     check(components?.[kind]?.capture && components?.[kind]?.restore, 'COMPONENT_UNAVAILABLE');
@@ -148,7 +149,8 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
         &&active.phase.fieldIndex===t.fieldIndex,'INVALID_TARGET_DECISION');
       return;
     }
-    const living = [0, 1].filter(seat => candidate.roster.entries.some(e => e.pokemon.id === candidate.roster.field[seat] && e.pokemon.hp > 0) && candidate.battle.turnCommands[seat] === null);
+    const living = [0, 1].filter(seat => candidate.roster.entries.some(e => e.pokemon.id === candidate.roster.field[seat] && e.pokemon.hp > 0) && candidate.battle.turnCommands[seat] === null
+      && (!queuedCommands || !candidate.roster.entries.find(e => e.pokemon.id === candidate.roster.field[seat]).pokemon.getMoveQueue().length));
     const active=candidate.continuation?.currentPhase;
     // The original Command UI may be suspended before a later seat's forced
     // action is processed. Reuse its registered M2 remaining stage; only that
@@ -306,6 +308,14 @@ export function createDecisionStateCodec({ roster, effects, Battle, Arena, getGa
     for(const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue'])result.continuation[key]=result.continuation[key].map(unpackPhase);
     for(const key of ['currentPhase','standbyPhase'])result.continuation[key]=unpackPhase(result.continuation[key]);
     result.pendingEffects=result.pendingEffects.map(p=>({...p,phase:phaseState.restore(p.phase,result,undefined,phaseGraph)}));
+    for (const descriptor of [...result.continuation.phaseQueue,...result.continuation.phaseQueuePrepend,
+      ...result.continuation.nextCommandPhaseQueue,result.continuation.currentPhase].filter(Boolean)) {
+      if (descriptor.phase?.nativeIntent !== undefined) {
+        check(queuedCommands && phaseState.capture(descriptor.phase,result).type==='CommandPhase'
+          && phaseState.capture(descriptor.phase,result).scope===descriptor.phase.fieldIndex,'INVALID_STORED_COMMAND');
+        readStoredCommandIntent(descriptor.phase.nativeIntent,result,descriptor.phase.fieldIndex);
+      }
+    }
     // A returned battler is temporarily off the field while its original
     // switch command still supplies the onEnd turn-count compensation.
     if(b)for(const slot of [0,1,2,3])if(b.turnCommands[slot]!==null&&result.roster.field[slot]===null){

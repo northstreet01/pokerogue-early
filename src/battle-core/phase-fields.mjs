@@ -204,7 +204,8 @@ export const phaseStateFields = Object.freeze({
   "CommandPhase": {
     "base": "FieldPhase",
     "fields": {
-      "fieldIndex": "int"
+      "fieldIndex": "int",
+      "nativeIntent": "string"
     },
     "required": [
       "fieldIndex"

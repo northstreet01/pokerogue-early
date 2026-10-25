@@ -309,8 +309,8 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
       }
       if (context.lobby) { await validateLobbyAction(room, action); return; }
       const decision = context.checkpoint.decision;
-      if (decision.kind === 'wait-actions') {
-        check(['fight', 'switch', 'ball'].includes(action?.kind), 'INVALID_ACTION');
+      if (decision.kind === 'wait-actions' || decision.kind === 'wait-target') {
+        check((decision.kind === 'wait-target' ? ['target'] : ['fight', 'switch', 'ball']).includes(action?.kind), 'INVALID_ACTION');
         await request(room, 'native-validate', { checkpoint: context.checkpoint, seat, action: COPY(action) });
         return;
       }
@@ -397,7 +397,7 @@ export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFacto
         intents = normalizeIntents(checkpoint, intents, result.intents);
         events.push(...(result.events ?? []).map(event => scopeEvent(event, checkpoint)));
       };
-      if (decision.kind === 'wait-actions') {
+      if (decision.kind === 'wait-actions' || decision.kind === 'wait-target') {
         check(inputs && canonical(Object.keys(inputs).sort()) === canonical(decision.requiredSeats.map(String).sort()), 'INCOMPLETE_COMMAND_INPUTS');
         await apply('native-submit', { checkpoint, inputs: COPY(inputs) });
       } else if (decision.kind === 'preparation') {

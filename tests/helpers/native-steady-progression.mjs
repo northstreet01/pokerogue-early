@@ -27,6 +27,8 @@ export function steadyInput(api,c){
   if(p.fields.hp<p.fields.stats[0]/4&&bench.length&&party(seat).find(e=>e.pokemon.fields.id===bench[0].pokemonId).pokemon.fields.hp>p.fields.hp*2){inputs[seat]=bench[0];continue;}
   inputs[seat]=options.filter(o=>o.kind==='fight'&&(o.target===null||o.target>=2)).toSorted((a,b)=>moveScore(p,b)-moveScore(p,a)
    ||((a.target===2+seat)?-1:1))[0];
+ }else if(d.kind==='wait-target'){
+  const seat=d.requiredSeats[0];inputs[seat]=d.options[seat].find(o=>o.target>=2)??d.options[seat][0];
  }else if(d.kind==='preparation'){
   const seat=d.requiredSeats.find(s=>!d.players[s].ready),p=d.players[seat],owned=party(seat);
   const sold=o=>d.shared?.shopClaims.some(claim=>claim.optionId===o.id);

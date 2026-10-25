@@ -1,0 +1,18 @@
+{
+  "profiles":"Local profiles / Saves", "hall":"Home", "legacy":"No profile selected · Legacy saves available",
+  "profileName":"Local trainer", "nickname":"Nickname", "nameRequired":"Enter a nickname", "confirm":"Confirm", "back":"Back",
+  "create":"Create profile", "migrate":"Import this browser's legacy saves", "import":"Import backup file", "export":"Export complete personal backup", "recovery":"Restore backup",
+  "select":"Use this profile", "rename":"Rename", "current":"Current: {{name}}", "created":"Profile saved", "saved":"Saved",
+  "preview":"Import preview · {{name}}", "summary":"{{slots}} solo adventures · {{eggs}} eggs", "install":"Import and use (keep original records)",
+  "replace":"Replace complete profile", "replacePrompt":"Collection, eggs, balances and receipts restore together. The current profile is backed up.",
+  "slot":"Legacy slot {{slot}}: Wave {{wave}}", "slotConfirmed":"Legacy adventure ownership confirmed", "confirmSlots":"Confirm these adventures belong to me",
+  "ownershipRequired":"Confirm legacy adventure ownership in profile management first.", "eggsReserved":"A cooperative adventure still has reserved eggs. Solo consumption is unavailable.",
+  "backupOrigin":"Initial migration / import checkpoint", "backupPrevious":"Profile before last restore", "backupAuto":"Automatic backup {{number}}", "restorePrompt":"Restore the complete profile? The current valid profile will be backed up.",
+  "busy":"This profile is in use in another page. Leave that page first.", "lost":"Profile write ownership was lost. Return home and retry.",
+  "closed":"This page is no longer active. Return home.", "conflict":"The profile changed. Read it again before continuing.", "failed":"The operation failed. Your previous valid save was not replaced.",
+  "unsupported":"Unsupported save version. Original data was retained.", "archiveCorrupt":"Backup verification failed. Choose a complete valid backup.", "sourceConflict":"Legacy data diverged after migration. Restore a complete backup; resources are never merged automatically.",
+  "retry":"Retry", "saveReturn":"Save status / Return home", "returnUnsaved":"Return home (save failed)", "saveFailedRetry":"Saving failed; the adventure has not continued. Confirm to retry, cancel to return home.",
+  "useProfileImport":"A local profile is active. Return home and import a complete personal backup to keep collection and adventure data consistent.",
+  "privateBackup":"Personal backups may contain private recovery data. Keep the file private. Export?", "noFile":"No file selected", "noBackups":"No valid backups",
+  "deferred":"Awaiting adventure end: {{count}} eggs", "legacySlots":"View / confirm legacy adventures", "loading":"Reading local data…", "profileChanged":"The selected profile changed. Return home and select it again."
+}

@@ -176,6 +176,8 @@ export class GameData {
   private scene: BattleScene;
   private localSystemSnapshot: string | null = null;
   private localSystemSaveQueue: Promise<void> = Promise.resolve();
+  private profileIO: any = null;
+  private profileClosing = false;
 
   public trainerId: integer;
   public secretId: integer;
@@ -201,10 +203,10 @@ export class GameData {
 
   private readonlyView: boolean;
 
-  constructor(scene: BattleScene, options: { readOnly?: boolean } = {}) {
+  constructor(scene: BattleScene, options: { readOnly?: boolean; skipSettings?: boolean } = {}) {
     this.scene = scene;
     this.readonlyView = !!options.readOnly;
-    if (!this.readonlyView) this.loadSettings();
+    if (!this.readonlyView && !options.skipSettings) this.loadSettings();
     this.trainerId = this.readonlyView ? 0 : Utils.randSeedInt(65536);
     this.secretId = this.readonlyView ? 0 : Utils.randSeedInt(65536);
     this.starterMoveData = {};
@@ -228,13 +230,27 @@ export class GameData {
     this.initEggMoveData();
   }
 
-  public saveSystem(): Promise<boolean> {
-    if (this.readonlyView) return Promise.resolve(false);
-    return new Promise<boolean>(resolve => {
-      updateUserInfo().then((success: boolean) => {
-        if (!success)
-          return resolve(false);
-        const data: SystemSaveData = {
+  public get localProfileId(): string | null { return this.profileIO?.profileId ?? null; }
+  public bindProfileIO(io: any): void {
+    if (this.profileIO) throw new Error('LOCAL_PROFILE_ALREADY_BOUND');
+    this.profileIO = io;
+  }
+  public async closeProfile(): Promise<void> {
+    if (!this.profileIO) return;
+    this.profileClosing = true;
+    try {
+      // GameData queues serialization before the repository sees the write.
+      // Drain that queue before closing the immutable profile binding.
+      await this.localSystemSaveQueue;
+      await this.profileIO.close();
+    } catch (error) { this.profileClosing = false; throw error; }
+  }
+  public readLocalData(key: string): Promise<string | null> { return this.profileIO ? this.profileIO.read(key) : readLocalSave(key); }
+  public refreshUserInfo(): Promise<boolean> { return updateUserInfo(key => this.readLocalData(key), this.profileIO?.displayName ?? 'Local'); }
+
+  /** Original system serialization, also used to create a genuinely new profile. */
+  public captureSystemData(): string {
+    const data: SystemSaveData = {
           trainerId: this.trainerId,
           secretId: this.secretId,
           gender: this.gender,
@@ -251,8 +267,24 @@ export class GameData {
           timestamp: new Date().getTime()
         };
 
-        const maxIntAttrValue = Math.pow(2, 31);
-        const systemData = JSON.stringify(data, (k: any, v: any) => typeof v === 'bigint' ? v <= maxIntAttrValue ? Number(v) : v.toString() : v);
+    const maxIntAttrValue = Math.pow(2, 31);
+    return JSON.stringify(data, (k: any, v: any) => typeof v === 'bigint' ? v <= maxIntAttrValue ? Number(v) : v.toString() : v);
+  }
+
+  public saveSystem(): Promise<boolean> {
+    if (this.readonlyView || this.profileClosing) return Promise.resolve(false);
+    if (this.profileIO) {
+      const data = this.captureSystemData();
+      const write = this.localSystemSaveQueue.catch(() => {}).then(async () => {
+        this.localSystemSnapshot = await this.profileIO.writeSystem(data, this.localSystemSnapshot);
+      });
+      this.localSystemSaveQueue = write;
+      return write.then(() => true, error => { console.error('Profile save failed', error); return false; });
+    }
+    return new Promise<boolean>(resolve => {
+      this.refreshUserInfo().then((success: boolean) => {
+        if (!success) return resolve(false);
+        const systemData = this.captureSystemData();
 
         if (!bypassLogin) {
           Utils.apiPost(`savedata/update?datatype=${GameDataType.SYSTEM}`, systemData)
@@ -375,7 +407,7 @@ export class GameData {
             handleSystemData(response);
           });
       } else {
-        readLocalSave('data').then(data => {
+        this.readLocalData('data').then(data => {
           this.localSystemSnapshot = data;
           return data ? handleSystemData(data) : resolve(false);
         })
@@ -494,9 +526,24 @@ export class GameData {
     } as SessionSaveData;
   }
 
+  public async saveEncounter(scene: BattleScene): Promise<boolean> {
+    if (this.profileIO) return this.saveSession(scene, true);
+    return await this.saveSystem() && await this.saveSession(scene, true);
+  }
+
   saveSession(scene: BattleScene, skipVerification?: boolean): Promise<boolean> {
+    if (this.readonlyView || this.profileClosing) return Promise.resolve(false);
+    if (this.profileIO) {
+      const system = this.captureSystemData(), session = JSON.stringify(this.getSessionSaveData(scene));
+      const write = this.localSystemSaveQueue.catch(() => {}).then(async () => {
+        await this.profileIO.saveAdventure(system,session,scene.sessionSlotId);
+        this.localSystemSnapshot = await this.profileIO.read('data');
+      });
+      this.localSystemSaveQueue = write;
+      return write.then(() => true, error => { console.error('Profile adventure save failed', error); return false; });
+    }
     return new Promise<boolean>(resolve => {
-      Utils.executeIf(!skipVerification, updateUserInfo).then(success => {
+      Utils.executeIf(!skipVerification, () => this.refreshUserInfo()).then(success => {
         if (success !== null && !success)
           return resolve(false);
 
@@ -548,7 +595,7 @@ export class GameData {
             await handleSessionData(response);
           });
       } else {
-        readLocalSave(sessionSaveKey(slotId)).then(sessionData => {
+        this.readLocalData(sessionSaveKey(slotId)).then(sessionData => {
           if (sessionData) return handleSessionData(sessionData);
           resolve(null);
         }).catch(reject);
@@ -654,6 +701,8 @@ export class GameData {
   }
 
   deleteSession(slotId: integer): Promise<boolean> {
+    if (this.readonlyView || this.profileClosing) return Promise.resolve(false);
+    if (this.profileIO) return this.profileIO.deleteSession(slotId).then(() => true, () => false);
     return new Promise<boolean>(resolve => {
       if (bypassLogin) {
         deleteLocalSave(sessionSaveKey(slotId)).then(() => {
@@ -678,6 +727,8 @@ export class GameData {
   }
 
   tryClearSession(scene: BattleScene, slotId: integer): Promise<[success: boolean, newClear: boolean]> {
+    if (this.profileClosing) return Promise.resolve([false, false]);
+    if (this.profileIO) return Promise.resolve(this.profileIO.beginClear(slotId));
     return new Promise<[boolean, boolean]>(resolve => {
       if (bypassLogin) {
         deleteLocalSave(sessionSaveKey(slotId)).then(() => {
@@ -770,7 +821,7 @@ export class GameData {
             resolve(true);
           });
       } else {
-        const reading = dataType < GameDataType.SETTINGS ? readLocalSave(dataKey) : Promise.resolve(localStorage.getItem(dataKey));
+        const reading = dataType < GameDataType.SETTINGS ? this.readLocalData(dataKey) : Promise.resolve(localStorage.getItem(dataKey));
         reading.then(data => {
           if (data) handleData(data);
           resolve(!!data);
@@ -780,6 +831,9 @@ export class GameData {
   }
 
   public importData(dataType: GameDataType, slotId: integer = 0): void {
+    if (this.profileIO && dataType < GameDataType.SETTINGS) {
+      this.scene.ui.showText(i18next.t('localMeta:useProfileImport')); return;
+    }
     const dataKey = getDataTypeKey(dataType, slotId);
 
     let saveFile: any = document.getElementById('saveFile');

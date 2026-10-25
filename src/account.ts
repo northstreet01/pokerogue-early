@@ -9,18 +9,18 @@ export interface UserInfo {
 
 export let loggedInUser: UserInfo = null;
 
-export function updateUserInfo(): Promise<boolean> {
+export function updateUserInfo(readSave: (key: string) => Promise<string | null> = readLocalSave, username = 'Local'): Promise<boolean> {
   return new Promise<boolean>((resolve, reject) => {
     if (bypassLogin) {
       (async () => {
         let lastSessionSlot = -1;
         for (let s = 0; s < 3; s++) {
-          if (await readLocalSave(sessionSaveKey(s))) {
+          if (await readSave(sessionSaveKey(s))) {
             lastSessionSlot = s;
             break;
           }
         }
-        loggedInUser = { username: 'Local', lastSessionSlot };
+        loggedInUser = { username, lastSessionSlot };
         resolve(true);
       })().catch(reject);
       return;

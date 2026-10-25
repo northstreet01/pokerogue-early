@@ -138,7 +138,8 @@ export default class CoopPlayPhase extends Phase {
     this.exitTask = (async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const committed = await Promise.race([
-        this.storage.pauseSession(this.origin, this.session()).catch(() => false),
+        Promise.all([this.storage.pauseSession(this.origin, this.session()).catch(() => false),
+          this.scene.gameData?.closeProfile?.().catch(() => {})]).then(([saved])=>saved),
         new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 500); }),
       ]);
       if (timer) clearTimeout(timer);
@@ -1238,11 +1239,15 @@ export default class CoopPlayPhase extends Phase {
     const query = new URLSearchParams(location.search);
     const resumeRoom = query.get('resumeRoom'), resumeSeat = query.get('resumeSeat');
     const explicit = query.get('fresh') !== '1' && /^[A-Z0-9]{6}$/i.test(resumeRoom ?? '') && ['0', '1'].includes(resumeSeat ?? '');
-    const value = this.roomId && this.token ? { roomId: this.roomId, seat: this.seat, token: this.token }
+    const value = this.roomId && this.token ? { roomId: this.roomId, seat: this.seat, token: this.token,
+        ...(this.scene.gameData?.localProfileId ? {profileId:this.scene.gameData.localProfileId} : {}) }
       : explicit ? await this.storage.resumeSession(this.origin, this.session(lifecycle, recovery), resumeRoom, Number(resumeSeat))
       : autoResumePaused() ? null : await this.storage.beginSession(this.origin, this.session(lifecycle, recovery), true);
     if (!this.current(lifecycle) || recovery !== this.recoveryVersion) return;
     if (value?.roomId && value?.token) {
+      if ((value.profileId??null)!==(this.scene.gameData?.localProfileId??null)) {
+        this.setStatus(i18next.t('localMeta:profileChanged'),true);return;
+      }
       if (explicit) allowAutoResume();
       this.roomId = value.roomId; this.seat = value.seat; this.token = value.token;
       this.resuming = true;
@@ -1277,7 +1282,8 @@ export default class CoopPlayPhase extends Phase {
   private async persistSeat() {
     if (this.disposed || !this.roomId || this.seat === null || !this.token) return;
     await this.storage.saveSeat(this.origin,
-      { roomId: this.roomId, seat: this.seat, token: this.token, runId: this.runId }, this.session());
+      { roomId: this.roomId, seat: this.seat, token: this.token, runId: this.runId,
+        ...(this.scene.gameData?.localProfileId ? {profileId:this.scene.gameData.localProfileId} : {}) }, this.session());
   }
 
   private async openStarterSelect() {

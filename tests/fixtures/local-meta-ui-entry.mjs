@@ -1,0 +1,12 @@
+export * from './local-meta-original-entry.mjs';
+export {createOriginalRuntime,constructOriginalPokemon,withStarterRandomContext,describeOriginalCatalogs} from '../../src/server/original-runtime';
+export {withOriginalRules} from '../../server/original-random-context.mjs';
+export {HomePhase,entryPhases} from '../../src/home-phase';
+export {LoginPhase,EncounterPhase,GameOverPhase} from '../../src/phases';
+export {Mode} from '../../src/ui/ui';
+export {default as CoopPlayPhase} from '../../src/coop/play-phase';
+export {profileRepository,prepareProfileGameData} from '../../src/local-meta/services';
+export {default as ProfileFormUiHandler} from '../../src/ui/profile-form-ui-handler';
+export {readLocalSave} from '../../src/system/local-save-store';
+export {loggedInUser} from '../../src/account';
+export {default as i18next} from '../../src/i18n';

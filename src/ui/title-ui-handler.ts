@@ -81,6 +81,7 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
       this.titleLogo?.setVisible(!this.config?.contextLabel);
       this.splashMessage.setVisible(!this.config?.contextLabel);
       this.homeHeading?.setVisible(!!this.config?.contextLabel);
+      this.homeHeading?.setText(this.config?.contextLabel ?? '');
       this.updatePlayerCount();
 
       this.playerCountTimer = setInterval(() => this.updatePlayerCount(), 10000);

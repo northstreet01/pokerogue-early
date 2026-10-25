@@ -90,7 +90,10 @@ export class LoginPhase extends Phase {
     super.start();
 
     this.scene.ui.setMode(Mode.LOADING, { buttonActions: [] });
-    Utils.executeIf(bypassLogin || !!Utils.getCookie(Utils.sessionIdKey), updateUserInfo).then(success => {
+    Promise.resolve().then(async () => {
+      if (bypassLogin) await (await import('./local-meta/services')).prepareProfileGameData(this.scene);
+      return Utils.executeIf(bypassLogin || !!Utils.getCookie(Utils.sessionIdKey), () => this.scene.gameData.refreshUserInfo());
+    }).then(success => {
       if (!success) {
         if (this.showText)
           this.scene.ui.showText(i18next.t("menu:logInOrCreateAccount"));
@@ -136,7 +139,14 @@ export class LoginPhase extends Phase {
     }).catch(error => {
       console.error('Local save unavailable', error);
       this.scene.ui.setMode(Mode.MESSAGE);
-      this.scene.ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:saveOpenFailed'):'Local save could not be opened.\nYour existing data has not been replaced.');
+      void import('./local-meta/services').then(({localProfileError}) => this.scene.ui.showText(error?.code
+        ? localProfileError(error) : i18next.t('earlyBattle:saveOpenFailed')));
+      if(!document.getElementById('local-profile-return')) {
+        const back=document.createElement('button');back.id='local-profile-return';back.textContent=i18next.t('localMeta:back');
+        Object.assign(back.style,{position:'fixed',bottom:'8px',left:'8px',zIndex:'1000'});
+        back.addEventListener('click',()=>location.assign('/'));document.body.append(back);
+        this.scene.events?.once('shutdown',()=>back.remove());
+      }
     });
   }
 
@@ -703,11 +713,12 @@ export class EncounterPhase extends BattlePhase {
         if (!this.loaded) {
           const deferred = this.scene.deferEncounterPersistence?.();
           if (deferred) return deferred.then(() => this.doEncounter());
-          return this.scene.gameData.saveSystem().then(success => {
-            if (!success)
-              return this.scene.reset(true);
-            return this.scene.gameData.saveSession(this.scene, true).then(() => this.doEncounter());
+          const persist = () => this.scene.gameData.saveEncounter(this.scene).then(success => {
+            if (success) return this.doEncounter();
+            this.scene.ui.showText(i18next.t('localMeta:saveFailedRetry'), null, () =>
+              this.scene.ui.setMode(Mode.CONFIRM, () => { void persist(); }, () => { location.assign('/'); }, false));
           });
+          return persist();
         } else
           this.doEncounter();
       });
@@ -2815,7 +2826,7 @@ export class GameOverPhase extends BattlePhase {
           } else if (this.scene.gameMode.isDaily && success[1])
             this.scene.gameData.gameStats.dailyRunSessionsWon++;
         }
-        this.scene.gameData.saveSystem();
+        const finish = () => {
         const fadeDuration = this.victory ? 10000 : 5000;
         this.scene.fadeOutBgm(fadeDuration, true);
         this.scene.ui.fadeOut(fadeDuration).then(() => {
@@ -2829,6 +2840,15 @@ export class GameOverPhase extends BattlePhase {
           this.scene.unshiftPhase(new TitlePhase(this.scene));
           this.end();
         });
+        };
+        if (this.scene.gameData.localProfileId) {
+          const persist = () => this.scene.gameData.saveSystem().then(saved => {
+            if (saved) finish();
+            else this.scene.ui.showText(i18next.t('localMeta:saveFailedRetry'), null, () =>
+              this.scene.ui.setMode(Mode.CONFIRM, () => { void persist(); }, () => { location.assign('/'); }, false));
+          });
+          void persist();
+        } else { this.scene.gameData.saveSystem(); finish(); }
       });
     });
   }

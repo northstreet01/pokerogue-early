@@ -1,0 +1,18 @@
+{
+  "profiles":"本地档案 / 存档管理", "hall":"局外大厅", "legacy":"未选择档案 · 可继续旧存档",
+  "profileName":"本地训练家", "nickname":"昵称", "nameRequired":"请输入昵称", "confirm":"确认", "back":"返回",
+  "create":"创建新档案", "migrate":"导入此浏览器旧资料", "import":"导入备份文件", "export":"导出完整个人备份", "recovery":"恢复备份",
+  "select":"使用这份档案", "rename":"修改昵称", "current":"当前：{{name}}", "created":"档案已保存", "saved":"保存成功",
+  "preview":"导入预览 · {{name}}", "summary":"{{slots}} 份单人冒险 · {{eggs}} 颗蛋", "install":"导入并使用（保留原资料）",
+  "replace":"完整替换这份档案", "replacePrompt":"收藏、蛋、余额和账本将一起恢复，当前档案保留备份。",
+  "slot":"旧槽位 {{slot}}：第 {{wave}} 波", "slotConfirmed":"旧冒险归属已确认", "confirmSlots":"确认这些旧冒险属于本人",
+  "ownershipRequired":"请先在档案管理中确认旧冒险归属。", "eggsReserved":"合作冒险仍有待孵化蛋，暂不能切换到单人消费。",
+  "backupOrigin":"首次迁移 / 导入恢复点", "backupPrevious":"上次恢复前的档案", "backupAuto":"自动备份 {{number}}", "restorePrompt":"恢复完整档案？现有有效档案会保留为恢复点。",
+  "busy":"该档案正在另一页面使用，请先退出那一页面。", "lost":"档案写入权已失效，请返回局外后重试。",
+  "closed":"当前页面已失效，请返回局外。", "conflict":"档案已被更新，请重新读取后再操作。", "failed":"资料操作失败，原有效存档没有被替换。",
+  "unsupported":"不支持的存档版本，原资料已保留。", "archiveCorrupt":"备份校验失败，请选择完整有效的备份。", "sourceConflict":"旧资料已迁移且出现分支，请使用完整备份恢复，不会自动合并资源。",
+  "retry":"重试", "saveReturn":"保存状态 / 返回局外", "returnUnsaved":"返回局外（本次保存失败）", "saveFailedRetry":"保存失败，冒险没有继续推进。确认重试，取消返回局外。",
+  "useProfileImport":"当前使用本地档案，请返回局外通过完整个人备份导入，避免收藏和冒险不一致。",
+  "privateBackup":"个人备份可能含私有恢复资料，请自行保管。确认导出？", "noFile":"未选择文件", "noBackups":"没有可用备份",
+  "deferred":"待终局孵化：{{count}} 颗", "legacySlots":"查看 / 确认旧冒险", "loading":"正在读取本地资料…", "profileChanged":"所选档案已变化，请返回局外重新选择。"
+}

@@ -130,7 +130,10 @@ export function nextBattleDriver(options={}){
         s.playBgm=()=>{};s.updateFieldScale=()=>Promise.resolve();s.updateModifiers=()=>tasks.add(Promise.resolve());
         s.tweens={add:o=>o.onComplete?.()};
         s.ui={setMode:()=>Promise.resolve(),showText:(text,_delay,done)=>{b.events.push({kind:'encounter-message',text});done?.();}};
-        s.gameData={setPokemonSeen:pk=>b.events.push({kind:'seen-hook',id:pk.id}),saveSystem:()=>Promise.resolve(true),saveSession:()=>Promise.resolve()};
+        s.gameData={setPokemonSeen:pk=>b.events.push({kind:'seen-hook',id:pk.id}),saveSystem:()=>Promise.resolve(true),saveSession:()=>Promise.resolve(),
+          // New profile encounters persist both original snapshots together.
+          // The frozen reference still uses the two legacy no-op save ports.
+          saveEncounter:()=>Promise.resolve(true)};
         // The original zero-item fixture keeps its guard. Composed encounter
         // tests explicitly supply original item factories and modifier updates.
         s.generateEnemyModifiers=()=>tasks.add(sceneMethod('generateEnemyModifiers','',reference,options.encounterModifiers).call(s));

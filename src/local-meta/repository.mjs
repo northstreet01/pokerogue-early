@@ -175,7 +175,10 @@ export function createProfileRepository({ store, codec, now = Date.now, uuid = (
       const raw = mutation(previous ? json(previous) : null, json(history));
       if (raw && typeof raw.then === 'function') Promise.resolve(raw).catch(() => {});
       check(raw && !('then' in raw),'ASYNC_LOCAL_TRANSACTION');
-      const next = codec.profile({...raw,revision:expectedRevision+1,updatedAt:Math.max(stamp(),raw.createdAt,previous?.updatedAt ?? 0)});
+      // A valid archive from another device may be ahead of this local copy.
+      // Its receipts retain their revisions; never lower them below the new CAS.
+      const revision = restore ? Math.max(expectedRevision,raw.revision)+1 : expectedRevision+1;
+      const next = codec.profile({...raw,revision,updatedAt:Math.max(stamp(),raw.createdAt,raw.updatedAt,previous?.updatedAt ?? 0)});
       check(next.profileId === profileId && identity(next) === identity(history.origin)
         && next.createdAt === history.origin.createdAt && JSON.stringify(next.migration) === JSON.stringify(history.origin.migration),'LOCAL_IDENTITY_CHANGED');
       if (!restore) for (const grant of previous.grantLedger) {

@@ -230,6 +230,14 @@ test('normal writes cannot remove ledger receipts; a whole archive rollback rest
   await assert.rejects(e.repo.save(e.pid,1,lease,p=>({...p,grantLedger:[]})),/LEDGER_REMOVAL/);
   const p=await e.repo.importArchive(old,{expectedRevision:1,lease});assert.deepEqual(p.grantLedger,[]);
   assert.deepEqual(p.originalSystem.voucherCounts,original.system.voucherCounts);
+  // Explicit synthetic newer-device archive: internal receipt revision must
+  // remain valid when the importing device's current revision is smaller.
+  const newer=await e.repo.exportArchive(e.pid);
+  newer.profile.revision=20;
+  newer.profile.grantLedger=[{id:'newer:receipt',sourceRunId:'run2',ownerProfileId:e.pid,kind:'voucher',payloadHash:'c'.repeat(64),revision:20}];
+  newer.digest=await digest(newer.profile);
+  const adopted=await e.repo.importArchive(newer,{expectedRevision:2,lease});
+  assert.equal(adopted.revision,21);assert.equal(adopted.grantLedger[0].revision,20);
 });
 test('corrupt directory and future primary never silently create a fresh profile or activate a bad target',async()=>{
   const e=await migrated(),before=await e.repo.list();

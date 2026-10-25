@@ -1,3 +1,7 @@
+2026-10-25 VS23最终覆盖：源码/测试8ba311f8完整1402/1402退出0。TM/进化道具及整备本人队伍重新开启进化的中英入口已接，原目录ID、存档与N/P标记保留，原UNPAUSE消息复用。真实双端/排版待验；下面进行中和旧未接说明为当时状态。见[最终验收](mvp-vs-02b23-growth-items-review.md)。
+
+2026-10-25 VS23补充（完整回归进行中）：原TM/进化道具入口和整备期本人队伍重新开启进化已接，新增中英coop:personalParty、coop:resumeEvolutionSubmitted，更新两种语言coopPausePrompt说明整备入口。原TM名字、招式N/P标记、目录ID和存档结构未改；原UNPAUSE消息继续沿用partyUiHandler资源。见[VS23验收](mvp-vs-02b23-growth-items-review.md)和[双端手测](vs02b23-manual-acceptance.md)。真实双浏览器和英文长文排版仍待验，下方旧“未接”均对应当时基线。
+
 # VS21 中文迁移清单
 
 本清单覆盖用户实际可进入的路径，不以几处按钮替换作为全面完成。冻结源码83ae8614完整回归1314/1314通过；真实双浏览器尚未验收。中文默认沿用prLang；英文仍可选，中文不写入catalogId、个人存档或客户端行动ID。

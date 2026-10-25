@@ -1808,3 +1808,44 @@ test('a partner target decision opens no target UI and cannot manufacture an act
  const {p,modes,sent}=personalPotionPhase();p.latest.personal.decision={id:'partner-target',kind:'wait-target',requiredSeats:[1],target:{moveId:130},options:[]};
  await p.openDecisionInput();assert.deepEqual(modes,[]);assert.deepEqual(sent,[]);
 });
+
+// VS23: original TM/Party choices remain display-only until durable server input.
+test('original TM menu receives its move ID and submits TEACH once on an owned display copy',async()=>{
+ const {p,sent,modes,entry}=personalPotionPhase();
+ const type=new api.TmModifierType(api.Moves.PROTECT).withIdFromFunc(api.modifierTypes.TM_COMMON);
+ const option={id:'tm-protect',type:api.captureModifierTypeState(type),cost:0},before=api.capturePokemonState(entry.pokemon);
+ await p.choosePreparationReward(option,p.latest,p.epoch);
+ const mode=modes.at(-1);assert.equal(mode[1],api.PartyUiMode.TM_MODIFIER);assert.equal(mode[6],api.Moves.PROTECT);
+ assert.deepEqual(mode[7].allowedOptions,[api.PartyOption.TEACH,api.PartyOption.SUMMARY]);
+ assert.equal(mode[4](p.scene.party[0]),null);
+ await mode[3](0,api.PartyOption.TEACH);await mode[3](0,api.PartyOption.TEACH);await tick();
+ assert.equal(sent.length,1);assert.deepEqual(sent[0].action,{kind:'preparation',operation:'reward',optionId:option.id,pokemonId:entry.id,moveIndex:null,fusionId:null});
+ assert.deepEqual(api.capturePokemonState(entry.pokemon),before);
+});
+
+test('original cooperative unpause option submits its own ID without changing the verified flag',async()=>{
+ const {p,sent,modes,entry}=personalPotionPhase();entry.pokemon.pauseEvolutions=true;
+ p.scene.getParty=()=>p.scene.party;
+ const before=api.capturePokemonState(entry.pokemon);await p.openPreparationParty();const mode=modes.at(-1);
+ assert.equal(mode[7].submitUnpauseOnly,true);
+ const handler=Object.assign(Object.create(api.PartyUiHandler.prototype),{optionsMode:true,options:[api.PartyOption.UNPAUSE_EVOLUTION],optionsCursor:0,cursor:0,
+ allowedOptions:new Set(mode[7].allowedOptions),submitUnpauseOnly:true,selectCallback:mode[3],clearOptions(){},getUi:()=>({playSelect(){}}),scene:p.scene});
+ assert.equal(handler.processInput(api.Button.ACTION),true);await waitUntil(()=>sent.length===1);
+ assert.equal(sent.length,1);assert.deepEqual(sent[0].action,{kind:'preparation',operation:'unpause-evolution',pokemonId:entry.id});
+ assert.deepEqual(api.capturePokemonState(entry.pokemon),before);
+});
+
+for(const change of ['cancel','epoch','revision'])test(`unpause party ${change} cannot submit a stale or cancelled command`,async()=>{
+ const {p,sent,modes,entry}=personalPotionPhase();entry.pokemon.pauseEvolutions=true;await p.openPreparationParty();const callback=modes.at(-1)[3];
+ if(change==='epoch')p.epoch='other';if(change==='revision')p.latest={...p.latest,revision:9,decisionId:'other'};
+ await callback(change==='cancel'?6:0,change==='cancel'?api.PartyOption.CANCEL:api.PartyOption.UNPAUSE_EVOLUTION);await tick();
+ assert.equal(sent.length,0);assert.equal(entry.pokemon.pauseEvolutions,true);
+});
+
+test('finished shared shopping still permits authoritative unpause without reopening purchases',async()=>{
+ const {p,sent,entry}=personalPotionPhase();entry.pokemon.pauseEvolutions=true;
+ p.latest.personal.decision.sharedMarket={rewardClaims:[],shopClaims:[],rerollLocked:true};p.latest.personal.decision.players.rewardResolved=true;p.latest.personal.decision.players.ready=true;
+ const action={kind:'preparation',operation:'unpause-evolution',pokemonId:entry.id};
+ assert.equal(await p.sendAction(action,'resume'),true);assert.equal(sent.length,1);assert.deepEqual(sent[0].action,action);
+ assert.equal(entry.pokemon.pauseEvolutions,true);
+});

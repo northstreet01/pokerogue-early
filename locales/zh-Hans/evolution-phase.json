@@ -2,7 +2,7 @@
   "evolving": "咦？\n{{pokemonName}}开始进化了！",
   "stopped": "{{pokemonName}}停止了进化。",
   "pausePrompt": "要暂停{{pokemonName}}的进化吗？\n可以在队伍界面重新开启进化。",
-  "coopPausePrompt": "要暂停{{pokemonName}}今后的进化吗？\n联机队伍界面暂不支持重新开启。选“否”仅取消本次进化。",
+  "coopPausePrompt": "要暂停{{pokemonName}}今后的进化吗？\n可在整备时打开本人队伍重新开启。",
   "paused": "已暂停{{pokemonName}}的进化。",
   "evolved": "恭喜！\n你的{{pokemonName}}进化成了{{evolvedName}}！",
   "confirm": "{{pokemonName}}即将进化，要继续吗？",

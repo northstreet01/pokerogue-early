@@ -13,7 +13,7 @@ import { createPlayStorage } from './play-storage.mjs';
 import { pauseAutoResume, autoResumePaused, allowAutoResume } from './exit-recovery.mjs';
 import { GameModes } from '../game-mode';
 import { Command } from '../ui/command-ui-handler';
-import { ModifierTypeOption, restoreModifierTypeState } from '../modifier/modifier-type';
+import { ModifierTypeOption, restoreModifierTypeState, TmModifierType } from '../modifier/modifier-type';
 import { PartyUiMode, PartyOption } from '../ui/party-ui-handler';
 import { getPokeballDisplayName as getPokeballName } from '../data/pokeball';
 import { SummaryUiMode } from '../ui/summary-ui-handler';
@@ -540,6 +540,7 @@ export default class CoopPlayPhase extends Phase {
     const shared = decision.sharedMarket;
     if (shared && player.rewardResolved && !player.subdecision && !player.selection) {
       await this.scene.ui.setMode(Mode.MESSAGE);
+      this.controls.replaceChildren(this.button(i18next.t('coop:personalParty'),()=>this.openPreparationParty()));
       this.setStatus(i18next.t('coop:shoppingFinished'));
       this.preparationSignature=signature;this.preparationViewKey=viewKey;return;
     }
@@ -562,6 +563,7 @@ export default class CoopPlayPhase extends Phase {
     this.controls.replaceChildren();
     {
       if (!player.rewardResolved) this.controls.append(this.button('跳过免费奖励', () => this.confirmSkipPreparation()));
+      this.controls.append(this.button(i18next.t('coop:personalParty'),()=>this.openPreparationParty()));
       const rewards = player.rewards.map((option: any) =>
         new ModifierTypeOption(restoreModifierTypeState(option.type), 0, 0));
       if (!rewards.length) throw new Error('PERSONAL_REWARD_MENU_EMPTY');
@@ -635,6 +637,20 @@ export default class CoopPlayPhase extends Phase {
     await this.scene.ui.setMode(Mode.CONFIRM, () => finish(true), () => finish(false));
   }
 
+  private async openPreparationParty() {
+    const snapshot=this.latest,epoch=this.epoch,row=snapshot?.personal.decision;
+    if(row?.kind!=='preparation'||row.players.subdecision||row.players.selection||!this.isPersonalInputCurrent(snapshot,epoch))return;
+    const party=this.model.applied?.personal?.party;
+    if(!party?.length)throw new Error('PERSONAL_PARTY_MISSING');
+    await this.showTeamParty(party,PartyUiMode.MODIFIER,async(slot,option)=>{
+      if(option!==PartyOption.UNPAUSE_EVOLUTION||!party[slot]){await this.returnToDecision(snapshot,epoch);return;}
+      const menuEpoch=this.teamMenuEpoch;
+      await this.scene.ui.setMode(Mode.MESSAGE);
+      if(this.isPersonalInputCurrent(snapshot,epoch)&&menuEpoch===this.teamMenuEpoch)
+        await this.sendAction({kind:'preparation',operation:'unpause-evolution',pokemonId:party[slot].id},i18next.t('coop:resumeEvolutionSubmitted'));
+    },()=>null,[PartyOption.SUMMARY,PartyOption.UNPAUSE_EVOLUTION]);
+  }
+
   private async showOriginalPreparationMenu(...args:any[]) {
     const ui=this.scene.ui;
     const handler=ui.getHandler?.(Mode.MODIFIER_SELECT);
@@ -665,7 +681,8 @@ export default class CoopPlayPhase extends Phase {
     if (targetKind === 'party' || targetKind === 'move') {
       const personal = this.model.applied?.personal;
       if (!personal?.party?.length) throw new Error('PERSONAL_PARTY_MISSING');
-      await this.showTeamParty(personal.party, targetKind === 'move' ? PartyUiMode.MOVE_MODIFIER : PartyUiMode.MODIFIER, async (slotIndex, option) => {
+      const tm = type instanceof TmModifierType;
+      await this.showTeamParty(personal.party, targetKind === 'move' ? PartyUiMode.MOVE_MODIFIER : tm ? PartyUiMode.TM_MODIFIER : PartyUiMode.MODIFIER, async (slotIndex, option) => {
         const entry = personal.party[slotIndex];
         this.preparationSignature = '';
         const menuEpoch = this.teamMenuEpoch;
@@ -673,13 +690,14 @@ export default class CoopPlayPhase extends Phase {
         if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return;
         const move = Number(option) - PartyOption.MOVE_1;
         const selected = targetKind === 'move' ? move >= 0 && move < 4 && entry?.pokemon.getMoveset()[move]
-          && type.moveSelectFilter(entry.pokemon.getMoveset()[move]) === null : option === PartyOption.APPLY;
+          && type.moveSelectFilter(entry.pokemon.getMoveset()[move]) === null : option === (tm ? PartyOption.TEACH : PartyOption.APPLY);
         if (!entry || !selected) { await this.openPreparationMenu(); return; }
         action.pokemonId = entry.id;
         if (targetKind === 'move') action.moveIndex = move;
         await this.sendAction(action, '本人道具目标已提交…');
       }, type.selectFilter, targetKind === 'move' ? [PartyOption.MOVE_1, PartyOption.MOVE_2, PartyOption.MOVE_3, PartyOption.MOVE_4, PartyOption.SUMMARY]
-        : [PartyOption.APPLY, PartyOption.SUMMARY], targetKind === 'move' ? type.moveSelectFilter : undefined);
+        : [tm ? PartyOption.TEACH : PartyOption.APPLY, PartyOption.SUMMARY], targetKind === 'move' ? type.moveSelectFilter : undefined,
+        tm ? type.moveId : undefined);
       if (this.releaseTeamParty && this.isPersonalInputCurrent(snapshot, epoch))
         this.controls.replaceChildren(this.button('取消使用／返回商店', async () => {
           this.clearTeamParty(); this.preparationSignature = '';
@@ -711,7 +729,7 @@ export default class CoopPlayPhase extends Phase {
 
   /** Original Party/Summary on loaded display copies; the verified model stays detached. */
   private async showTeamParty(entries: any[], mode: PartyUiMode, select: (slot: number, option: PartyOption) => any,
-    filter: (pokemon: any) => string | null, allowedOptions: PartyOption[], moveFilter?: (move: any) => string | null) {
+    filter: (pokemon: any) => string | null, allowedOptions: PartyOption[], moveFilter?: (move: any) => string | null, tmMoveId?: number) {
     const snapshot = this.latest, epoch = this.epoch;
     if (!this.isPersonalInputCurrent(snapshot, epoch)) return false;
     this.clearPreparationParty(); this.clearActiveSwitchParty();
@@ -783,7 +801,9 @@ export default class CoopPlayPhase extends Phase {
         if (current) return Promise.resolve(select(slot, option)).catch(error => {
           if (this.isPersonalInputCurrent(snapshot, epoch)) this.setStatus(`队伍选择失败：${error?.message ?? error}`, true);
         });
-      }, filter, moveFilter, undefined, { allowedOptions, readOnlySummary: true, ...(mode === PartyUiMode.RELEASE ? { submitReleaseOnly:true } : {}) });
+      }, filter, moveFilter, tmMoveId, { allowedOptions, readOnlySummary: true,
+        ...(allowedOptions.includes(PartyOption.UNPAUSE_EVOLUTION)?{submitUnpauseOnly:true}:{}),
+        ...(mode === PartyUiMode.RELEASE ? { submitReleaseOnly:true } : {}) });
       if (!active || !this.isPersonalInputCurrent(snapshot, epoch)) {
         release();
         if (!this.releaseTeamParty && this.scene.ui.getMode?.() === Mode.PARTY) await this.scene.ui.setMode(Mode.MESSAGE);
@@ -1353,7 +1373,7 @@ export default class CoopPlayPhase extends Phase {
     if (!this.latest || this.seat === null || !this.roomId) return false;
     if (this.actionId) { this.setStatus('操作已提交，等待回执…'); return false; }
     if (!this.inputReady) { this.setStatus('正在核对双方状态，请稍后提交'); return false; }
-    if (action.kind==='preparation' && this.latest.personal.decision.sharedMarket) {
+    if (action.kind==='preparation' && action.operation!=='unpause-evolution' && this.latest.personal.decision.sharedMarket) {
       const d=this.latest.personal.decision;
       const claimed=(action.operation==='reward'?d.sharedMarket.rewardClaims:action.operation==='buy'?d.sharedMarket.shopClaims:[])
         .some((claim:any)=>claim.optionId===action.optionId);

@@ -2,7 +2,7 @@
   "evolving": "What?\n{{pokemonName}} is evolving!",
   "stopped": "{{pokemonName}} stopped evolving.",
   "pausePrompt": "Would you like to pause evolutions for {{pokemonName}}?\nEvolutions can be re-enabled from the party screen.",
-  "coopPausePrompt": "Pause future evolutions for {{pokemonName}}?\nRe-enabling evolutions in the cooperative party screen is not available yet. Choose No to cancel only this evolution.",
+  "coopPausePrompt": "Pause future evolutions for {{pokemonName}}?\nThey can be re-enabled from your party during preparation.",
   "paused": "Evolutions have been paused for {{pokemonName}}.",
   "evolved": "Congratulations!\nYour {{pokemonName}} evolved into {{evolvedName}}!",
   "confirm": "{{pokemonName}} is about to evolve. Continue?",

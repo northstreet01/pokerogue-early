@@ -13,5 +13,7 @@
  "claimed":"该道具已被领取，请选择剩余库存。",
  "marketLocked":"本轮选择已结束或重抽已锁定。",
  "stockReward":"玩家{{player}}已领取",
- "stockPaid":"玩家{{player}}已购买"
+ "stockPaid":"玩家{{player}}已购买",
+ "personalParty":"查看本人队伍",
+ "resumeEvolutionSubmitted":"重新开启进化已提交，等待服务器确认…"
 }

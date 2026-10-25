@@ -13,5 +13,7 @@
  "claimed":"This item has already been taken. Please choose remaining stock.",
  "marketLocked":"Your choices are complete or rerolling is locked.",
  "stockReward":"Player {{player}} claimed",
- "stockPaid":"Player {{player}} purchased"
+ "stockPaid":"Player {{player}} purchased",
+ "personalParty":"View my party",
+ "resumeEvolutionSubmitted":"Evolution resumed request submitted. Waiting for the server…"
 }

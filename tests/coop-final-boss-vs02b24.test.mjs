@@ -6,7 +6,7 @@ import {createOriginalRuleHost} from '../server/original-rule-host.mjs';
 import {finalBossFixture,finalBossConfig,finalBossTrace,phase} from './helpers/native-final-boss.mjs';
 import {forcedProgressionHost} from './helpers/forced-progression-host.mjs';
 import {steadyInput} from './helpers/native-steady-progression.mjs';
-let api,fixture;
+let api,fixture,stageTrace;
 before(async()=>{await buildCoopRuntime();api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');api.describeOriginalCatalogs();fixture=await finalBossFixture(api);});
 const enemies=c=>c.roster.entries.filter(e=>e.owner===null);
 
@@ -50,7 +50,7 @@ test('normal damage keeps one enemy action, owned PP and exact codec restoration
 });
 
 test('original first-stage Damage, same-instance form, moves, held item and final ending survive every phase restart',async()=>{
- const trace=await finalBossTrace(api,fixture.checkpoint),id=enemies(fixture.checkpoint)[0].pokemon.fields.id;
+ const trace=stageTrace=await finalBossTrace(api,fixture.checkpoint),id=enemies(fixture.checkpoint)[0].pokemon.fields.id;
  assert.equal(trace.terminal.decision.kind,'ended');assert.equal(trace.terminal.decision.victory,true);
  const phases=trace.steps.flatMap(s=>s.result.events.filter(e=>e.kind==='phase-start').map(e=>e.phase));
  for(const name of ['DamagePhase','QuietFormChangePhase','FaintPhase','VictoryPhase','GameOverPhase'])assert.ok(phases.includes(name),name);
@@ -67,6 +67,22 @@ test('original first-stage Damage, same-instance form, moves, held item and fina
   const h=await forcedProgressionHost(finalBossConfig);
   try{assert.deepEqual(await h.request(step.operation,step.payload),step.result);}finally{await h.close();}
  }
+});
+
+for(const seat of [0,1])test(`phase change with fainted seat ${seat} preserves its original replacement without adding a second player summon`,async()=>{
+ const transition=stageTrace.steps.find(s=>s.result.events.some(e=>e.kind==='dialogue')&&s.before.battle.battleSpec===1
+  &&enemies(s.before)[0].pokemon.fields.formIndex===0&&enemies(s.before)[0].pokemon.fields.bossSegmentIndex===0);
+ assert.ok(transition,'original first-stage ending');
+ const c=api.originalDecisionStateCodec.restore(transition.before),actor=c.roster.entries.find(e=>e.owner===seat&&e.index===0).pokemon;
+ actor.hp=0;actor.status=new api.Status(api.StatusEffect.FAINT);
+ const h=await forcedProgressionHost(finalBossConfig);try{
+  const r=await h.request('native-step',api.originalDecisionStateCodec.capture(c));
+  const phases=[...r.checkpoint.continuation.phaseQueue,...r.checkpoint.continuation.phaseQueuePrepend];
+  assert.ok(!phases.some(d=>d.phase.type==='SummonPhase'),'co-op already has two owned fronts; fainting must use its own replacement');
+  assert.ok(!phases.some(d=>d.phase.type==='ToggleDoublePositionPhase'),'do not replay solo front expansion');
+  assert.ok(phases.some(d=>d.phase.type==='QuietFormChangePhase'),'original transformation is retained');
+  assert.equal(r.checkpoint.roster.field[seat],actor.id);assert.equal(r.checkpoint.roster.field[1-seat],fixture.checkpoint.roster.field[1-seat]);
+ }finally{await h.close();}
 });
 
 test('legacy dual-Boss checkpoints preserve both original generated instances, HP and codec data on resume',async()=>{

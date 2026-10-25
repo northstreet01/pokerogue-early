@@ -2487,7 +2487,10 @@ export class DamagePhase extends PokemonPhase {
             this.scene.triggerPokemonFormChange(pokemon, SpeciesFormChangeManualTrigger, false);
             this.scene.currentBattle.double = true;
             const availablePartyMembers = this.scene.getParty().filter(p => !p.isFainted());
-            if (availablePartyMembers.length > 1) {
+            // Independent co-op fronts already exist from the first stage.
+            // Solo expands here; co-op fainting retains its owned replacement
+            // phase instead of summoning a reserve into the partner's seat.
+            if (availablePartyMembers.length > 1 && !(this.scene as any).nativeIndependentCommands) {
               this.scene.pushPhase(new ToggleDoublePositionPhase(this.scene, true));
               if (!availablePartyMembers[1].isOnField())
                 this.scene.pushPhase(new SummonPhase(this.scene, 1));

@@ -38,7 +38,12 @@ test('explicit manifest covers every original Phase declaration, inherited field
     const name=c.name.text;if(excludedPhaseTypes.includes(name))continue;names.push(name);
     const spec=phaseStateFields[name];assert.ok(spec,name);
     assert.equal(spec.base,c.heritageClauses[0].types[0].expression.getText());
-    assert.deepEqual([...Object.keys(spec.fields),...spec.display].sort(),c.members.filter(ts.isPropertyDeclaration).map(n=>n.name.getText()).sort(),name);
+    // The native adapter persists a validated manual command while an earlier
+    // automatic command waits for its target. This is the sole adapter field;
+    // keep all original declarations subject to the exact AST comparison.
+    const adapterFields=name==='CommandPhase'?['nativeIntent']:[];
+    if(adapterFields.length){assert.equal(spec.fields.nativeIntent,'string');assert.ok(!spec.required.includes('nativeIntent'));}
+    assert.deepEqual([...Object.keys(spec.fields),...spec.display].sort(),[...c.members.filter(ts.isPropertyDeclaration).map(n=>n.name.getText()),...adapterFields].sort(),name);
   }
   assert.deepEqual(names.sort(),Object.keys(phaseStateFields).sort());
 });

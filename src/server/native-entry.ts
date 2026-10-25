@@ -46,7 +46,8 @@ import { PokeballType } from '../data/pokeball';
 import { advancePreBattleSwitch } from '../battle-core/pre-battle-switch-runner.mjs';
 import { createPreBattleSwitchDecision, createForcedSwitchDecision } from '../battle-core/switch-command.mjs';
 import { advanceForcedSwitch } from '../battle-core/forced-switch-runner.mjs';
-import PartyUiHandler, { PartyOption, PartyUiMode } from '../ui/party-ui-handler';
+import PartyUiHandler, { PartyOption, PartyUiMode, unpausePartyEvolution } from '../ui/party-ui-handler';
+import { pokemonEvolutions } from '../data/pokemon-evolutions';
 import { createCaptureChoice, validateCaptureChoice } from '../battle-core/capture-choice.mjs';
 import { hasLegacyCaptures, legacyCaptureOptions, validateLegacyCapture } from '../battle-core/legacy-capture.mjs';
 import { nextSafeDecisionId } from '../battle-core/safe-decisions.mjs';
@@ -1467,7 +1468,9 @@ function preparationEffectDriver(runtime, intents = []) {
         return () => { if (descriptor) Object.defineProperty(pokemon, 'updateInfo', descriptor); else delete (pokemon as any).updateInfo; };
       });
       view.unshiftPhase = phase => {
-        if (phase instanceof LevelUpPhase) {phases.capture(phase,c,seat);growth.unshift(phase);return;}
+        if ([LevelUpPhase,LearnMovePhase,EvolutionPhase].some(ctor=>Object.getPrototypeOf(phase)===ctor.prototype)) {
+          phases.capture(phase,c,seat);growth.unshift(phase);return;
+        }
         check(!next && phase instanceof SelectModifierPhase, 'UNEXPECTED_PREPARATION_PHASE'); next = phase;
       };
       view.validateAchvs = BattleScene.prototype.validateAchvs; // validateAchv is the existing deferred owned port.
@@ -1566,6 +1569,12 @@ export async function chooseNativePreparation(runtime, payload) {
     } finally { binding.dispose(); }
   }
   check(!hasLegacyCaptures(c, payload.seat) || payload.action?.operation === 'unready', 'LEGACY_CAPTURE_PENDING');
+  if(payload.action?.operation==='unpause-evolution'){
+    const target=validateEvolutionResume(c,payload.seat,payload.action);
+    const text=unpausePartyEvolution(target);
+    c.decision.id=nextSafeDecisionId(c.decision.id);
+    return {checkpoint:codec.capture(c),events:[{kind:'message',scope:payload.seat,text,presentation:presentationText(text)}],intents:[]};
+  }
   const intents = [];
   let result = await advancePreparationEffect(c, payload.seat, payload.action, codec, originalSafeDecisionCodec, preparationEffectDriver(runtime, intents));
   if (result.context.pendingEffects.some(e=>e.id.startsWith(`preparation-growth-${payload.seat}-`))) {
@@ -1737,6 +1746,14 @@ export async function chooseNativeSwitch(runtime, payload) {
 
 // Pure validators/projection for the formal adapter. They restore the original
 // model, read it, and never mutate the committed checkpoint or consume RNG.
+function validateEvolutionResume(c,seat,action){
+  codec.validateAction(c,seat,action);
+  check(c.decision.kind==='preparation'&&c.decision.players[seat].subdecision===null,'INVALID_EVOLUTION_RESUME');
+  const entry=c.roster.entries.find(e=>e.owner===seat&&e.group==='party'&&e.pokemon.id===action.pokemonId);
+  check(entry?.pokemon.pauseEvolutions===true&&pokemonEvolutions[entry.pokemon.species.speciesId]?.length>0,'INVALID_EVOLUTION_RESUME');
+  return entry.pokemon;
+}
+
 export function validateNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
@@ -1748,6 +1765,7 @@ export function validateNativePreparation(runtime, payload) {
     validateLegacyCapture(c, payload.seat, payload.action, codec, originalSafeDecisionCodec); return true;
   }
   check(!hasLegacyCaptures(c, payload.seat) || payload.action?.operation === 'unready', 'LEGACY_CAPTURE_PENDING');
+  if(payload.action?.operation==='unpause-evolution'){validateEvolutionResume(c,payload.seat,payload.action);return true;}
   validatePreparationEffect(c, payload.seat, payload.action, originalSafeDecisionCodec,
     preparationEffectDriver(runtime));
   return true;

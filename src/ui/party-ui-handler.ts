@@ -20,6 +20,12 @@ import { SummaryUiMode } from './summary-ui-handler';
 
 const defaultMessage = () => i18next.t('partyUiHandler:choosePokemon');
 
+// Shared by the original local menu and the authoritative cooperative intent.
+export function unpausePartyEvolution(pokemon: PlayerPokemon): string {
+  pokemon.pauseEvolutions = false;
+  return i18next.t('partyUiHandler:unpausedEvolutions', { pokemonName: pokemon.name });
+}
+
 export enum PartyUiMode {
   SWITCH,
   FAINT_SWITCH,
@@ -63,6 +69,7 @@ export type PokemonMoveSelectFilter = (pokemonMove: PokemonMove) => string;
 export default class PartyUiHandler extends MessageUiHandler {
   private readOnlySummary = false;
   private submitReleaseOnly = false;
+  private submitUnpauseOnly = false;
   private partyUiMode: PartyUiMode;
   private fieldIndex: integer;
 
@@ -196,6 +203,7 @@ export default class PartyUiHandler extends MessageUiHandler {
       ? new Set<PartyOption>([...args[6].allowedOptions, PartyOption.CANCEL]) : undefined;
     this.readOnlySummary = args[6]?.readOnlySummary === true;
     this.submitReleaseOnly = args[6]?.submitReleaseOnly === true;
+    this.submitUnpauseOnly = args[6]?.submitUnpauseOnly === true;
 
     this.partyContainer.setVisible(true);
     this.partyBg.setTexture(`party_bg${this.scene.currentBattle.double ? '_double' : ''}`);
@@ -316,8 +324,9 @@ export default class PartyUiHandler extends MessageUiHandler {
         } else if (option === PartyOption.UNPAUSE_EVOLUTION) {
           this.clearOptions();
           ui.playSelect();
-          pokemon.pauseEvolutions = false;
-          this.showText(i18next.t("partyUiHandler:unpausedEvolutions", { pokemonName: (pokemon.name) }), null, () => this.showText(null, 0), null, true);
+          if (this.submitUnpauseOnly) this.selectCallback?.(this.cursor, option);
+          else this.showText(unpausePartyEvolution(pokemon), null, () => this.showText(null, 0), null, true);
+          return true;
         } else if (option === PartyOption.RELEASE) {
           this.clearOptions();
           ui.playSelect();
@@ -785,6 +794,7 @@ export default class PartyUiHandler extends MessageUiHandler {
     this.allowedOptions = undefined;
     this.readOnlySummary = false;
     this.submitReleaseOnly = false;
+    this.submitUnpauseOnly = false;
     this.partyContainer.setVisible(false);
     this.clearPartySlots();
   }

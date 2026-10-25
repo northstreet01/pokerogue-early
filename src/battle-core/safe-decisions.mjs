@@ -85,6 +85,10 @@ export function createSafeDecisionCodec({evolution,modifierType,hasBiome,hasMove
     else if(d.kind==='preparation') {
       const p=d.players[seat];
       if(p.subdecision!==null){validateAction({...c,decision:p.subdecision},seat,a);return;}
+      if(a?.kind==='preparation'&&a.operation==='unpause-evolution'){
+        exact(a,['kind','operation','pokemonId']);
+        check(p.selection===null&&owned(c,seat,a.pokemonId),'INVALID_PREPARATION_OWNER');return;
+      }
       validateSharedPreparationAction(c,seat,a);
       check(a.kind==='preparation','INVALID_ACTION');
       if(['ready','unready','skip-reward','reroll'].includes(a.operation)){

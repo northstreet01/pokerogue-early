@@ -70,12 +70,13 @@ export async function advancePreparationEffect(context,seat,action,codec,safe,dr
   const saved=codec.capture(c),owned=saved.pendingEffects.find(e=>e.id===effect.id);
   check(owned?.phase.type==='SelectModifierPhase'&&owned.phase.scope===seat&&owned.phase.fields.rerollCount.value===p.rerollCount,'INVALID_PREPARATION_OWNER');
   if(result.growth!==undefined){
-    check(action.operation==='reward'&&Array.isArray(result.growth)&&result.growth.length>0&&result.growth.length<=1000,
+    check(['reward','buy'].includes(action.operation)&&Array.isArray(result.growth)&&result.growth.length>0&&result.growth.length<=1000,
       'INVALID_PREPARATION_GROWTH');
     check(!c.pendingEffects.some(e=>e.id.startsWith(`preparation-growth-${seat}-`)),'PREPARATION_GROWTH_PENDING');
     c.pendingEffects.push(...result.growth.map((phase,index)=>({id:`preparation-growth-${seat}-${index}`,phase,remaining:'start'})));
     const growth=codec.capture(c).pendingEffects.filter(e=>e.id.startsWith(`preparation-growth-${seat}-`));
-    check(growth.every(e=>e.phase.scope===seat&&e.phase.type==='LevelUpPhase'),'INVALID_PREPARATION_GROWTH');
+    check(growth.every(e=>e.phase.scope===seat&&['LevelUpPhase','LearnMovePhase','EvolutionPhase'].includes(e.phase.type)),
+      'INVALID_PREPARATION_GROWTH');
   }
   return {context:c,events:copy(result.events),grants:[]};
 }

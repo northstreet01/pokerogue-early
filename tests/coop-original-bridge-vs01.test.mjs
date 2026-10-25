@@ -179,15 +179,23 @@ async function syncBoth(env, a, b, sa, sb) {
 
 let actionCounter = 0;
 async function submit(client, snapshot, action) {
-  const actionId = `${client.name}-${snapshot.revision}-${++actionCounter}`;
-  const message = {
-    type: 'submitAction', roomId: snapshot.roomId, runId: snapshot.runId,
-    decisionId: snapshot.decisionId, expectedRevision: snapshot.revision, actionId, action,
-  };
-  client.send(message);
-  const receipt = await client.wait(item => item.type === 'actionReceipt' && item.actionId === actionId);
-  assert.equal(receipt.accepted, true, `receipt ${actionId}: ${JSON.stringify(receipt)}`);
-  return receipt;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const actionId = `${client.name}-${snapshot.revision}-${++actionCounter}`;
+    const message = {
+      type: 'submitAction', roomId: snapshot.roomId, runId: snapshot.runId,
+      decisionId: snapshot.decisionId, expectedRevision: snapshot.revision, actionId, action,
+    };
+    client.send(message);
+    const receipt = await client.wait(item => item.type === 'actionReceipt' && item.actionId === actionId);
+    if (receipt.accepted) return receipt;
+    assert.equal(receipt.code, 'SYNC_BLOCKED', `receipt ${actionId}: ${JSON.stringify(receipt)}`);
+    await client.wait(item => item.type === 'syncStatus'
+      && item.roomId === snapshot.roomId
+      && item.revision === snapshot.revision
+      && item.decisionId === snapshot.decisionId
+      && item.blocked === false);
+  }
+  assert.fail(`submit did not unblock for revision=${snapshot.revision} decision=${snapshot.decisionId}`);
 }
 
 async function submitOne(env, room, client, snapshot, action) {

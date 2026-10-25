@@ -29,7 +29,15 @@ test('original encounter preserves frozen rules with tracked Promises and one ex
   const scene=parse('battle-scene.ts').statements.find(n=>n.name?.text==='BattleScene');
   assert.equal(normalize(scene.members.find(n=>n.name?.getText()==='deferEncounterPersistence').getText()),
     'deferEncounterPersistence(): Promise<void> | null { return null; }','solo scene keeps original save path');
-  for(const [name,body]of Object.entries(frozen.scene))assert.equal(normalize(scene.members.find(n=>n.name?.getText()===name).getText()),normalize(body));
+  for(const [name,body]of Object.entries(frozen.scene)){
+    let actual=scene.members.find(n=>n.name?.getText()===name).getText();
+    if(name==='newBattle'){
+      assert.equal(actual.split(', enemyDouble?: boolean').length,2);
+      assert.equal(actual.split(', enemyDouble ?? newDouble').length,2);
+      actual=actual.replace(', enemyDouble?: boolean','').replace(', enemyDouble ?? newDouble','');
+    }
+    assert.equal(normalize(actual),normalize(body));
+  }
 });
 
 for(const mode of ['missing','null'])test(`encounter ${mode} candidate IO keeps original system/session save order`,async()=>{

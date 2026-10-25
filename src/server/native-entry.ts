@@ -456,7 +456,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     // before any asynchronous encounter work or subsequent request can run.
     try {
       if (fixed) fixed.double = true;
-      return BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true);
+      // Battle.double continues to mean two independent player fronts. Only
+      // the original Classic final encounter uses a single enemy level draw.
+      // Existing checkpoints retain their saved enemyParty/enemyLevels (even
+      // legacy dual bosses); binding/restoring never regenerates either list.
+      const singleFinalBoss = root.gameMode.isClassic && wave === 200;
+      return BattleScene.prototype.newBattle.call(root, args[0], args[1], args[2], true, !singleFinalBoss);
     } finally { if (fixed) fixed.double = oldDouble; }
   };
   function bindPhase(p, existingScope?: number) {

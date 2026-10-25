@@ -61,14 +61,17 @@ export default class Battle {
     public battleSeed: string;
     private battleSeedState: string;
 
-    constructor(gameMode: GameMode, waveIndex: integer, battleType: BattleType, trainer: Trainer, double: boolean) {
+    // Enemy cardinality is a creation input. The resulting enemyLevels/party
+    // already persist it; double retains the original player front semantics.
+    // Omitting enemyDouble preserves every existing single-player caller.
+    constructor(gameMode: GameMode, waveIndex: integer, battleType: BattleType, trainer: Trainer, double: boolean, enemyDouble: boolean = double) {
         this.gameMode = gameMode;
         this.waveIndex = waveIndex;
         this.battleType = battleType;
         this.trainer = trainer;
         this.initBattleSpec();
         this.enemyLevels = battleType !== BattleType.TRAINER
-            ? new Array(double ? 2 : 1).fill(null).map(() => this.getLevelForWave())
+            ? new Array(enemyDouble ? 2 : 1).fill(null).map(() => this.getLevelForWave())
             : trainer.getPartyLevels(this.waveIndex);
         this.enemyParty = [];
         this.seenEnemyPartyMemberIds = new Set<integer>();

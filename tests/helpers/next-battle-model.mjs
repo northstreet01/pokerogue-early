@@ -101,7 +101,7 @@ export function nextBattleDriver(options={}){
         s.seed=c.scene.seed;Object.defineProperty(s,'waveSeed',{get:()=>c.scene.waveSeed,set:v=>c.scene.waveSeed=v});
         s.resetSeed=sceneMethod('resetSeed','waveIndex',reference).bind(s);
         s.getMaxExpLevel=sceneMethod('getMaxExpLevel','ignoreLevelCap',false).bind(s);
-        s.newBattle=()=>sceneMethod('newBattle','waveIndex,battleType,trainerData,double',reference).call(s,undefined,undefined,undefined,true);
+        s.newBattle=()=>sceneMethod('newBattle','waveIndex,battleType,trainerData,double,enemyDouble',reference).call(s,undefined,undefined,undefined,true);
         s.executeWithSeedOffset=(fn,offset)=>ruleSeedOffset(()=>{throw Error('no room');},s.seed,offset,fn);
         s.trySpreadPokerus=sceneMethod('trySpreadPokerus','',reference).bind(s);
         s.pushPhase=q=>queueOwnedPhase(c,q,q.constructor===originalPhases.CheckSwitchPhase?q.fieldIndex:null);

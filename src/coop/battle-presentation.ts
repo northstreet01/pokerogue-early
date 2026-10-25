@@ -18,6 +18,11 @@ import { presentOriginalEvolution } from './evolution-presentation';
 import {renderPresentationText} from '../system/presentation-text.mjs';
 import {presentOriginalCapture} from './capture-presentation';
 import {presentOriginalFormChange} from './form-change-presentation';
+import { BattleSpec } from '../enums/battle-spec';
+
+export const coopFieldPosition = (shared: any, slot: number): FieldPosition =>
+  slot === 2 && shared.battleSpec === BattleSpec.FINAL_BOSS && shared.field[3] === null
+    ? FieldPosition.CENTER : slot % 2 ? FieldPosition.RIGHT : FieldPosition.LEFT;
 
 export function captureResultText(event: any): string {
   const ball = getPokeballName(event.pokeballType);
@@ -308,7 +313,7 @@ export class CoopBattlePresentation {
     if (slot < 0 || slot > 3) return;
     const field = [...this.field]; field[slot] = display;
     this.displayedById.set(display.id, display); this.attachField(field, batch.snapshot.shared);
-    void display.setFieldPosition(slot % 2 ? FieldPosition.RIGHT : FieldPosition.LEFT);
+    void display.setFieldPosition(coopFieldPosition(batch.snapshot.shared, slot));
     if (event.kind === 'pokemon-enter') {
       if (event.view) {
         // A switch and the incoming Pokemon's damage can share one committed
@@ -573,7 +578,7 @@ export class CoopBattlePresentation {
             if (this.scene.textures?.exists && !this.scene.textures.exists(loadedDisplay.getBattleSpriteKey()))
               throw new Error('精灵素材下载失败，请重试加载');
             const slot = shared.field.indexOf(view.id);
-            void loadedDisplay.setFieldPosition(slot % 2 ? FieldPosition.RIGHT : FieldPosition.LEFT);
+            void loadedDisplay.setFieldPosition(coopFieldPosition(shared, slot));
             await within(Promise.resolve(loadedDisplay.updateInfo(true)), 1200, signal);
             this.looks.set(view.id, look); this.modelKeys.set(view.id, key);
           })());

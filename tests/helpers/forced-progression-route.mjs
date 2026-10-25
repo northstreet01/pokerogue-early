@@ -22,12 +22,17 @@ export async function forcedProgressionRoute({untilWave=56,untilVictory=false,se
   provisioning,intents:initialSaved?.intents??[],hostFactory:forcedProgressionHost};
  let env=await openPreparationRoom({...fixture,store:new FormalRoomStore(directory)});
  let pair=env.pair,lastWave=0,saved,error=null,terminalRestored=false,lastActions=[];
- const trace=[],restarts=[],phases=new Map();
+ const trace=[],restarts=[],phases=new Map(),finalBoss=[];
  try{
   for(let n=0;n<4000;n++){
    const room=env.server.rooms.get(pair[0].identity.roomId);saved=structuredClone(room.checkpoint);
    const c=saved.nativeCheckpoint,wave=c.battle.waveIndex;
    const step={step:n,wave,kind:c.decision.kind,revision:room.revision};trace.push(step);
+   if(wave===200)finalBoss.push({step:n,kind:c.decision.kind,requiredSeats:c.decision.requiredSeats,
+    field:[...c.roster.field],double:c.battle.double,enemyLevels:[...c.battle.enemyLevels],
+    enemies:c.roster.entries.filter(e=>e.owner===null).map(e=>({id:e.pokemon.fields.id,species:e.pokemon.fields.species,
+     form:e.pokemon.fields.formIndex,hp:e.pokemon.fields.hp,segments:e.pokemon.fields.bossSegments,segment:e.pokemon.fields.bossSegmentIndex})),
+    owners:c.roster.entries.filter(e=>e.owner!==null&&e.group==='party'&&e.index===0).map(e=>({owner:e.owner,id:e.pokemon.fields.id}))});
    if(wave!==lastWave){lastWave=wave;await onWave(step);await fs.writeFile(join(output,`wave-${wave}.json`),JSON.stringify(saved));}
    if(c.decision.kind==='ended'){
     if(untilVictory&&c.decision.victory===true){
@@ -73,7 +78,7 @@ export async function forcedProgressionRoute({untilWave=56,untilVictory=false,se
  const result={seed,mode:'TEST_ONLY enemy lethal damage amount + player damage zero; original segment handling retained',
   startedWave:fixture.checkpoint.battle.waveIndex,reachedWave:saved?.nativeCheckpoint.battle.waveIndex,decision:saved?.nativeCheckpoint.decision.kind,
   victory:saved?.nativeCheckpoint.decision.victory??null,reason:saved?.nativeCheckpoint.decision.reason??null,
-  error,restarts,terminalRestored,trace,phases:Object.fromEntries([...phases].map(([wave,names])=>[wave,[...names]])),
+  error,restarts,terminalRestored,trace,finalBoss,phases:Object.fromEntries([...phases].map(([wave,names])=>[wave,[...names]])),
   pendingVouchers:saved?.intents.filter(i=>i.type==='voucher-pending').map(i=>({id:i.id,owner:i.owner,status:i.status,payload:i.payload})),
   pendingCompletion:saved?.intents.filter(i=>i.type==='completion-pending'),
   realBrowser:false,realUserRoomModified:false};

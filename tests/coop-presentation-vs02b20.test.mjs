@@ -15,6 +15,21 @@ before(async()=>{
 });
 const fixture=()=>presentationFixture(api);
 
+test('one final Boss uses the original center position while both player fronts retain left/right positions',async()=>{
+ const f=fixture(),positions=[],make=f.p.container.bind(f.p);
+ f.p.container=(...args)=>{const p=make(...args);p.setFieldPosition=position=>positions.push([p.id,position]);return p;};
+ const player=f.snapshot.shared.pokemon[0],partner={...player,id:player.id+1,owner:1,fieldIndex:1};
+ const boss={...player,id:player.id+2,owner:null,fieldIndex:2,speciesId:890,bossSegments:4,bossSegmentIndex:3};
+ f.snapshot.shared={...f.snapshot.shared,waveIndex:200,battleSpec:1,double:true,field:[player.id,partner.id,boss.id,null],pokemon:[player,partner,boss]};
+ await f.p.apply(f.snapshot,f.applied);
+ assert.equal(f.scene.party[0].id,player.id);assert.equal(f.scene.party[1].id,partner.id);
+ // FieldPosition.CENTER=0, LEFT=1, RIGHT=2 are the original enum values.
+ assert.ok(positions.some(([id,p])=>id===boss.id&&p===0));
+ assert.ok(positions.some(([id,p])=>id===player.id&&p===1));
+ assert.ok(positions.some(([id,p])=>id===partner.id&&p===2));
+ f.p.clear();
+});
+
 test('same field revisions reuse original display objects and assets',async()=>{
   const {p,scene,counts,snapshot,applied}=fixture();await p.apply(snapshot,applied);const first=scene.party[0];
   await p.apply({...snapshot,revision:1},applied);

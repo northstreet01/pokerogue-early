@@ -71,7 +71,7 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
       &&c.battle.enemyParty.every(p=>!p.isFainted(true)), 'INVALID_NEXT_BATTLE_RESULT');
   } else check(c.battle.waveIndex===context.battle.waveIndex+1&&c.battle.double===true
     &&c.battle.battleType===0&&(c.battle.battleSpec===0||finalEncounter())&&c.battle.turn===1
-    &&c.battle.enemyParty.length===2&&c.battle.enemyParty.every(p=>!p.isFainted(true)), 'INVALID_NEXT_BATTLE_RESULT');
+    &&c.battle.enemyParty.length===(finalEncounter()?1:2)&&c.battle.enemyParty.every(p=>!p.isFainted(true)), 'INVALID_NEXT_BATTLE_RESULT');
   check(canonical(personalBefore)===canonical(personalResources(c))&&canonical(before.eggState??null)===canonical(after.eggState??null),
     'NEXT_BATTLE_RESOURCE_CHANGED');
   if(biomeTransition){

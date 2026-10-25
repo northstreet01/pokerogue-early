@@ -874,7 +874,7 @@ export default class BattleScene extends Phaser.Scene {
 		}
 	}
 
-	newBattle(waveIndex?: integer, battleType?: BattleType, trainerData?: TrainerData, double?: boolean): Battle {
+	newBattle(waveIndex?: integer, battleType?: BattleType, trainerData?: TrainerData, double?: boolean, enemyDouble?: boolean): Battle {
 		let newWaveIndex = waveIndex || ((this.currentBattle?.waveIndex || (startingWave - 1)) + 1);
 		let newDouble: boolean;
 		let newBattleType: BattleType;
@@ -934,7 +934,7 @@ export default class BattleScene extends Phaser.Scene {
 
 		this.lastEnemyTrainer = lastBattle?.trainer ?? null;
 
-		this.currentBattle = new Battle(this.gameMode, newWaveIndex, newBattleType, newTrainer, newDouble);
+		this.currentBattle = new Battle(this.gameMode, newWaveIndex, newBattleType, newTrainer, newDouble, enemyDouble ?? newDouble);
 		this.currentBattle.incrementTurn(this);
 
 		//this.pushPhase(new TrainerMessageTestPhase(this, TrainerType.RIVAL, TrainerType.RIVAL_2, TrainerType.RIVAL_3, TrainerType.RIVAL_4, TrainerType.RIVAL_5, TrainerType.RIVAL_6));

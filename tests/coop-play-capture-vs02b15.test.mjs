@@ -281,8 +281,12 @@ for (const seat of [0,1]) test(`VS22 seat ${seat}: shared stock preserves origin
   const field=[...phase.presentation.field],allocations={...visual.counts};
   phase.makeTeamPokemon=entry=>{const p=api.restorePokemonState(api.capturePokemonState(entry.pokemon));p.scene=phase.scene;
     p.init=()=>{};p.loadAssets=async()=>{};p.destroy=()=>{};return p;};
-  const potionIndex=row.shop.findIndex(o=>o.type.catalogId==='POTION');assert.ok(potionIndex>=0);
-  menu[3](row.shop.length>6?3:2,potionIndex);
+  // The first original fight can leave this seat completely healthy. Use its
+  // naturally spent PP to enter a valid original target menu without undoing
+  // the full-health Potion guard or fabricating damage in the fixture.
+  const itemIndex=row.shop.findIndex(o=>o.type.catalogId==='ETHER');assert.ok(itemIndex>=0);
+  assert.ok(phase.model.applied.personal.party.some(e=>e.pokemon.getMoveset().some(move=>move.ppUsed>0)));
+  menu[3](row.shop.length>6?3:2,itemIndex);
   await until(()=>ui.mode===api.Mode.PARTY,'own original item target');
   const party=phase.scene.party,choose=modes.at(-1)[3];
   await until(()=>env.peerSnapshot().revision===phase.latest.revision,'peer initial stock');

@@ -1,3 +1,9 @@
+<!-- LOCAL-META-04 final -->
+2026-10-26 局外第四批完成，待用户手测。最终源码／测试5efc9c7e95cf11d042400521f7b7e247905576a4；统一原城镇大厅、同一Phaser.Game场景切换与缓存、独立等人房间、各自本机入口连接房主、host/profile/run/seat隔离和重连。单人首次仍保留原地图／训练家完整预加载。终局清槽前排空旧快照，防止旧保存提前删槽。
+自动验收：f8fbefd3独立相关13文件306/306退出0；其后仅保存排队与画布边界修订，e63保存19/19、最终5ef UI131/131退出0，最终类型／隔离Worker／生产均0。不拼接成最终全套通过，不重跑200。实测IAB+Chrome独立来源：等待到齐、原选队、准备1/2停留、双方首战真实攻击到回合2同步、一端退出大厅无残图且对端等待恢复。同文档退出保持一个画布；真实两设备LAN／n2n、声音及手动恢复仍待用户。
+8034回环预览继续运行（exec41567），产物build/local-meta-04/dist-final，合成数据preview-legacy/preview-formal；最终完整产物为dist-shipping。真实8020、隧道、房间未动；没有测试仍在运行。工程仅本地提交，不push/merge/deploy。收尾实时远端查询网络失败，启动时feature92a6b0b6/main86798227只作历史。
+第五批永久grants／蛋进度及延迟孵化仅备任务书，未授权不自动推进；扭蛋／完整离线仍后续。用户要求验收后交其测试，停止扩展。详见[第四批验收](local-meta-04-review.md)、[测试说明](local-meta-04-usage.md)，ignored证据build/local-meta-04/final-evidence.json。只early，不创建联系agent；SPEC和全部AGENT/PROMPT本地忽略不提交。恢复先查实际Git与进程，不自动重跑全套。
+<!-- /LOCAL-META-04 final -->
 <!-- LOCAL-META-03 current -->
 2026-10-26 用户已授权并完成局外第三批的档案菜单与原单人IO绑定。源码测试923b89f17e7b6fbbe34438f7d8e235e3e689d2a4（生产最终b4f0e78a，后续仅旧夹具补saveEncounter）；原Title/FormModal／收藏／蛋／券只读UI复用，新建原初始化、选档／改昵称、迁移确认／旧三槽归属、完整备份导入导出恢复已接。GameData固定本人profileId，遭遇System+Session同事务，终局统计+清槽同事务，退出排空原保存队列后释放写者；正式合作选队读本人档案，凭据恢复校验profileId，无永久grant或新蛋消费。未激活保留旧入口，不动真实资料。
 最终独立三文件42/42退出0、50620.1017ms，16新+18原首页+8双WS边界，类型／隔离Worker／生产均0，build/local-meta-03/dist。修订前11文件264中256/8失败由旧夹具缺接口，最终只复验相关三文件，不拼接成264通过；更早网络EACCES和调度夹具中断均保留。未跑全套／200；真人Chrome和应用内浏览器确认根菜单、合成建档／刷新、原单人欢迎与返回，声音／真实双端／完整离线待验。

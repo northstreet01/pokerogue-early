@@ -5,7 +5,7 @@ import {moves,status,battler} from './helpers/original-model.mjs';
 import {effectContext,runDamage,runEffect,advanceEffect,nativeEffectDriver,damageRules} from './helpers/move-effect-model.mjs';
 import {moveRules} from './helpers/move-execution-model.mjs';
 import {observeRulePromise,createRuleTaskTracker} from '../src/battle-core/rule-task-tracker.mjs';
-import {advanceQueuedMoveEffect} from '../src/battle-core/move-effect-runner.mjs';
+import {advanceQueuedMoveEffect} from "./helpers/reference-rules/move-effect-runner.mjs";
 import {copy} from '../src/battle-core/coop-contract.mjs';
 import {originalI18n} from './helpers/localization-model.mjs';
 import {presentationText} from '../src/system/presentation-text.mjs';

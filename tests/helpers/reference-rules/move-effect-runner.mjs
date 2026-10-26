@@ -1,5 +1,5 @@
-import {copy,requireContract as check} from './coop-contract.mjs';
-import {selectNextPhase} from './phase-queue.mjs';
+import {copy,requireContract as check} from '../../../src/battle-core/coop-contract.mjs';
+import {selectNextPhase} from '../../../src/battle-core/phase-queue.mjs';
 
 // Await one original effect boundary; the driver must also drain its rule tasks.
 // Promise stacks/UI callbacks are never checkpoints. No default driver exists.

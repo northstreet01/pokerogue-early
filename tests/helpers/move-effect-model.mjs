@@ -5,7 +5,7 @@ import {actionContext,bindAction,abilityRules,moveRules,common,utils,hitRules,co
 import {originalPhases,installPhaseTestDependencies,phaseCodec} from './phase-model.mjs';
 import {codec} from './decision-model.mjs';
 import {modifiers} from './modifier-model.mjs';
-import {advanceQueuedMoveEffect} from '../../src/battle-core/move-effect-runner.mjs';
+import {advanceQueuedMoveEffect} from "./reference-rules/move-effect-runner.mjs";
 import {selectNextPhase} from '../../src/battle-core/phase-queue.mjs';
 import {createRuleTaskTracker} from '../../src/battle-core/rule-task-tracker.mjs';
 

@@ -1,40 +1,12 @@
-import { defineConfig } from 'vite';
-// import fs from 'vite-plugin-fs';
+import {defineConfig} from 'vite';
 
-export default defineConfig(({ mode }) => {
-	return {
-		test: {
-			setupFiles: ['./src/test/vitest.setup.ts'],
-			environment: 'jsdom',
-			deps: {
-				optimizer: {
-					web: {
-						include: ['vitest-canvas-mock'],
-					}
-				}
-			},
-			threads: false,
-			environmentOptions: {
-				jsdom: {
-					resources: 'usable',
-				},
-			},
-			coverage: {
-				provider: 'istanbul',
-				reportsDirectory: 'coverage',
-				reporters: ['text-summary', 'html'],
-			},
-		},
-		plugins: [/*fs()*/],
-		server: { host: '0.0.0.0', port: 8000 },
-		clearScreen: false,
-		build: {
-			minify: 'esbuild',
-			sourcemap: true
-		},
-		esbuild: {
-			pure: mode === 'production' ? [ 'console.log' ] : [],
-			keepNames: true,
-		},
-	}
-})
+// Node protocol/Worker tests use node:test and are run by their own scripts.
+export default defineConfig({
+  test:{
+    include:['tests/vitest/**/*.test.ts'],
+    setupFiles:['./tests/vitest/setup.ts'],
+    environment:'jsdom',
+    coverage:{provider:'istanbul',reportsDirectory:'coverage',reporters:['text-summary','html']},
+  },
+  esbuild:{keepNames:true},
+});

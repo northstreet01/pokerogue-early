@@ -10,3 +10,5 @@ export {default as ProfileFormUiHandler} from '../../src/ui/profile-form-ui-hand
 export {readLocalSave} from '../../src/system/local-save-store';
 export {loggedInUser} from '../../src/account';
 export {default as i18next} from '../../src/i18n';
+export {initGameSpeed} from '../../src/system/game-speed';
+export {default as SoundFade} from 'phaser3-rex-plugins/plugins/soundfade';

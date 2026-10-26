@@ -7,7 +7,7 @@ import UIPlugin from 'phaser3-rex-plugins/templates/ui/ui-plugin';
 import BBCodeTextPlugin from 'phaser3-rex-plugins/plugins/bbcodetext-plugin';
 import InputTextPlugin from 'phaser3-rex-plugins/plugins/inputtext-plugin.js';
 import BBCodeText from 'phaser3-rex-plugins/plugins/bbcodetext';
-import {createAppNavigation} from './app-navigation.mjs';
+import {createAppNavigation,closeAppScene,bindAppNavigationControls} from './app-navigation.mjs';
 import {beginLoading} from './coop/loading-screen.mjs';
 import './coop/play.css';
 import {Mode} from './ui/ui';
@@ -100,8 +100,7 @@ initialScene.appReady=()=>markSceneReady(initialScene.appUrl);
 const navigate=createAppNavigation({base:location.href,
   close:async(scene:BattleScene,discard:boolean)=>{
     entryStartedAt=performance.now();entryResourceStart=performance.getEntriesByType('resource').length;
-    const saved=await scene.prepareAppLeave?.();
-    if(discard||saved===false)scene.gameData?.invalidateProfile();else await scene.gameData?.closeProfile();
+    await closeAppScene(scene,discard);
   },
   replace:(url:URL)=>history.replaceState(null,'',url.pathname+url.search),
   start:(old:BattleScene,url:URL)=>new Promise<void>((resolve,reject)=>{
@@ -112,17 +111,26 @@ const navigate=createAppNavigation({base:location.href,
       next.appReady=()=>{desktopScene=next;markSceneReady(url);screen.complete();resolve();};
       old.ui?.getHandler?.(Mode.TITLE)?.clear();
       old.appRetired=true;
+      // Sound objects and their fade tasks belong to the outgoing scene. Destroy
+      // them while its event bus is alive instead of leaving stopped duplicates.
+      game.sound.removeAll();
       game.scene.stop(old.sys.settings.key);game.scene.remove(old.sys.settings.key);
-      game.sound.stopAll();game.scene.add(next.sys.settings.key,next,true);
+      game.scene.add(next.sys.settings.key,next,true);
     } catch(error){screen.fail('模式切换失败，请保留存档后重试');reject(error);}
   })});
 initialScene.navigateApp=(value,options)=>navigate(initialScene,value,options);
 
 // The bottom navigation shares the same local flow instead of opening another
 // document (and another Game). Browser back never targets an obsolete live scene.
-document.querySelector('#desktopControls a[href^="/coop-play.html"]')?.addEventListener('click',event=>{
-  event.preventDefault();const current=game.scene.getScenes(true)[0] as BattleScene;
-  void current?.navigateApp?.('/coop-play.html?fresh=1');
+const releaseNavigation=bindAppNavigationControls(document,(url:string)=>{
+  document.getElementById('app-navigation-error')?.remove();
+  return desktopScene.navigateApp(url);
+},()=>{
+  if(document.getElementById('app-navigation-error'))return;
+  const error=document.createElement('span');error.id='app-navigation-error';error.setAttribute('role','alert');
+  error.textContent='尚未确认当前进度保存，已留在游戏中。请重试保存后再返回大厅。';
+  document.getElementById('desktopControls')?.append(error);
 });
+game.events.once('destroy',releaseNavigation);
 
 export default game;

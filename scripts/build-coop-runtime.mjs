@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { isBuiltin } from 'node:module';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-// Separate from the browser build: never replace Phaser for / or /coop.html.
+// Separate from the renderer build: never replace Phaser in the game documents.
 export async function buildCoopRuntime({ outDir = resolve(root, 'build/coop-runtime') } = {}) {
   return build({
     configFile: false, root, publicDir: false, logLevel: 'warn',

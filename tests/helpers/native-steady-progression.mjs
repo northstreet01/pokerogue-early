@@ -1,5 +1,5 @@
 import {createRequire} from 'node:module';
-import {createOriginalCoopAdapter} from '../../server/original-coop-adapter.mjs';
+import {createOriginalCoopAdapter} from "./original-adapter.mjs";
 import {defaultTrainerRoute} from './native-default-trainer.mjs';
 
 // A legal-input test player, not a battle simulator. Every effect, price,

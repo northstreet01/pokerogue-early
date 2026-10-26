@@ -5,7 +5,7 @@ import {originalPhases,phaseCodec} from './helpers/phase-model.mjs';
 import {experienceContext,advanceExperience,referenceExperience,atExperienceEnd,experienceDriver,bindExperience,referenceSoloVictory} from './helpers/experience-model.mjs';
 import {modifiers,types} from './helpers/modifier-model.mjs';
 import {nextPostPhase} from './helpers/post-damage-model.mjs';
-import {advanceVictoryExperience} from '../src/battle-core/victory-experience-runner.mjs';
+import {advanceVictoryExperience} from "./helpers/reference-rules/victory-experience-runner.mjs";
 import {copy} from '../src/battle-core/coop-contract.mjs';
 
 for(const opts of [{},{share:true},{bonuses:true},{emptySeat:true}])test(`cooperative original experience schedules/applies once with personal effects ${JSON.stringify(opts)}`,async()=>{

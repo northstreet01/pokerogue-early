@@ -1,5 +1,4 @@
 import BattleScene from "../battle-scene";
-import { DailyRunScoreboard } from "./daily-run-scoreboard";
 import OptionSelectUiHandler from "./option-select-ui-handler";
 import { Mode } from "./ui";
 import * as Utils from "../utils";
@@ -9,13 +8,11 @@ import i18next from '../i18n';
 
 export default class TitleUiHandler extends OptionSelectUiHandler {
   private titleContainer: Phaser.GameObjects.Container;
-  private dailyRunScoreboard: DailyRunScoreboard;
   private playerCountLabel: Phaser.GameObjects.Text;
   private titleLogo: Phaser.GameObjects.Image;
   private homeHeading: Phaser.GameObjects.Text;
   private splashMessage: Phaser.GameObjects.Text;
 
-  private playerCountTimer;
 
   constructor(scene: BattleScene, mode: Mode = Mode.TITLE) {
     super(scene, mode);
@@ -42,10 +39,7 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
     this.splashMessage.setAngle(-20)
     this.titleContainer.add(this.splashMessage);
 
-    this.dailyRunScoreboard = new DailyRunScoreboard(this.scene, 1, 44);
-		this.dailyRunScoreboard.setup();
 
-    this.titleContainer.add(this.dailyRunScoreboard);
 
     this.playerCountLabel = addTextObject(this.scene, (this.scene.game.canvas.width / 6) - 2, (this.scene.game.canvas.height / 6) - 90, i18next.t('earlyBattle:localSolo'), TextStyle.MESSAGE, { fontSize: '54px' });
     this.playerCountLabel.setOrigin(1, 0);
@@ -77,7 +71,6 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
 
       const ui = this.getUi();
 
-      this.dailyRunScoreboard.setVisible(false);
 
       this.titleLogo?.setVisible(!this.config?.contextLabel);
       this.splashMessage.setVisible(!this.config?.contextLabel);
@@ -85,7 +78,6 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
       this.homeHeading?.setText(this.config?.contextLabel ? '宝可梦肉鸽 · 冒险大厅' : '');
       this.updatePlayerCount();
 
-      this.playerCountTimer = setInterval(() => this.updatePlayerCount(), 10000);
 
       this.scene.tweens.add({
         targets: [ this.titleContainer, ui.getMessageHandler().bg ],
@@ -103,8 +95,6 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
 
     const ui = this.getUi();
 
-    clearInterval(this.playerCountTimer);
-    this.playerCountTimer = null;
 
     this.scene.tweens.add({
       targets: [ this.titleContainer, ui.getMessageHandler().bg ],

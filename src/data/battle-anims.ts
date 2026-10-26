@@ -7,7 +7,6 @@ import { BattlerIndex } from "../battle";
 import stringify, { Element } from "json-stable-stringify";
 import { Moves } from "./enums/moves";
 import { getTypeRgb } from "./type";
-//import fs from 'vite-plugin-fs/browser';
 
 export enum AnimFrameTarget {
     USER,

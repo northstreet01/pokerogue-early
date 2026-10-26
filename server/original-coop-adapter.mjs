@@ -1,18 +1,19 @@
 import { createOriginalRuleHost } from './original-rule-host.mjs';
+import {randomUUID} from 'node:crypto';
 import { ContractError, canonical, requireContract as check } from '../src/battle-core/coop-contract.mjs';
 
-// VS-02 bridge. The legacy fixture.parties mode is retained only for the
-// accepted VS-01 seam tests; production/VS-02 initialization uses the lobby
-// envelope (no fixed parties), selected by fixture.lobby.
+// Original-rule adapter. Production always enters the profile lobby; seam tests
+// may supply an explicit fixture, but no test party is a production default.
 export const ADAPTER_FORMAT_VERSION = 3;
-const DEFAULT_FIXTURE = Object.freeze({
-  seed: 'vs01-original-coop',
-  identities: [{ trainerId: 1, secretId: 2 }, { trainerId: 3, secretId: 4 }],
-  parties: [[1, 4, 7], [906, 909, 912]],
-  eggState: { players: [[], []] },
-});
 const COPY = value => JSON.parse(canonical(value));
 const clone = value => JSON.parse(JSON.stringify(value));
+
+// The desktop host, local development server and standalone server share one
+// production configuration. Player identity/team arrive through verified profiles.
+export function createPlayerHostAdapter({seedFactory=()=>randomUUID(),hostFactory}={}) {
+  return createOriginalCoopAdapter({hostFactory,seedFactory,fixture:{profileLobby:true,sharedPreparation:true,
+    identities:[{trainerId:0,secretId:0},{trainerId:0,secretId:0}]}});
+}
 
 function stageOf(context) {
   if (context.lobby) return 'lobby';
@@ -47,8 +48,9 @@ function profileLobbyState(players = null) {
   };
 }
 
-export function createOriginalCoopAdapter({ fixture = DEFAULT_FIXTURE, hostFactory = createOriginalRuleHost,
+export function createOriginalCoopAdapter({ fixture, hostFactory = createOriginalRuleHost,
   seedFactory = null, rulesVersion = 'early-vs02', contentHash = 'vs02-original-coop' } = {}) {
+  check(fixture && typeof fixture === 'object', 'ADAPTER_CONFIGURATION_REQUIRED');
   const rooms = new Map();
   const failed = new Set();
 

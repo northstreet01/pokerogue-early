@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { WebSocket } from 'ws';
 import { buildCoopRuntime } from '../scripts/build-coop-runtime.mjs';
 import { attachFormalCoopServer, FormalRoomStore } from '../server/formal-coop-service.mjs';
-import { createOriginalCoopAdapter } from '../server/original-coop-adapter.mjs';
+import { createOriginalCoopAdapter } from "./helpers/original-adapter.mjs";
 import { createSnapshotConsumer } from '../src/battle-core/coop-client.mjs';
 import { canonical } from '../src/battle-core/coop-contract.mjs';
 import { createOriginalClientModel } from '../src/coop/original-client-model.mjs';

@@ -9,7 +9,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FormalRoomStore } from '../server/formal-coop-service.mjs';
-import { createOriginalCoopAdapter } from '../server/original-coop-adapter.mjs';
+import { createOriginalCoopAdapter } from "./helpers/original-adapter.mjs";
 import { canonical } from '../src/battle-core/coop-contract.mjs';
 
 // VS-02 segment 1: lobby selections, persisted adapter envelope and restart

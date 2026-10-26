@@ -27,7 +27,6 @@ export class HomePhase extends Phase {
   private epoch = 0;
   private disposed = false;
   private transitions: Promise<void> = Promise.resolve();
-  private returnButton?: HTMLButtonElement;
   private originalData?: GameData;
   private music = new AbortController();
   private activeProfile: string | null = null;
@@ -48,14 +47,6 @@ export class HomePhase extends Phase {
       this.backdrop=this.scene.add.nineslice(0,0,'town_bg',null,320,180,0,0,132,0);
       this.backdrop.setOrigin(0).setScale(6).setDepth(0.5);
     }
-    const button = document.createElement('button');
-    button.type = 'button'; button.textContent = '返回初始界面';
-    button.id = 'home-return';
-    Object.assign(button.style, { position: 'fixed', bottom: '8px', left: '8px', zIndex: '999',
-      padding: '8px 12px', maxWidth: '90vw', font: '14px system-ui' });
-    for (const name of ['keydown', 'keyup']) button.addEventListener(name, event => event.stopPropagation());
-    button.addEventListener('click', () => { void this.showHome(); });
-    document.body.append(button); this.returnButton = button;
     this.scene.events.once('shutdown', () => this.dispose());
     void this.showHome();
   }
@@ -65,7 +56,6 @@ export class HomePhase extends Phase {
   private dispose(): void {
     this.disposed = true; this.epoch++;
     this.music.abort(); this.scene.fadeOutBgm?.(150, true);
-    this.returnButton?.remove();
     this.fileInput?.remove();
     this.backdrop?.destroy();
     document.getElementById('coop-exit-return')?.remove();

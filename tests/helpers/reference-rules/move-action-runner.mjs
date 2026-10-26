@@ -1,5 +1,5 @@
-import {copy,requireContract as check} from './coop-contract.mjs';
-import {selectNextPhase} from './phase-queue.mjs';
+import {copy,requireContract as check} from '../../../src/battle-core/coop-contract.mjs';
+import {selectNextPhase} from '../../../src/battle-core/phase-queue.mjs';
 
 // One not-yet-started original MovePhase, on an independently restored model.
 // Headless scene/rule providers are trusted and must explicitly declare support;

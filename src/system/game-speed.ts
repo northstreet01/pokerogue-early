@@ -6,16 +6,18 @@ import * as Utils from "../utils";
 
 type FadeIn = typeof FadeIn;
 type FadeOut = typeof FadeOut;
+let soundSpeedInstalled = false;
+
+function scaleDuration<T>(value: T, scene: BattleScene): T {
+  if (value instanceof Utils.FixedInt) return value.value as unknown as T;
+  const speed = scene?.gameSpeed ?? 1;
+  return typeof value === 'number' && speed !== 1 ? Math.ceil(value / speed) as T : value;
+}
 
 export function initGameSpeed() {
   const thisArg = this as BattleScene;
 
-  const transformValue = <T>(value: T): T => {
-    if (value instanceof Utils.FixedInt)
-      return value.value as unknown as T;
-    return typeof value === 'number' && thisArg.gameSpeed !== 1
-      ? Math.ceil(value / thisArg.gameSpeed) as T : value;
-  };
+  const transformValue = <T>(value: T): T => scaleDuration(value, thisArg);
 
   const originalAddEvent = this.time.addEvent;
   this.time.addEvent = function (config: Phaser.Time.TimerEvent | Phaser.Types.Time.TimerEventConfig) {
@@ -73,13 +75,17 @@ export function initGameSpeed() {
     return originalAddCounter.apply(this, [ config ]);
   };
   
+  // Rex is shared across scenes. Install once and read the scene passed to each
+  // call; wrapping per entry multiplies speed and retains destroyed scenes.
+  if (soundSpeedInstalled) return;
+  soundSpeedInstalled = true;
   const originalFadeOut = SoundFade.fadeOut;
   SoundFade.fadeOut = ((
     scene: Phaser.Scene,
     sound: Phaser.Sound.BaseSound,
     duration: number,
     destroy?: boolean
-  ) => originalFadeOut(scene, sound, transformValue(duration), destroy)) as FadeOut;
+  ) => originalFadeOut(scene, sound, scaleDuration(duration, scene as BattleScene), destroy)) as FadeOut;
 
   const originalFadeIn = SoundFade.fadeIn;
   SoundFade.fadeIn = ((
@@ -88,5 +94,5 @@ export function initGameSpeed() {
     duration: number,
     endVolume?: number,
     startVolume?: number
-  ) => originalFadeIn(scene, sound, transformValue(duration), endVolume, startVolume)) as FadeIn;
+  ) => originalFadeIn(scene, sound, scaleDuration(duration, scene as BattleScene), endVolume, startVolume)) as FadeIn;
 }

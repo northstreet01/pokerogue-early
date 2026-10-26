@@ -23,7 +23,7 @@
 本机最新产物：
 
 ```text
-build/input-solo-fix/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe
+build/desktop/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe
 ```
 
 双击 EXE，必须保留整个发行文件夹，不能只复制 EXE。`build/` 不纳入 Git；拉取源码后需按下方步骤构建，不会随源码推送取得二进制程序。
@@ -58,12 +58,12 @@ Windows 正常数据目录为 `%APPDATA%\PokeRogue-LAN`，程序菜单可以打�
 ```powershell
 npm ci --ignore-scripts
 node node_modules/electron/install.js
-$env:POKEROGUE_DESKTOP_OUTPUT='build/input-solo-fix'
+$env:POKEROGUE_DESKTOP_OUTPUT='build/desktop'
 npm run build:desktop
 npm run package:desktop
 ```
 
-输出包含独立原 Worker、前端与完整素材，不覆盖原 `dist` 或 `build/coop-runtime`。开发运行该产物可执行 `.\node_modules\electron\dist\electron.exe build/input-solo-fix/app`。省略输出环境变量时，构建／封装默认使用 `build/desktop`；`npm run start:desktop` 也固定运行该默认目录。
+输出包含独立原 Worker、前端与完整素材，不覆盖原 `dist` 或 `build/coop-runtime`。开发运行该产物可执行 `.\node_modules\electron\dist\electron.exe build/desktop/app`。省略输出环境变量时，构建／封装默认使用 `build/desktop`；`npm run start:desktop` 也固定运行该默认目录。
 
 ## 浏览器开发入口
 
@@ -71,7 +71,7 @@ npm run package:desktop
 npm run start
 ```
 
-默认开发地址 `http://localhost:8020/`，监听本机。根路径为统一大厅；`/coop-play.html` 为正式原版联机界面；`/coop.html` 保留旧实验引擎；`/save-tools.html` 为旧版存档工具。普通 `start`／`start:server` 未启用 profile adapter 时，正式 WS 返回 `ADAPTER_UNAVAILABLE`。
+默认开发地址 `http://localhost:8020/`，监听本机。根路径为统一大厅；`/coop-play.html` 为正式原版联机界面；旧实验页和独立存档维护页已删除，档案统一从大厅管理。普通 `start`／`start:server` 未启用 profile adapter 时，正式 WS 返回 `ADAPTER_UNAVAILABLE`。
 
 需要运行正式浏览器合作入口时：
 
@@ -81,33 +81,23 @@ npm run build
 npm run start:local
 ```
 
-`start:local` 显式启用正式 profile 大厅，默认监听本机 8020；需要 LAN 监听时执行 `npm run start:local -- --host`。与 Vite 开发服务择一运行，不能只上传静态 `dist` 代替 Node 服务。旧实验说明见 [COOP.md](COOP.md)，不代表正式原规则链路的当前状态。
+`start:local` 显式启用正式 profile 大厅，默认监听本机 8020；需要 LAN 监听时执行 `npm run start:local -- --host`。与 Vite 开发服务择一运行，不能只上传静态 `dist` 代替 Node 服务。桌面、开发和独立服务使用同一正式房主配置。
 
-## 验证与开发记录
+## 验证与代码审查
 
-10 月 27 日修复房间码输入被大厅刷新打断、单人选队并确认存档槽后开局中断，以及存档槽不能鼠标点击。相关 19 项回归、类型及独立构建通过；隔离 Electron 中验证了鼠标选槽、第一波行动、存档读取和六位房间码输入。详见 [本轮修复记录](docs/input-solo-fix-review.md)。
-
-最近准备页／展示批相关测试 130/130、显示收尾复测 3/3、正式协议与原 profile 大厅 23/23 通过；类型、独立 Worker、最终前端、封装及 EXE 合成流程检查通过。这些是分开的相关验证，不相加为一次完整回归。程序 QA 使用临时合成资料、协议队友和隐藏窗口专用帧驱动；道具截图使用明确的展示夹具，不等于真实掉落／授予完成。
-
-正常前台操作、真实获得的道具、完整购物、真实两设备 LAN／穿透、声音与长局仍待手测。本次没有重跑全套或 200 波，不能用历史通过记录代替当前版本的全面验收。
-
-可按修改范围选择检查：
+每次交付先审查真实调用链、模块归属、失败保存边界和资源生命周期，再运行结构检查、类型、相关回归及实际EXE验证。替换旧实现时同时删除废弃入口、依赖和测试；仅供测试的驱动放tests/helpers。新包验证后清理旧发行包，不再逐批堆目录与报告。
 
 ```powershell
+npm run review:code
 npm run typecheck
-node --test tests/coop-room-display.test.mjs tests/coop-play-entry.test.mjs tests/localization.test.mjs
-node --test tests/coop-profile-lobby-vs02b03.test.mjs tests/coop-formal.test.mjs
-node --test tests/desktop-runtime.test.mjs tests/desktop-storage.test.mjs
 ```
 
-部分测试会启动本机 HTTP／WebSocket 和原 Worker，需要回环网络及临时目录读写权限。不要在真实游戏服务运行时重建它正在使用的运行器。
+结构检查覆盖全部第一方模块的语法、相对依赖和生产可达性，并限制发行页面；它不替代人工代码审查或玩法验证。相关测试按修改范围选择，不自动跑全套或200波。当前详细结果见[验收与审查](docs/desktop-lan-review.md)。
 
-- [桌面操作与手测](docs/desktop-lan-usage.md)
-- [准备页与局内展示验收](docs/coop-ready-ui-review.md)
-- [本地数据库、迁移与备份](docs/desktop-storage-review.md)
-- [Windows 首批交付](docs/desktop-lan-review.md)
-- [架构转型路线](docs/desktop-lan-transition.md)
-- [开发交接](docs/DEVELOPMENT-HANDOFF.md)与[模块计划](docs/coop-development-plan.md)
+- [使用与手测](docs/desktop-lan-usage.md)
+- [当前架构](docs/desktop-lan-transition.md)与[存档约束](docs/local-meta-architecture.md)
+- [维护与交付要求](docs/DEVELOPMENT-HANDOFF.md)
+- [后续计划](docs/coop-development-plan.md)
 
 ## 原版来源与许可证
 

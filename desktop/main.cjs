@@ -73,7 +73,7 @@ else {
     window=new BrowserWindow({width:1280,height:850,minWidth:800,minHeight:600,show:!smoke,
       backgroundColor:'#111b2b',title:'宝可梦肉鸽 · 局域网版',webPreferences:{
         preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}});
-    const local=url=>{try{return new URL(url).origin===assets.origin;}catch{return false;}};
+    const local=url=>runtime.isAppDocument(url,assets.origin);
     window.webContents.on('will-navigate',(event,url)=>{if(!local(url))event.preventDefault();});
     window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
     window.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));

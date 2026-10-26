@@ -6,8 +6,6 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { attachFormalCoopServer, FormalRoomStore, hashProjection } from '../server/formal-coop-service.mjs';
-import { attachCoopServer } from '../server/coop-service.mjs';
-import { ENGINE_VERSION, RULES_HASH } from '../src/coop/engine.mjs';
 import { canonical, copy, ContractError, requireContract, validateMessage } from '../src/battle-core/coop-contract.mjs';
 import { createSnapshotConsumer, digestProjection } from '../src/battle-core/coop-client.mjs';
 
@@ -277,20 +275,9 @@ test('a resync request delivers fresh snapshots to both clients whose ACKs were 
   } finally { await f.close(); }
 });
 
-test('formal and experimental endpoints coexist on the same HTTP server', async () => {
-  const httpServer = http.createServer();
-  const legacy = await attachCoopServer(httpServer, { store: { async load() { return []; }, async save() {} } });
-  const formal = await attachFormalCoopServer(httpServer, { store: memoryStore() }); const clients = [];
-  try {
-    await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
-    const base = `ws://127.0.0.1:${httpServer.address().port}`;
-    // Legacy frames deliberately bypass the formal client's schema assertion.
-    const old = new WebSocket(base + '/coop/ws'); clients.push(old);
-    await new Promise(resolve => old.once('open', resolve));
-    const joined = new Promise(resolve => old.on('message', raw => { const m = JSON.parse(raw); if (m.type === 'joined') resolve(m); }));
-    old.send(JSON.stringify({ type: 'create', name: 'legacy', version: ENGINE_VERSION, rulesHash: RULES_HASH })); assert.equal((await joined).seat, 0);
-    const modern = await new Client(base + '/coop/v1/ws').open(); clients.push(modern.socket);
-    modern.send({ type: 'hello', ...formal.versions }); await modern.wait(m => m.type === 'welcome'); modern.send({ type: 'createRoom', name: 'formal' });
-    assert.equal((await modern.wait(m => m.type === 'error')).code, 'ADAPTER_UNAVAILABLE'); assert.equal(legacy.rooms.size, 1); assert.equal(formal.rooms.size, 0);
-  } finally { for (const socket of clients) socket.terminate(); await formal.close(); await legacy.close(); await new Promise(resolve => httpServer.close(resolve)); }
+test('formal endpoint without an adapter rejects room creation', async () => {
+  const f = await server({adapter:null});
+  try { const client=await f.client();client.send({type:'createRoom',name:'A'});
+    assert.equal((await client.wait(m=>m.type==='error')).code,'ADAPTER_UNAVAILABLE');assert.equal(f.rooms.size,0);
+  } finally { await f.close(); }
 });

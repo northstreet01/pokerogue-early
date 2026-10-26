@@ -1,4 +1,5 @@
-// Explicit, opt-in adapter. It is not imported by any game startup path.
+// Serialization/validation boundary shared by profiles and explicit legacy
+// import. Importing validators does not authorize a migration or overwrite.
 // Match the original engine's initialization order before touching GameData.
 import '../battle-scene';
 import { GameData } from '../system/game-data';

@@ -1,4 +1,4 @@
-name: Verify early foundation
+name: Verify LAN game
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
@@ -22,11 +22,17 @@ jobs:
         run: npm run typecheck
       - name: Local save regression tests
         run: npm run test:local-save
+      - name: Desktop storage, transport and package replacement
+        run: npm run test:desktop
+      - name: Local profiles and guarded navigation
+        run: node --test --test-concurrency=1 tests/local-meta.test.mjs tests/local-meta-ui.test.mjs tests/local-meta-entry.test.mjs
       - name: Cooperative battle and socket regression tests
         run: npm run test:coop
       - name: Original battle rule compatibility tests
         run: npm run test:battle-core
       - name: Upstream localization compatibility tests
         run: npm run test:localization
-      - name: Build game and save manager
+      - name: Review project boundaries
+        run: npm run review:code
+      - name: Build game documents
         run: npm run build

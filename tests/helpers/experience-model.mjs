@@ -9,7 +9,7 @@ import {modifiers,types,installModifierTestDependencies} from './modifier-model.
 import {enemyFaintContext,advanceEnemyFaint,atVictoryBoundary,enemyFaintDriver,referenceCap,liveCap,waveForDifficulty} from './enemy-faint-model.mjs';
 import {queueOwnedPhase} from './native-switch-model.mjs';
 import {nextPostPhase,BattleSpec} from './post-damage-model.mjs';
-import {advanceVictoryExperience} from '../../src/battle-core/victory-experience-runner.mjs';
+import {advanceVictoryExperience} from "./reference-rules/victory-experience-runner.mjs";
 import {advanceQueuedRulePhase} from '../../src/battle-core/rule-phase-runner.mjs';
 import {selectNextPhase} from '../../src/battle-core/phase-queue.mjs';
 import {createRuleTaskTracker} from '../../src/battle-core/rule-task-tracker.mjs';

@@ -4,7 +4,7 @@ import {codec} from './helpers/decision-model.mjs';
 import {pokemon,status,moves} from './helpers/original-model.mjs';
 import {originalPhases} from './helpers/phase-model.mjs';
 import {actionContext,runAction,runHitCheck,abilityRules,advanceAction,nativeMoveDriver} from './helpers/move-execution-model.mjs';
-import {advanceQueuedMoveAction} from '../src/battle-core/move-action-runner.mjs';
+import {advanceQueuedMoveAction} from "./helpers/reference-rules/move-action-runner.mjs";
 
 test('native MovePhase consumes PP/status/history and queues the same effects as frozen source for either owner',()=>{
   const cases=[()=>{},(c,p)=>{p.hp=0;},(c,p)=>{p.moveset[0].ppUsed=p.moveset[0].getMovePp();},

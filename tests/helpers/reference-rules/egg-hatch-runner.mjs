@@ -1,5 +1,5 @@
-import {copy,canonical,requireContract as check} from './coop-contract.mjs';
-import {selectNextPhase} from './phase-queue.mjs';
+import {copy,canonical,requireContract as check} from '../../../src/battle-core/coop-contract.mjs';
+import {selectNextPhase} from '../../../src/battle-core/phase-queue.mjs';
 
 // Only the original generation rule runs here. Removing the egg and writing
 // dex/IV/egg-move data require the later atomic personal collection transaction.

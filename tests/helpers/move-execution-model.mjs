@@ -4,7 +4,7 @@ import {parse,evaluate,read,pokemon,installPokemonTestDependencies,moveCatalog,s
 import {originalPhases,installPhaseTestDependencies,phaseCodec,formModule} from './phase-model.mjs';
 import {initialDecision,codec} from './decision-model.mjs';
 import {modifiers} from './modifier-model.mjs';
-import {advanceQueuedMoveAction} from '../../src/battle-core/move-action-runner.mjs';
+import {advanceQueuedMoveAction} from "./reference-rules/move-action-runner.mjs";
 import {prependPhase,pushPhase} from '../../src/battle-core/phase-queue.mjs';
 import {observeRulePromise} from '../../src/battle-core/rule-task-tracker.mjs';
 import {originalI18n,originalLocalizedPokemonMessage} from './localization-model.mjs';

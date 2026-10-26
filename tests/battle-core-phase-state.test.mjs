@@ -7,7 +7,7 @@ import {phaseConstructors,phaseCodec,evolutionCodec,formCodec,evolutionModule,fo
 import {phaseStateFields,excludedPhaseTypes} from '../src/battle-core/phase-fields.mjs';
 import {createOriginalQueueStateCodec} from '../src/battle-core/original-queue-state.mjs';
 import {copy} from '../src/battle-core/coop-contract.mjs';
-import {checkpointRuleProjection} from '../src/battle-core/rule-projection.mjs';
+import {checkpointRuleProjection} from "./helpers/reference-rules/rule-projection.mjs";
 import {eggs} from './helpers/egg-model.mjs';
 
 function schema(type){const spec=phaseStateFields[type];return {...(phaseStateFields[spec.base]?schema(spec.base):{}),...spec.fields};}

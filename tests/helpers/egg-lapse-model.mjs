@@ -6,7 +6,7 @@ import {aftermathContext,advanceAftermath,referenceAfterBattle,atEggBoundary} fr
 import {bindAction,compileReference,actionRules} from './move-execution-model.mjs';
 import {queueOwnedPhase} from './native-switch-model.mjs';
 import {createRuleTaskTracker} from '../../src/battle-core/rule-task-tracker.mjs';
-import {advanceEggLapse} from '../../src/battle-core/egg-lapse-runner.mjs';
+import {advanceEggLapse} from "./reference-rules/egg-lapse-runner.mjs";
 import {selectNextPhase} from '../../src/battle-core/phase-queue.mjs';
 import {requireContract as check,copy} from '../../src/battle-core/coop-contract.mjs';
 const frozen=JSON.parse(fs.readFileSync(new URL('../fixtures/early-egg-lapse-reference.json',import.meta.url),'utf8'));

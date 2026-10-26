@@ -3,6 +3,10 @@ import {resolve,join} from 'node:path';
 import {mkdir,cp,writeFile,readFile} from 'node:fs/promises';
 import {buildCoopRuntime} from './build-coop-runtime.mjs';
 import {desktopOutput} from './desktop-output.mjs';
+import {spawnSync} from 'node:child_process';
+// Refuse stale entry points or unresolved imports before constructing a release.
+const review=spawnSync(process.execPath,['scripts/review-code.mjs'],{stdio:'inherit'});
+if(review.status!==0)throw Error('CODE_REVIEW_FAILED');
 const root=join(desktopOutput(),'app');
 await mkdir(root,{recursive:true});
 // Never overwrite dist/runtime belonging to an active browser service.
@@ -16,6 +20,7 @@ await mkdir(join(root,'src/battle-core'),{recursive:true});
 await cp('src/battle-core/coop-contract.mjs',join(root,'src/battle-core/coop-contract.mjs'));
 await mkdir(join(root,'src/local-meta'),{recursive:true});
 await cp('src/local-meta/codec.mjs',join(root,'src/local-meta/codec.mjs'));
+await cp('src/app-navigation.mjs',join(root,'src/app-navigation.mjs'));
 await mkdir(join(root,'node_modules'),{recursive:true});
 await cp('node_modules/ws',join(root,'node_modules/ws'),{recursive:true});
 const pkg=JSON.parse(await readFile('package.json','utf8'));

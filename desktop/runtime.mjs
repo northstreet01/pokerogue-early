@@ -3,10 +3,11 @@ import { createReadStream } from 'node:fs';
 import { stat, realpath } from 'node:fs/promises';
 import { resolve, sep, extname } from 'node:path';
 import { networkInterfaces } from 'node:os';
-import { randomUUID } from 'node:crypto';
 import { loadHostIdentity, serveHostIdentity } from '../server/host-identity.mjs';
 import { attachFormalCoopServer, FormalRoomStore } from '../server/formal-coop-service.mjs';
-import { createOriginalCoopAdapter } from '../server/original-coop-adapter.mjs';
+import { createPlayerHostAdapter } from '../server/original-coop-adapter.mjs';
+import {isAppDocument} from '../src/app-navigation.mjs';
+export {isAppDocument};
 
 export const APP_PORT = 18734;
 export const HOST_PORT = 18735;
@@ -39,6 +40,7 @@ export async function startAssetServer(root, port = APP_PORT) {
       if (!candidate.startsWith(directory + sep)) throw Error('INVALID_PATH');
       const path = await realpath(candidate);
       if (!path.startsWith(directory + sep) || !(await stat(path)).isFile()) throw Error('INVALID_PATH');
+      if (extname(path).toLowerCase() === '.html' && !isAppDocument(request.url, 'http://localhost')) throw Error('UNSUPPORTED_DOCUMENT');
       response.setHeader('Content-Type',types[extname(path)] ?? 'application/octet-stream');
       response.setHeader('X-Content-Type-Options','nosniff');
       response.setHeader('Cache-Control','no-cache');
@@ -53,12 +55,11 @@ export async function startAssetServer(root, port = APP_PORT) {
 }
 
 // The LAN listener exposes formal identity/WS only, never the local asset tree.
-export async function startLanHost({directory,port=HOST_PORT,bind='0.0.0.0',adapterFactory=createOriginalCoopAdapter}) {
+export async function startLanHost({directory,port=HOST_PORT,bind='0.0.0.0',adapterFactory=createPlayerHostAdapter}) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 || port === APP_PORT) throw Error('INVALID_HOST_PORT');
   if (!['0.0.0.0','127.0.0.1'].includes(bind)) throw Error('INVALID_HOST_BIND');
   const identity = await loadHostIdentity(directory);
-  const adapter = adapterFactory({fixture:{profileLobby:true,sharedPreparation:true,
-    identities:[{trainerId:0,secretId:0},{trainerId:0,secretId:0}]},seedFactory:()=>randomUUID()});
+  const adapter = adapterFactory();
   const server=http.createServer((request,response)=>{
     if (serveHostIdentity(request,response,identity)) return;
     response.writeHead(404);response.end('Not found');

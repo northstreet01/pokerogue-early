@@ -1,4 +1,4 @@
-import {copy} from './coop-contract.mjs';
+import {copy} from '../../../src/battle-core/coop-contract.mjs';
 
 // Checkpoints may retain original presentation metadata needed when rebuilding
 // a queued Phase. It must not enter the shared rule digest (or depend on locale).

@@ -6,7 +6,7 @@ import {eggs,installEggTestDependencies} from './egg-model.mjs';
 import {eggHatchPhases,installEggHatchTestDependencies,phaseCodec,evolutionModule} from './phase-model.mjs';
 import {eggLapseContext,advanceEggs} from './egg-lapse-model.mjs';
 import {compileReference,utils} from './move-execution-model.mjs';
-import {advanceEggHatch} from '../../src/battle-core/egg-hatch-runner.mjs';
+import {advanceEggHatch} from "./reference-rules/egg-hatch-runner.mjs";
 import {RandomDataGenerator,withSeedOffset} from '../../src/battle-core/random.mjs';
 import {selectNextPhase} from '../../src/battle-core/phase-queue.mjs';
 

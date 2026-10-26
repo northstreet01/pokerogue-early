@@ -29,7 +29,10 @@ export async function prepareProfileGameData(scene:any) {
   if(scene.appRetired)throw new Error('LOCAL_PROFILE_CLOSED');
   const requested=(scene.appUrl?.searchParams??new URLSearchParams(location.search)).get('profile');
   if(requested&&requested!==index.activeProfileId)throw Object.assign(new Error('LOCAL_PROFILE_CHANGED'),{code:'LOCAL_PROFILE_CHANGED'});
-  if(!index.activeProfileId)return; // Explicit legacy compatibility; no migration.
+  // Compatibility is limited to the original single collection until the user
+  // explicitly imports/selects a profile. No experimental engine or restore UI
+  // is involved; the source data must stay readable for the migration preview.
+  if(!index.activeProfileId)return;
   const mode=scene.appUrl ? scene.appUrl.pathname==='/coop-play.html'?'coop':'solo' : (globalThis as any).window?.__COOP_PLAY__?'coop':'solo';
   let io:any;
   const data=scene.gameData;

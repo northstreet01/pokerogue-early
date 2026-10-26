@@ -167,9 +167,7 @@ test('actual legacy save API and device settings use SQLite without changing bro
     assert.equal(await api.readLocalSave('data:backup'),'{"n":1}');
     await api.mutateLocalSaves(['data','coop-grants'],()=>({data:'{"n":4}','coop-grants':'{"n":4}'}));
     assert.deepEqual(await api.readLocalSaveSnapshot(['data','coop-grants']),{data:'{"n":4}','coop-grants':'{"n":4}'});
-    await assert.rejects(api.restoreLocalSaves({data:'broken'}));assert.equal(await api.readLocalSave('data'),'{"n":4}');
-    await api.restoreLocalSaves({data:'{"n":5}'});assert.equal(await api.readLocalSave('data:backup'),'{"n":4}');
-    await api.deleteLocalSave('data');assert.equal(await api.readLocalSave('data'),null);assert.equal(await api.readLocalSave('data:backup'),'{"n":5}');
+    await api.deleteLocalSave('data');assert.equal(await api.readLocalSave('data'),null);assert.equal(await api.readLocalSave('data:backup'),'{"n":4}');
     deviceStorage().setItem('settings','{"音量":3}');assert.equal(deviceStorage().getItem('settings'),'{"音量":3}');deviceStorage().removeItem('settings');assert.equal(deviceStorage().hasOwnProperty('settings'),false);
     assert.throws(()=>deviceStorage().setItem('unknown','x'),/INVALID_PREFERENCE_KEY/);
     assert.deepEqual(await captureDesktopLegacy(globalThis.indexedDB,{getItem:()=>null}),old);

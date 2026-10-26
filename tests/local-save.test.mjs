@@ -46,18 +46,6 @@ test('invalid slots are refused and missing saves return null', async () => {
   for (const slot of [-1, 3, 0.5, NaN]) assert.throws(() => saves.sessionSaveKey(slot));
   assert.equal(await saves.readLocalSave('missing-test'), null);
 });
-test('archive restore validates every record before replacing anything and retains previous data', async () => {
-  await saves.writeLocalSave('data', '{"original":true}');
-  await assert.rejects(saves.restoreLocalSaves({ data: '{"replacement":true}', sessionData: 'broken' }));
-  assert.equal(await saves.readLocalSave('data'), '{"original":true}');
-  await saves.restoreLocalSaves({ data: '{"replacement":true}', sessionData: '{"wave":9}' });
-  assert.equal(await saves.readLocalSave('data'), '{"replacement":true}');
-  assert.equal(await saves.readLocalSave('data:backup'), '{"original":true}');
-  assert.equal(await saves.readLocalSave('sessionData'), '{"wave":9}');
-  assert.equal(await saves.readLocalSave('sessionData2'), null);
-  assert.equal(await saves.readLocalSave('sessionData2:backup'), '{"wave":3}');
-});
-
 test('backup snapshots keep collection and grant ledger at the same transaction boundary', async () => {
   await saves.mutateLocalSaves(['snapshot-data','snapshot-ledger'], () => ({
     'snapshot-data':'{"revision":1}', 'snapshot-ledger':'{"revision":1}'

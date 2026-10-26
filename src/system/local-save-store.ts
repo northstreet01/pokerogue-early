@@ -116,48 +116,6 @@ export async function deleteLocalSave(key: string): Promise<void> {
   });
 }
 
-/** Restore a validated archive atomically, retaining current primary records as backups. */
-export async function restoreLocalSaves(records: Record<string, string>): Promise<void> {
-  const primary = ['data', 'coop-grants', 'coop-experiment-data', 'coop-experiment-grants', 'coop-seats', ...[0, 1, 2].map(sessionSaveKey)];
-  const allowed = [...primary, ...primary.map(key => `${key}:backup`)];
-  for (const [key, value] of Object.entries(records)) {
-    if (!allowed.includes(key) || typeof value !== 'string') throw new Error('备份包含不支持的记录');
-    const parsed = JSON.parse(value);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('备份记录格式无效');
-  }
-  if (!records.data && !primary.some(key => records[key])) throw new Error('备份没有可恢复的存档');
-  const port=native();if(port){
-    await port.transact([...allowed,'coop-profile-lease'],r=>{
-      if(r['coop-profile-lease']&&JSON.parse(validateRecord(r['coop-profile-lease'])).expires>Date.now())throw Error('合作页面正在使用收藏，请先退出合作连接再恢复备份');
-      const changes={};for(const key of primary){
-        if(r[key])changes[key+':backup']=r[key];else if(records[key+':backup'])changes[key+':backup']={schema:1,value:records[key+':backup'],updatedAt:Date.now()};
-        changes[key]=records[key]?{schema:1,value:records[key],updatedAt:Date.now()}:null;
-      }return {changes};
-    });return;
-  }
-  const db = await openDatabase();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(STORE, 'readwrite');
-    const store = transaction.objectStore(STORE);
-    let failure: Error;
-    const lease = store.get('coop-profile-lease');
-    lease.onsuccess = () => { if (lease.result && JSON.parse(validateRecord(lease.result)).expires > Date.now()) {
-      failure = new Error('合作页面正在使用收藏，请先退出合作连接再恢复备份'); transaction.abort();
-    } };
-    for (const key of primary) {
-      const previous = store.get(key);
-      previous.onsuccess = () => {
-        if (previous.result) store.put(previous.result, `${key}:backup`);
-        else if (records[`${key}:backup`]) store.put({ schema: 1, value: records[`${key}:backup`], updatedAt: Date.now() }, `${key}:backup`);
-        if (records[key]) store.put({ schema: 1, value: records[key], updatedAt: Date.now() }, key);
-        else store.delete(key);
-      };
-    }
-    transaction.oncomplete = () => resolve();
-    transaction.onabort = () => reject(failure ?? transaction.error);
-  });
-}
-
 /** Synchronous mutation after all reads, in one transaction; no network awaits inside it. */
 export async function mutateLocalSaves(keys: string[], mutation: (records: Record<string, string | null>) => Record<string, string | null>): Promise<void> {
   const port=native();if(port){

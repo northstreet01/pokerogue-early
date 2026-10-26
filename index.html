@@ -33,8 +33,8 @@
 		<button data-desktop-key="LEFT" aria-label="向左">←</button><button data-desktop-key="RIGHT" aria-label="向右">→</button>
 		<button data-desktop-key="ACTION">确认 Enter</button><button data-desktop-key="CANCEL">返回 Esc</button><button data-desktop-key="MENU">菜单 M</button>
 		<button data-desktop-key="SUBMIT">完成选队 C</button><span>WASD 移动 · 鼠标点击菜单选择</span>
-		<a href="/save-tools.html">本地存档</a>
-		<a href="/coop-play.html?fresh=1">联机冒险</a>
+		<button type="button" data-app-route="/">返回大厅</button>
+		<button type="button" data-app-route="/coop-play.html?fresh=1">联机冒险</button>
 	</nav>
 	<div id="touchControls">
 		<div id="dpad" class="unselectable">
@@ -81,7 +81,6 @@
 	<script type="module" src="src/main.ts"></script>
 	<script type="module" src="src/coop/exit-home.mjs"></script>
 	<script src="src/touch-controls.js" type="module"></script>
-	<script src="src/debug.js" type="module"></script>
 </body>
 
 </html>

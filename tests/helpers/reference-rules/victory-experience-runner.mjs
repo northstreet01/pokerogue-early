@@ -1,5 +1,5 @@
-import {copy,requireContract as check} from './coop-contract.mjs';
-import {selectNextPhase} from './phase-queue.mjs';
+import {copy,requireContract as check} from '../../../src/battle-core/coop-contract.mjs';
+import {selectNextPhase} from '../../../src/battle-core/phase-queue.mjs';
 
 // Execute only the extracted original experience segment, once. Stats and
 // battle aftermath remain explicit pending work on this same Victory instance.

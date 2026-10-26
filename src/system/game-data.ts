@@ -505,7 +505,7 @@ export class GameData {
 
   public getTutorialFlags(): TutorialFlags {
     const ret: TutorialFlags = {};
-    Object.values(Tutorial).map(tutorial => tutorial as Tutorial).forEach(tutorial => ret[Tutorial[tutorial]] = false);
+    for (const tutorial of Object.values(Tutorial)) ret[tutorial] = false;
 
     if (!deviceStorage().hasOwnProperty('tutorials'))
       return ret;

@@ -66,7 +66,7 @@ module.exports=async({app,window,hosts,origin,dataRoot})=>{
     resumed.send({type:'resumeSeat',roomId:first.roomId,resumeToken:welcome.resumeToken});
     const restored=await resumed.wait(m=>m.type==='snapshot');assert.equal(restored.runId,first.runId);assert.equal(restored.seat,0);
     report.checks.push('original-worker-room','two-websockets','host-restart','same-run-seat');
-    await evaluate(`document.querySelector('#desktopControls a[href^="/coop-play.html"]').click()`);
+    await evaluate(`document.querySelector('#desktopControls [data-app-route^="/coop-play.html"]').click()`);
     await until(`!!document.querySelector('input[aria-label="本机房主端口"]')`);
     assert.equal(await evaluate('document.querySelectorAll("canvas").length'),1);
     await evaluate(`[...document.querySelectorAll('#coop-play-overlay button')].find(b=>b.textContent==='启动本机房主').click()`);

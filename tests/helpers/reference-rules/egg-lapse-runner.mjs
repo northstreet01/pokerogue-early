@@ -1,5 +1,5 @@
-import {copy,requireContract as check} from './coop-contract.mjs';
-import {selectNextPhase} from './phase-queue.mjs';
+import {copy,requireContract as check} from '../../../src/battle-core/coop-contract.mjs';
+import {selectNextPhase} from '../../../src/battle-core/phase-queue.mjs';
 
 // PLAY-14: the trusted driver invokes the same original EggLapse Phase once
 // for each personal inventory. All rows and original hatch queues commit as a

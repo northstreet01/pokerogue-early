@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createOriginalCoopAdapter} from '../../server/original-coop-adapter.mjs';
+import {createOriginalCoopAdapter} from "./original-adapter.mjs";
 import {formalFixture} from './formal-ws.mjs';
 import {createSnapshotConsumer} from '../../src/battle-core/coop-client.mjs';
 import {createOriginalClientModel} from '../../src/coop/original-client-model.mjs';

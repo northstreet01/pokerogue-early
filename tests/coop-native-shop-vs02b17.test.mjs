@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildCoopRuntime } from '../scripts/build-coop-runtime.mjs';
-import { createOriginalCoopAdapter } from '../server/original-coop-adapter.mjs';
+import { createOriginalCoopAdapter } from "./helpers/original-adapter.mjs";
 import { FormalRoomStore } from '../server/formal-coop-service.mjs';
 import { formalFixture } from './helpers/formal-ws.mjs';
 import { defaultTrainerRoute, progressDefault } from './helpers/native-default-trainer.mjs';

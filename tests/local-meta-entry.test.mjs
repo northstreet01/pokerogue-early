@@ -9,7 +9,7 @@ import http from 'node:http';
 import {WebSocket} from 'ws';
 import {JSDOM} from 'jsdom';
 import {IDBFactory} from 'fake-indexeddb';
-import {createAppNavigation,appRoute} from '../src/app-navigation.mjs';
+import {createAppNavigation,appRoute,closeAppScene,bindAppNavigationControls,isAppDocument} from '../src/app-navigation.mjs';
 import {normalizeEndpoint,hostScope,identifyHost,rememberHost,readHosts} from '../src/coop/host-connection.mjs';
 import {createPlayStorage} from '../src/coop/play-storage.mjs';
 import {loadHostIdentity,serveHostIdentity,clientOriginAllowed} from '../server/host-identity.mjs';
@@ -51,6 +51,43 @@ test('host endpoint accepts only clean HTTP origins and preserves browser mixed-
  assert.equal(normalizeEndpoint('http://192.168.1.8:8020/',base),'http://192.168.1.8:8020');
  for(const endpoint of ['ws://host','http://user:pass@host','http://host/a','http://host/?token=x','file:///tmp'])assert.throws(()=>normalizeEndpoint(endpoint,base));
  assert.throws(()=>normalizeEndpoint('http://host','https://local.test/'),/HTTPS_REQUIRED/);
+});
+
+test('unconfirmed save cannot silently discard a live profile during navigation',async()=>{
+ const calls=[],scene={prepareAppLeave:async()=>false,gameData:{invalidateProfile:()=>calls.push('discard'),closeProfile:async()=>calls.push('close')}};
+ await assert.rejects(closeAppScene(scene),/APP_SAVE_UNCONFIRMED/);assert.deepEqual(calls,[]);
+ await closeAppScene(scene,true);assert.deepEqual(calls,['discard']);
+});
+
+test('new tutorial preferences contain real tutorial IDs and preserve stored completion',()=>{
+ const read=()=>api.GameData.prototype.getTutorialFlags.call({});
+ const expected=['INTRO','ACCESS_MENU','MENU','STARTER_SELECT','SELECT_ITEM','EGG_GACHA'].sort();
+ assert.deepEqual(Object.keys(read()).sort(),expected);assert.ok(Object.values(read()).every(value=>value===false));
+ localStorage.setItem('tutorials','{"INTRO":true}');assert.equal(read().INTRO,true);assert.equal(read().ACCESS_MENU,false);
+});
+
+test('bottom controls use guarded in-app navigation and report failures without loading another document',async()=>{
+ document.body.innerHTML='<nav><button data-app-route="/">返回大厅</button></nav>';
+ const calls=[],errors=[],release=bindAppNavigationControls(document,async value=>{calls.push(value);throw Error('disk');},e=>errors.push(e.message));
+ let leaked=0;window.addEventListener('keydown',()=>leaked++);
+ document.querySelector('button').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));assert.equal(leaked,0);
+ document.querySelector('button').click();await new Promise(r=>setTimeout(r,0));
+ assert.deepEqual(calls,['/']);assert.deepEqual(errors,['disk']);assert.equal(location.href,base);
+ release();document.querySelector('button').click();await new Promise(r=>setTimeout(r,0));assert.equal(calls.length,1);
+ for(const page of ['/save-tools.html','/coop.html','/other.html','https://other.test/'])assert.equal(isAppDocument(page,base),false);
+ for(const page of ['/','/index.html','/coop-play.html'])assert.equal(isAppDocument(page,base),true);
+});
+
+test('sound speed follows the active scene and is not wrapped again on mode changes',()=>{
+ const fades=[],originalOut=api.SoundFade.fadeOut,originalIn=api.SoundFade.fadeIn;
+ api.SoundFade.fadeOut=(_scene,_sound,duration)=>fades.push(duration);
+ api.SoundFade.fadeIn=(_scene,_sound,duration)=>fades.push(duration);
+ const scene=gameSpeed=>({gameSpeed,time:{addEvent(){}},tweens:{add(){},chain(){},addCounter(){}}});
+ try {
+  const first=scene(2),second=scene(5);api.initGameSpeed.call(first);const wrapper=api.SoundFade.fadeOut;
+  api.initGameSpeed.call(second);assert.equal(api.SoundFade.fadeOut,wrapper);
+  api.SoundFade.fadeOut(second,{},1000);api.SoundFade.fadeIn(first,{},1000);assert.deepEqual(fades,[200,500]);
+ }finally{api.SoundFade.fadeOut=originalOut;api.SoundFade.fadeIn=originalIn;}
 });
 test('host discovery never treats a remote 404 or a different host identity as a legacy server',async()=>{
  await assert.rejects(identifyHost('http://remote.test',{base,fetcher:async()=>({status:404,ok:false})}),/HOST_UNAVAILABLE/);
@@ -189,8 +226,15 @@ const adapter={rulesVersion:'transport-only',contentHash:'transport-only',create
  restoreCheckpoint:value=>structuredClone(value),projectSnapshot:()=>({shared:{},personal:{}}),describeDecision:()=>({id:'lobby',requiredSeats:[0,1]})};
 async function host(t,identity,store){
  const server=http.createServer((request,response)=>{if(!serveHostIdentity(request,response,identity)){response.writeHead(404);response.end();}});
- const service=await attachFormalCoopServer(server,{adapter,store});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const endpoint=`http://127.0.0.1:${server.address().port}`,sockets=[];
+ const service=await attachFormalCoopServer(server,{adapter,store});let endpoint;
+ try{
+  for(let attempt=0;attempt<10;attempt++){
+   await new Promise(r=>server.listen(0,'127.0.0.1',r));endpoint=`http://127.0.0.1:${server.address().port}`;
+   try{await fetch(endpoint+'/coop/v1/host');break;}
+   catch(error){await new Promise(r=>server.close(r));if(error.cause?.message!=='bad port'||attempt===9)throw error;}
+  }
+ }catch(error){await service.close();throw error;}
+ const sockets=[];
  let closed=false;const close=async()=>{if(closed)return;closed=true;for(const socket of sockets)socket.terminate();await service.close();await new Promise(r=>server.close(r));};
  t.after(close);
  return {endpoint,close,async client(origin){

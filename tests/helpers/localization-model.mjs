@@ -12,8 +12,10 @@ for(const lng of ['en','zh-Hans'])for(const file of fs.readdirSync(new URL(`loca
  bundledLocales[`../locales/${lng}/${file}`]=JSON.parse(fs.readFileSync(new URL(`locales/${lng}/${file}`,root),'utf8'));
 const source=fs.readFileSync(new URL('src/i18n.ts',root),'utf8').replace(/import\.meta\.glob\([^;]+\)/,'bundledLocales');
 export const originalI18n=i18next.createInstance();
+const storage={getItem:()=> 'en'};
 vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{
- exports:{},bundledLocales,localStorage:{getItem:()=> 'en'},require:key=>{
+ exports:{},bundledLocales,localStorage:storage,require:key=>{
+  if(key==='./platform/preferences.mjs')return {deviceStorage:()=>storage};
   if(key==='i18next')return {default:originalI18n};
   if(key==='./system/language.mjs')return language;
   if(key==='./system/presentation-text.mjs')return presentationText;

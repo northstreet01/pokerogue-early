@@ -4,7 +4,7 @@ import {codec,initialDecision} from './helpers/decision-model.mjs';
 import {eggs,eggCodec,eggData} from './helpers/egg-model.mjs';
 import {eggLapseContext,advanceEggs,referenceEggs,queuedHatches,atEggStop,eggLapseDriver} from './helpers/egg-lapse-model.mjs';
 import {eggHatchPhases,phaseCodec} from './helpers/phase-model.mjs';
-import {advanceEggLapse} from '../src/battle-core/egg-lapse-runner.mjs';
+import {advanceEggLapse} from "./helpers/reference-rules/egg-lapse-runner.mjs";
 import {projectEggSnapshot,restoreEggView} from './helpers/egg-lapse-clients.mjs';
 import {copy} from '../src/battle-core/coop-contract.mjs';
 

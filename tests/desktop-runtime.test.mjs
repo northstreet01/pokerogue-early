@@ -6,7 +6,20 @@ import http from 'node:http';
 import {WebSocket} from 'ws';
 import {startAssetServer,createHostController,startLanHost,listen,closeHttp} from '../desktop/runtime.mjs';
 import {startDesktopHost} from '../src/desktop-host.mjs';
+import {createPlayerHostAdapter,createOriginalCoopAdapter} from '../server/original-coop-adapter.mjs';
 const copy=value=>JSON.parse(JSON.stringify(value));
+
+test('all player-host entry points use profile lobby and shared preparation without fixed test parties',async()=>{
+ const requests=[];let closed=0;
+ assert.throws(()=>createOriginalCoopAdapter(),/ADAPTER_CONFIGURATION_REQUIRED/);
+ const adapter=createPlayerHostAdapter({seedFactory:()=> 'host-config-test',hostFactory:async()=>({
+  request:async type=>{requests.push(type);assert.equal(type,'catalogs');return {species:[]};},close:async()=>{closed++;}})});
+ try{const context=await adapter.createInitialContext({runId:'host-config-run'});
+  assert.equal(context.profileLobby,true);assert.equal(context.checkpoint,null);assert.equal(context.provisioning.sharedPreparation,true);
+  assert.equal(context.provisioning.seed,'host-config-test');assert.ok(context.lobby.players.every(p=>p.profile===null&&!p.ready));
+  assert.deepEqual(requests,['catalogs']);
+ }finally{await adapter.closeAll();}assert.equal(closed,1);
+});
 const factory=()=>({rulesVersion:'desktop-test',contentHash:'desktop-test',
   createInitialContext:()=>({step:0}),validateCheckpoint:()=>true,captureCheckpoint:copy,restoreCheckpoint:copy,
   describeDecision:c=>({id:`step-${c.step}`,requiredSeats:[0,1]}),validateAction:()=>true,
@@ -25,11 +38,13 @@ async function client(endpoint){
 }
 test('local resources reject alternate Host, writes and symlink escape; no room API',async()=>{
   const root=await temporary();await writeFile(join(root,'index.html'),'local-assets');
+  await writeFile(join(root,'save-tools.html'),'obsolete restore tool');
   await writeFile(join(root,'sprite.png'),'sprite');const server=await startAssetServer(root,0);
   try{
     assert.equal(await (await fetch(server.origin)).text(),'local-assets');
     assert.equal((await fetch(server.origin+'/sprite.png')).headers.get('content-type'),'image/png');
     assert.equal((await fetch(server.origin+'/coop/v1/host')).status,404);
+    assert.equal((await fetch(server.origin+'/save-tools.html')).status,404);
     assert.equal((await fetch(server.origin,{method:'POST'})).status,405);
     const forbidden=await new Promise((resolve,reject)=>{
       const req=http.get(server.origin,{headers:{host:'evil.invalid'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);

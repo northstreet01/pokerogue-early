@@ -100,6 +100,15 @@ test('a resumed seat with another run stops before model consumption or outbox r
  await p.onMessage({type:'snapshot',connectionEpoch:'epoch',roomId:'ABC123',seat:0,runId:'different-run'});
  assert.match(p.status.textContent,/RUN_MISMATCH/);
 });
+test('failed identity discovery retries owned rooms, clears an older retry on reconnect, and leaves unjoined address entry manual',async t=>{
+ for(const owned of [false,true]){
+  const {p}=uiPhase(t);p.roomId=owned?'ABC123':null;p.hostId=hostA;
+  p.identifyEndpoint=async(_endpoint,expected)=>{assert.equal(expected,hostA);throw Error('HOST_UNAVAILABLE');};
+  const old=setTimeout(()=>assert.fail('obsolete retry must be cancelled'),10000);p.reconnectTimer=old;
+  await p.connect('http://127.0.0.1:9000');assert.notEqual(p.reconnectTimer,old);
+  assert.equal(!!p.reconnectTimer,owned);assert.equal(p.socket,null);p.stopSession();assert.equal(p.reconnectTimer,null);
+ }
+});
 test('return uses the same app navigation and closes the cooperative writer before switching',async t=>{
  const {p,scene}=uiPhase(t),events=[];
  scene.gameData.closeProfile=async()=>events.push('close');scene.navigateApp=async()=>events.push('navigate');

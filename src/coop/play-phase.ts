@@ -90,6 +90,7 @@ export default class CoopPlayPhase extends Phase {
   private expectedRunId: string | null = null;
   private playerNames: (string|null)[] = [null,null];
   private pauseTask: Promise<boolean> | null = null;
+  private reconnectAttempts=0;
 
   constructor(scene: BattleScene) { super(scene); }
 
@@ -262,6 +263,7 @@ export default class CoopPlayPhase extends Phase {
 
   private async connect(endpoint?:string) {
     if (this.disposed) return;
+    if(this.reconnectTimer)clearTimeout(this.reconnectTimer);this.reconnectTimer=null;
     const lifecycle = ++this.lifecycle;
     this.messageChain = Promise.resolve();
     this.socket?.close();this.socket=null;this.versions=null;this.renderLobbyControls();
@@ -270,7 +272,7 @@ export default class CoopPlayPhase extends Phase {
     this.setStatus('正在核对房主地址…');
     let host:any;
     try{host=await this.identifyEndpoint(selected,this.hostId??query.get('hostId'));}
-    catch(error){if(this.current(lifecycle))this.setStatus(hostConnectionError(error)??'无法连接房主，请检查地址与服务；个人档案仍保留在本机。',true);return;}
+    catch(error){if(this.current(lifecycle)){this.setStatus(hostConnectionError(error)??'无法连接房主，请检查地址与服务；个人档案仍保留在本机。',true);this.scheduleReconnect();}return;}
     if(!this.current(lifecycle))return;
     this.endpoint=host.endpoint;this.hostId=host.hostId;
     this.origin=host.hostId?hostScope(location.origin,host.hostId,this.scene.gameData?.localProfileId):location.origin;
@@ -281,6 +283,7 @@ export default class CoopPlayPhase extends Phase {
     this.socket = socket;
     socket.addEventListener('open', async () => {
       if (!current()) return;
+      this.reconnectAttempts=0;
       this.setStatus('已连接，恢复席位…');
       this.send({ type: 'hello', protocolVersion: PROTOCOL_VERSION, checkpointVersion: CHECKPOINT_VERSION,
         rulesVersion: RULES_VERSION, contentHash: CONTENT_HASH });
@@ -301,10 +304,15 @@ export default class CoopPlayPhase extends Phase {
       this.clearPreparationParty();
       this.clearActiveSwitchParty();
       this.inputReady = false; this.battleInputActive = false;
+      if(this.seat!==null)this.online[this.seat]=false;
       this.closeStarterSelect();
-      this.reconnectTimer = setTimeout(() => this.connect(), 1000);
+      this.scheduleReconnect();
     });
     socket.addEventListener('error', () => { if (current()) this.setStatus('WebSocket 连接失败', true); });
+  }
+  private scheduleReconnect(){
+    if(this.disposed||!this.roomId||this.reconnectTimer)return;
+    this.reconnectTimer=setTimeout(()=>{this.reconnectTimer=null;void this.connect();},Math.min(1000*2**this.reconnectAttempts++,5000));
   }
   private identifyEndpoint(endpoint:string,expectedHostId:string|null){
     return identifyHost(endpoint,{expectedHostId,signal:this.hostAbort.signal});

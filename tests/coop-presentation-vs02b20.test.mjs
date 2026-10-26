@@ -108,7 +108,7 @@ test('cooperative music uses original selection and preserves a playing track ac
 
 test('original playBgm retains its loop/volume and an aborted late load cannot restart music',()=>{
   const scene=Object.create(api.BattleScene.prototype),callbacks=[],sounds=[],plays=[],loops=[];
-  Object.assign(scene,{masterVolume:0.5,bgmVolume:0.4,bgm:null,bgmCache:new Set(),
+  Object.assign(scene,{masterVolume:0.5,bgmVolume:0.4,bgm:null,bgmCache:new Set(),cache:{audio:{exists:()=>false}},
     arena:{bgm:'town',getBgmLoopPoint:()=>7.288},load:{audio(){},once:(_event,cb)=>callbacks.push(cb),isLoading:()=>false,start(){}},
     sound:{add:key=>{sounds.push(key);return {key,isPlaying:true,play:c=>plays.push(c),on:(_event,cb)=>loops.push(cb)};}}});
   const abandoned=new AbortController();scene.playBgm('town',false,abandoned.signal);abandoned.abort();callbacks.shift()();

@@ -435,6 +435,7 @@ test('explicit create wins over a pending auto-resume and stale starter callback
   assert.deepEqual(sent.map(m => m.type), ['createRoom']);
   assert.equal(p.roomId, null);
   let callback, cancel;
+  p.inputReady=true; // Simulate the acknowledged lobby before opening its UI.
   p.scene.ui.setMode = async (_mode, accept, config) => { callback = accept; cancel = config.onCancel; };
   await p.openStarterSelect();
   await p.leaveSession(); callback([]); cancel();
@@ -457,9 +458,10 @@ test('old socket callbacks cannot reconnect after exit or feed a newer connectio
   t.after(() => { globalThis.WebSocket = previous; });
   const { p, sent } = phase(); exitEnvironment(p);
   location.protocol = 'http:'; location.host = 'localhost:8031';
-  p.connect(); const old = sockets[0];
+  p.identifyEndpoint=async()=>({endpoint:origin,hostId:null,legacy:true});
+  await p.connect(); const old = sockets[0];
   p.messageChain = new Promise(() => {});
-  p.connect(); const next = sockets[1];
+  await p.connect(); const next = sockets[1];
   await next.callbacks.open();
   next.callbacks.message({ data: JSON.stringify({ type: 'welcome' }) });
   await p.messageChain;
@@ -1793,7 +1795,7 @@ test('public teammate and enemy display retain visible status and clear it on th
 test('waiting room exposes both seats and no ready/edit actions until both models are acknowledged',async()=>{
  const {p}=phase();await p.onMessage(welcome);await p.onMessage(await snapshot());p.inputReady=false;p.online=[true,false];
  api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.match(p.controls.textContent,/玩家2：等待加入/);assert.equal(p.controls.querySelectorAll('button').length,0);
- p.online=[true,true];p.inputReady=true;api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.match(p.controls.textContent,/提交准备/);assert.match(p.controls.textContent,/重新选队/);
+ p.online=[true,true];p.inputReady=true;api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.match(p.controls.textContent,/提交准备/);assert.match(p.controls.textContent,/选择队伍/);
  p.inputReady=false;api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.equal(p.controls.querySelectorAll('button').length,0);
 });
 

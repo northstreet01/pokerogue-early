@@ -150,6 +150,18 @@ test('return waits for GameData queued writes before releasing its profile and b
   const next=await openGameProfileIO(r,p.profileId);await next.close();
 });
 
+for(const kind of ['system','session'])test(`legacy ${kind} verification already in flight is drained before a new scene can open`,async()=>{
+  const g=game(null);await g.data.loadSystem();let verify;
+  g.data.refreshUserInfo=()=>new Promise(resolve=>{verify=resolve;});
+  g.data.gameStats.battles=41;g.scene.currentBattle.waveIndex=7;
+  const saving=kind==='system'?g.data.saveSystem():g.data.saveSession(g.scene),closing=g.data.closeProfile();
+  let closed=false;void closing.then(()=>closed=true);await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(closed,false);verify(true);assert.equal(await saving,true);await closing;
+  const saved=JSON.parse(await api.readLocalSave(kind==='system'?'data':'sessionData'));
+  assert.equal(kind==='system'?saved.gameStats.battles:saved.waveIndex,kind==='system'?41:7);
+  assert.equal(await g.data.saveSystem(),false);
+});
+
 test('terminal disk failure preserves slot and statistics until a successful retry; failed return stays recoverable',async t=>{
   const {r,p}=await created(),store=createMetaStore({indexedDB:factory});let fail=false;
   const repo=createProfileRepository({codec:createMetaCodec(api.originalSaveCodec),store:{read:store.read,

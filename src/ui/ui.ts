@@ -334,6 +334,7 @@ export default class UI extends Phaser.GameObjects.Container {
   }
 
   private setModeInternal(mode: Mode, clear: boolean, forceTransition: boolean, chainMode: boolean, args: any[], signal?: AbortSignal): Promise<void> {
+    if((this.scene as BattleScene)?.appRetired)return Promise.resolve();
     return new Promise(resolve => {
       if (signal?.aborted) return resolve();
       if (this.mode === mode && !forceTransition) {
@@ -341,6 +342,7 @@ export default class UI extends Phaser.GameObjects.Container {
         return;
       }
       const doSetMode = () => {
+        if((this.scene as BattleScene)?.appRetired){resolve();return;}
         if (signal?.aborted) { this.cancelFade(); resolve(); return; }
         if (this.mode !== mode) {
           if (clear)

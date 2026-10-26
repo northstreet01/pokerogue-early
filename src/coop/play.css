@@ -1,0 +1,25 @@
+/* The room is a distinct waiting view over the original town art. Its controls
+   retain the existing formal room/profile flow; the battle uses a compact HUD. */
+body{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+#app{flex:1;min-height:0;position:relative}#desktopControls{flex:none}
+#coop-play-overlay{position:fixed;inset:0 0 auto;z-index:100;font:13px/1.5 emerald,system-ui;pointer-events:none}
+#coop-play-overlay .panel{pointer-events:auto;display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;padding:5px 12px;background:rgba(13,23,40,.94);color:#fff;border-bottom:2px solid #66799c}
+#coop-play-overlay h1{font-size:16px;margin:0}
+#coop-play-overlay .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+#coop-play-overlay button,#coop-play-overlay input{font:inherit;padding:6px 12px;border:2px solid #697997;border-radius:3px;background:#f8f8fc;color:#252638;min-height:34px;box-sizing:border-box}
+#coop-play-overlay button{cursor:pointer}#coop-play-overlay button:disabled{opacity:.5;cursor:default}
+#coop-play-overlay button.primary{background:#dae9f8;border-color:#557fa8}
+#coop-play-overlay .status{overflow-wrap:anywhere}#coop-play-overlay .error{color:#ff8e8e}
+#coop-play-overlay .host-address input{min-width:230px;flex:1}
+#coop-play-overlay.room-lobby:not(.selecting-team){inset:0;display:grid;place-items:center;padding:60px 16px 100px;box-sizing:border-box;background:rgba(20,31,45,.12);font-size:18px}
+#coop-play-overlay.room-lobby:not(.selecting-team) .panel{display:block;width:min(640px,90vw);max-height:75vh;overflow:auto;padding:22px;background:#f7f7fa;color:#303044;border:6px double #78849d;box-shadow:0 5px 0 #34384b}
+#coop-play-overlay.room-lobby h1{font-size:24px;margin-bottom:12px}
+#coop-play-overlay.room-lobby .error{color:#b63140}
+#coop-play-overlay .room-players{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+#coop-play-overlay .room-player{padding:12px;background:#e6e9f1;border:2px solid #aab0c5}
+#coop-play-overlay:not(.room-lobby) .room-players,#coop-play-overlay.selecting-team .room-players{display:none}
+#coop-play-overlay.selecting-team h1{font-size:14px;margin:0}
+#coop-play-overlay.selecting-team{position:relative;inset:auto;order:-1;flex:none}
+#coop-play-overlay.selecting-team .coop-room-controls{display:none}
+#coop-play-overlay [hidden]{display:none!important}
+@media(max-width:600px){#coop-play-overlay.room-lobby:not(.selecting-team) .panel{padding:12px}#coop-play-overlay .room-players{grid-template-columns:1fr}#coop-play-overlay.room-lobby h1{font-size:20px}}

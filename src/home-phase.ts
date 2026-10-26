@@ -13,6 +13,8 @@ import {captureLegacySource,prsvSystemSource} from './local-meta/legacy-source';
 import {legacyBackupSource} from './local-meta/repository.mjs';
 import {digest} from './local-meta/codec.mjs';
 import i18next from './i18n';
+import {readHosts,hostScope} from './coop/host-connection.mjs';
+import {showCoopExitReturn} from './coop/exit-home.mjs';
 
 /** Root has no login/save/room side effects. Direct game entries retain login. */
 export function entryPhases(scene: BattleScene, coop: boolean, solo: boolean): Phase[] {
@@ -31,6 +33,7 @@ export class HomePhase extends Phase {
   private activeProfile: string | null = null;
   private profileName = '';
   private fileInput?: HTMLInputElement;
+  private backdrop?: Phaser.GameObjects.NineSlice;
   private t(key:string,args?:any):string{return i18next.t(`localMeta:${key}`,args) as string;}
   private repository(epoch=this.epoch){return profileRepository(()=>this.current(epoch));}
 
@@ -39,6 +42,12 @@ export class HomePhase extends Phase {
     this.scene.fadeOutBgm(0, false);
     this.scene.playBgm?.('menu', false, this.music.signal);
     this.scene.ui.fadeIn(250);
+    showCoopExitReturn(document,this.scene.appUrl??location,url=>this.navigate(url));
+    // Original town art, without any party, enemy, battle HUD or old scene.
+    if(this.scene.add?.nineslice){
+      this.backdrop=this.scene.add.nineslice(0,0,'town_bg',null,320,180,0,0,132,0);
+      this.backdrop.setOrigin(0).setScale(6).setDepth(0.5);
+    }
     const button = document.createElement('button');
     button.type = 'button'; button.textContent = '返回初始界面';
     button.id = 'home-return';
@@ -58,6 +67,8 @@ export class HomePhase extends Phase {
     this.music.abort(); this.scene.fadeOutBgm?.(150, true);
     this.returnButton?.remove();
     this.fileInput?.remove();
+    this.backdrop?.destroy();
+    document.getElementById('coop-exit-return')?.remove();
     this.releaseView();
   }
 
@@ -67,6 +78,7 @@ export class HomePhase extends Phase {
 
   private navigate(url: string): void {
     if(this.activeProfile)url+=(url.includes('?')?'&':'?')+'profile='+encodeURIComponent(this.activeProfile);
+    if(this.scene.navigateApp){void this.scene.navigateApp(url).catch(error=>this.showError(error));return;}
     this.dispose();
     location.assign(url);
   }
@@ -96,7 +108,7 @@ export class HomePhase extends Phase {
         void Promise.resolve(result).catch(error=>{if(this.current(actionEpoch))void this.showError(error);});
       } };
     });
-    return this.display(epoch, Mode.TITLE, [{ options, noCancel: true, maxOptions: 4, yOffset: 47,
+    return this.display(epoch, Mode.TITLE, [{ options, noCancel: true, maxOptions: 6, yOffset: 47,
       contextLabel: context??(this.activeProfile?this.t('current',{name:this.profileName.slice(0,14)}):'选择冒险 / 个人资料') }]);
   }
 
@@ -161,11 +173,17 @@ export class HomePhase extends Phase {
     const epoch = ++this.epoch;
     await this.menu(epoch, [['正在读取，返回', () => { void this.showHome(); }]]);
     try {
-      const seats = (await createPlayStorage().listSeats(location.origin)).filter(value=>(value.profileId??null)===this.activeProfile);
+      const storage=createPlayStorage();
+      const legacy=(await storage.listSeats(location.origin)).map(value=>({...value,legacy:true}));
+      const hosts=readHosts().hosts;
+      const hosted=(await Promise.all(hosts.map(async host=>(await storage.listSeats(hostScope(location.origin,host.hostId,this.activeProfile)))
+        .map(value=>({...value,hostId:host.hostId,endpoint:host.endpoint,legacy:false}))))).flat();
+      const seats=[...legacy,...hosted].filter(value=>(value.profileId??null)===this.activeProfile);
       if (!this.current(epoch)) return;
       await this.menu(epoch, [
-        ...seats.map(value => [`房间 ${value.roomId} · 玩家${value.seat + 1}`, () =>
-          this.navigate(`/coop-play.html?resumeRoom=${encodeURIComponent(value.roomId)}&resumeSeat=${value.seat}`)] as [string, () => void]),
+        ...seats.map(value => [`房间 ${value.roomId} · 玩家${value.seat + 1}${value.hostId?' · '+value.endpoint:''}`, () =>
+          this.navigate(`/coop-play.html?resumeRoom=${encodeURIComponent(value.roomId)}&resumeSeat=${value.seat}`
+            +(value.hostId?`&host=${encodeURIComponent(value.endpoint)}&hostId=${encodeURIComponent(value.hostId)}`:this.scene.navigateApp?'&legacy=1':''))] as [string, () => void]),
         [seats.length ? '返回初始界面' : '没有可恢复席位，返回', () => { void this.showHome(); }],
       ]);
     } catch {

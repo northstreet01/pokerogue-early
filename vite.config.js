@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { attachCoopServer } from './server/coop-service.mjs';
 import { attachFormalCoopServer, FormalRoomStore } from './server/formal-coop-service.mjs';
 import { createOriginalCoopAdapter } from './server/original-coop-adapter.mjs';
+import {loadHostIdentity,serveHostIdentity} from './server/host-identity.mjs';
 // import fs from 'vite-plugin-fs';
 
 export default defineConfig(({ mode }) => {
@@ -20,6 +21,10 @@ export default defineConfig(({ mode }) => {
 		plugins: [{
 			name: 'early-coop-server',
 			async configureServer(server) {
+				const formalDirectory=process.env.COOP_FORMAL_DATA ?? 'server/data/formal-rooms';
+				const identity=await loadHostIdentity(formalDirectory);
+				const allowedOrigins=(process.env.COOP_CLIENT_ORIGINS??'').split(',').map(value=>value.trim()).filter(Boolean);
+				server.middlewares.use((request,response,next)=>{if(!serveHostIdentity(request,response,identity,allowedOrigins))next();});
 				coopService = await attachCoopServer(server.httpServer, { directory: process.env.COOP_DATA ?? 'server/data/rooms' });
 				profileAdapter = process.env.COOP_PROFILE_LOBBY === '1'
 					? createOriginalCoopAdapter({ fixture: { profileLobby: true,
@@ -27,12 +32,12 @@ export default defineConfig(({ mode }) => {
 						seedFactory: () => randomUUID() })
 					: null;
 				formalCoopService = await attachFormalCoopServer(server.httpServer, { adapter: profileAdapter,
-					store: new FormalRoomStore(process.env.COOP_FORMAL_DATA ?? 'server/data/formal-rooms') });
+					store: new FormalRoomStore(formalDirectory),allowedOrigins });
 				server.httpServer.once('close', () => { void closeServices(); });
 			},
 			async closeBundle() { await closeServices(); }
 		}],
-		server: { host: '0.0.0.0', port: 8020, strictPort: true },
+		server: { host: process.env.COOP_BIND??'127.0.0.1', port: 8020, strictPort: true },
 		clearScreen: false,
 		build: {
 			rollupOptions: { input: { game: resolve('index.html'), saves: resolve('save-tools.html'), coop: resolve('coop.html'), coopPlay: resolve('coop-play.html') } },

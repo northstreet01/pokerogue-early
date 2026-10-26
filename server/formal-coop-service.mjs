@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, readFile, open, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import {clientOriginAllowed} from './host-identity.mjs';
 import { PROTOCOL_VERSION, CHECKPOINT_VERSION, ContractError, requireContract as check, validateMessage, assertVersions, requireAdapter, SERVER_METHODS, canonical, copy } from '../src/battle-core/coop-contract.mjs';
 
 export const hashProjection = value => createHash('sha256').update(canonical(value)).digest('hex');
@@ -25,7 +26,7 @@ export class FormalRoomStore {
 }
 
 // No default original-game adapter: a production connection must fail closed.
-export async function attachFormalCoopServer(httpServer, { adapter = null, store = new FormalRoomStore(), heartbeatMs = 15000 } = {}) {
+export async function attachFormalCoopServer(httpServer, { adapter = null, store = new FormalRoomStore(), heartbeatMs = 15000, allowedOrigins=[] } = {}) {
   const versions = { protocolVersion: PROTOCOL_VERSION, checkpointVersion: CHECKPOINT_VERSION, rulesVersion: adapter?.rulesVersion ?? 'early-unavailable', contentHash: adapter?.contentHash ?? 'unavailable' };
   const rooms = new Map(), connections = new Map(), queues = new Map(), confirmations = new Map(), faults = new Map();
   // Load without rewriting incompatible saves. Compatibility is checked on resume.
@@ -51,7 +52,10 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
   const send = (socket, message) => { validateMessage(message, 'server'); if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
   function status(room) {
     const message = { type: 'syncStatus', roomId: room.roomId, runId: room.runId, revision: room.revision, online: online(room), acked: acked(room), submitted: [0, 1].map(seat => Object.hasOwn(room.inputs, seat)), blocked: blocked(room), reason: faults.get(room.roomId) ?? (!online(room).every(Boolean) ? 'DISCONNECTED' : blocked(room) ? 'WAITING_ACK' : 'READY') };
-    for (const seat of [0, 1]) { const socket = connections.get(key(room.roomId, seat)); if (socket) send(socket, message); }
+    for (const seat of [0, 1]) { const socket = connections.get(key(room.roomId, seat)); if (socket) {
+      send(socket,{type:'roomPresence',roomId:room.roomId,runId:room.runId,players:room.seats.map(player=>player?.name??null)});
+      send(socket, message);
+    } }
   }
   function serial(roomId, task) {
     const work = (queues.get(roomId) ?? Promise.resolve()).then(task);
@@ -228,7 +232,7 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
   }
   const upgrade = (request, socket, head) => {
     if (new URL(request.url, 'http://localhost').pathname !== '/coop/v1/ws') return;
-    try { if (request.headers.origin && new URL(request.headers.origin).host !== request.headers.host) { socket.destroy(); return; } } catch { socket.destroy(); return; }
+    if(!clientOriginAllowed(request.headers.origin,request.headers.host,allowedOrigins)){socket.destroy();return;}
     wss.handleUpgrade(request, socket, head, client => wss.emit('connection', client));
   };
   httpServer.on('upgrade', upgrade);

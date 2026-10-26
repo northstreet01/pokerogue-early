@@ -178,6 +178,7 @@ export class GameData {
   private localSystemSaveQueue: Promise<void> = Promise.resolve();
   private profileIO: any = null;
   private profileClosing = false;
+  private pendingSaves = new Set<Promise<boolean>>();
 
   public trainerId: integer;
   public secretId: integer;
@@ -231,18 +232,22 @@ export class GameData {
   }
 
   public get localProfileId(): string | null { return this.profileIO?.profileId ?? null; }
+  public get localProfileName(): string { return this.profileIO?.displayName ?? '本地训练家'; }
+  public invalidateProfile(): void { this.profileClosing = true; this.profileIO?.invalidate(); }
   public bindProfileIO(io: any): void {
     if (this.profileIO) throw new Error('LOCAL_PROFILE_ALREADY_BOUND');
     this.profileIO = io;
   }
   public async closeProfile(): Promise<void> {
-    if (!this.profileIO) return;
     this.profileClosing = true;
     try {
+      // Include legacy saves still reading/validating their source, before
+      // they have reached the actual write queue. A new Scene must not race it.
+      if((await Promise.all([...this.pendingSaves])).some(saved=>!saved))throw new Error('LOCAL_SAVE_FAILED');
       // GameData queues serialization before the repository sees the write.
       // Drain that queue before closing the immutable profile binding.
       await this.localSystemSaveQueue;
-      await this.profileIO.close();
+      await this.profileIO?.close();
     } catch (error) { this.profileClosing = false; throw error; }
   }
   public readLocalData(key: string): Promise<string | null> { return this.profileIO ? this.profileIO.read(key) : readLocalSave(key); }
@@ -271,7 +276,14 @@ export class GameData {
     return JSON.stringify(data, (k: any, v: any) => typeof v === 'bigint' ? v <= maxIntAttrValue ? Number(v) : v.toString() : v);
   }
 
+  private trackSave(work:Promise<boolean>):Promise<boolean>{
+    this.pendingSaves.add(work);void work.then(()=>this.pendingSaves.delete(work),()=>this.pendingSaves.delete(work));return work;
+  }
   public saveSystem(): Promise<boolean> {
+    if(this.profileClosing)return Promise.resolve(false);
+    return this.trackSave(this.saveSystemInternal());
+  }
+  private saveSystemInternal(): Promise<boolean> {
     if (this.readonlyView || this.profileClosing) return Promise.resolve(false);
     if (this.profileIO) {
       const data = this.captureSystemData();
@@ -532,6 +544,10 @@ export class GameData {
   }
 
   saveSession(scene: BattleScene, skipVerification?: boolean): Promise<boolean> {
+    if(this.profileClosing)return Promise.resolve(false);
+    return this.trackSave(this.saveSessionInternal(scene,skipVerification));
+  }
+  private saveSessionInternal(scene: BattleScene, skipVerification?: boolean): Promise<boolean> {
     if (this.readonlyView || this.profileClosing) return Promise.resolve(false);
     if (this.profileIO) {
       const system = this.captureSystemData(), session = JSON.stringify(this.getSessionSaveData(scene));
@@ -561,7 +577,9 @@ export class GameData {
               resolve(true);
             });
         } else {
-          writeLocalSave(sessionSaveKey(scene.sessionSlotId), JSON.stringify(sessionData))
+          const write=this.localSystemSaveQueue.catch(()=>{}).then(()=>writeLocalSave(sessionSaveKey(scene.sessionSlotId), JSON.stringify(sessionData)));
+          this.localSystemSaveQueue=write;
+          write
             .then(() => { console.debug('Local session data saved'); resolve(true); }, error => {
               console.error('Local session save failed', error); resolve(false);
             });

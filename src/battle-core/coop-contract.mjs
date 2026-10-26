@@ -47,6 +47,7 @@ const fields = {
   grantAck: { ...identity, connectionEpoch: string, grantIds: v => Array.isArray(v) && v.length <= 100 && v.every(string) },
   requestSnapshot: { ...identity, knownRevision: integer, reason: string },
   welcome: { ...versions, roomId: v => v === null || string(v), seat: v => v === null || seat(v), connectionEpoch: v => v === null || string(v), resumeToken: v => v === null || string(v) },
+  roomPresence: {...identity, players:v=>Array.isArray(v)&&v.length===2&&v.every(name=>name===null||string(name)&&name.length<=24)},
   actionReceipt: { ...state, actionId: string, accepted: v => typeof v === 'boolean', code: string },
   snapshot: { ...versions, ...state, connectionEpoch: string, seat, shared: object, personal: object, sharedHash: digest, personalHash: digest, events: Array.isArray, grants: Array.isArray },
   syncStatus: { ...identity, revision: integer, online: v => Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'boolean'), acked: v => Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'boolean'), submitted: v => Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'boolean'), blocked: v => typeof v === 'boolean', reason: string },

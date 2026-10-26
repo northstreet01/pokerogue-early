@@ -1,6 +1,6 @@
 // Only the return from cooperative exit adds this small navigation notice.
 // Root now offers explicit mode selection.
-export function showCoopExitReturn(doc = document, page = location) {
+export function showCoopExitReturn(doc = document, page = location, navigate = null) {
   const result = new URLSearchParams(page.search).get('coopExit');
   if (!['saved', 'limited', 'defeat', 'victory'].includes(result)) return null;
   if (doc.getElementById('coop-exit-return')) return doc.getElementById('coop-exit-return');
@@ -15,10 +15,10 @@ export function showCoopExitReturn(doc = document, page = location) {
     : '已离开当前联机，但退出记录未确认保存。请从下方入口重开，避免自动续旧房；新建／加入仍需本地存储可用。';
   const link = doc.createElement('a'); link.href = '/coop-play.html?fresh=1';
   link.textContent = '重新进入联机'; link.style.color = '#9ac7ff';
+  if(navigate)link.addEventListener('click',event=>{event.preventDefault();navigate(link.getAttribute('href'));});
   const solo = doc.createElement('button'); solo.type = 'button'; solo.textContent = '返回模式选择';
   solo.addEventListener('click', () => notice.remove());
   for (const type of ['keydown', 'keyup']) notice.addEventListener(type, event => event.stopPropagation());
   notice.append(message, link, solo); doc.body.append(notice);
   return notice;
 }
-if (typeof document !== 'undefined') showCoopExitReturn();

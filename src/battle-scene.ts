@@ -182,8 +182,14 @@ export default class BattleScene extends Phaser.Scene {
 
 	private blockInput: boolean;
 
-	constructor() {
-		super('battle');
+	public appUrl?: URL;
+	public appReady?: () => void;
+	public appRetired = false;
+	public prepareAppLeave?: () => Promise<boolean>;
+	public navigateApp?: (url: string, options?: {discard?: boolean}) => Promise<void>;
+
+	constructor(key: string = 'battle') {
+		super(key);
 
 		initSpecies();
 		initMoves();
@@ -196,12 +202,14 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	loadImage(key: string, folder: string, filename?: string) {
+		if (this.textures.exists(key)) return;
 		if (!filename)
 			filename = `${key}.png`;
 		this.load.image(key, `images/${folder}/${filename}`);
 	}
 
 	loadAtlas(key: string, folder: string, filenameRoot?: string) {
+		if (this.textures.exists(key)) return;
 		if (!filenameRoot)
 			filenameRoot = key;
 		if (folder)
@@ -210,6 +218,7 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	loadPokemonAtlas(key: string, atlasPath: string, experimental?: boolean) {
+		if (this.textures.exists(key)) return;
 		if (experimental === undefined)
 			experimental = this.experimentalSprites;
 		if (experimental) {
@@ -230,12 +239,14 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	loadSpritesheet(key: string, folder: string, size: integer, filename?: string) {
+		if (this.textures.exists(key)) return;
 		if (!filename)
 			filename = `${key}.png`;
 		this.load.spritesheet(key, `images/${folder}/${filename}`, { frameWidth: size, frameHeight: size });
 	}
 
 	loadSe(key: string, folder?: string, filenames?: string | string[]) {
+		if (this.cache.audio.exists(key)) return;
 		if (!filenames)
 			filenames = `${key}.wav`;
 		if (!folder)
@@ -250,6 +261,7 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	loadBgm(key: string, filename?: string) {
+		if (this.cache.audio.exists(key)) return;
 		if (!filename)
 			filename = `${key}.mp3`;
 		this.load.audio(key, `audio/bgm/${filename}`);
@@ -345,7 +357,9 @@ export default class BattleScene extends Phaser.Scene {
 		// existing slum/tall_grass/beach assets; preload must not request the
 		// enum aliases that have no image files.
 		const arenaKeys = new Set<string>();
+		const minimalEntry=this.appUrl && this.appUrl.searchParams.get('solo')!=='1';
 		Utils.getEnumValues(Biome).map(bt => {
+			if(minimalEntry&&bt!==Biome.TOWN&&bt!==Biome.PLAINS)return;
 			const btKey = getBiomeKey(bt);
 			if (arenaKeys.has(btKey)) return;
 			arenaKeys.add(btKey);
@@ -379,7 +393,7 @@ export default class BattleScene extends Phaser.Scene {
 		this.loadAtlas('trainer_f_back', 'trainer');
 		this.loadAtlas('trainer_f_back_pb', 'trainer');
 
-		Utils.getEnumValues(TrainerType).map(tt => {
+		if(!minimalEntry)Utils.getEnumValues(TrainerType).map(tt => {
 			const config = trainerConfigs[tt];
 			this.loadAtlas(config.getSpriteKey(), 'trainer');
 			if (config.doubleOnly || config.hasDouble)
@@ -483,8 +497,8 @@ export default class BattleScene extends Phaser.Scene {
 		
 		populateAnims();
 
-		if (!(window as any).__COOP_PLAY__)
-			this.load.plugin('rextexteditplugin', 'https://raw.githubusercontent.com/rexrainbow/phaser3-rex-notes/master/dist/rextexteditplugin.min.js', true);
+		// Inputs already use the bundled rexInputTextPlugin. No game code uses
+		// rextexteditplugin; do not fetch an unrelated plugin on every solo entry.
 	}
 
 	create() {
@@ -496,11 +510,9 @@ export default class BattleScene extends Phaser.Scene {
 
 		this.load.setBaseURL();
 
-		this.spritePipeline = new SpritePipeline(this.game);
-		(this.renderer as Phaser.Renderer.WebGL.WebGLRenderer).pipelines.add('Sprite', this.spritePipeline);
-
-		this.fieldSpritePipeline = new FieldSpritePipeline(this.game);
-		(this.renderer as Phaser.Renderer.WebGL.WebGLRenderer).pipelines.add('FieldSprite', this.fieldSpritePipeline);
+		const pipelines=(this.renderer as Phaser.Renderer.WebGL.WebGLRenderer).pipelines;
+		this.spritePipeline=(pipelines.get('Sprite')??pipelines.add('Sprite',new SpritePipeline(this.game))) as SpritePipeline;
+		this.fieldSpritePipeline=(pipelines.get('FieldSprite')??pipelines.add('FieldSprite',new FieldSpritePipeline(this.game))) as FieldSpritePipeline;
 
 		this.time.delayedCall(20, () => this.launchBattle());
 	}
@@ -628,7 +640,7 @@ export default class BattleScene extends Phaser.Scene {
 
 		this.trainer = trainer;
 
-		this.anims.create({
+		if (!this.anims.exists('prompt')) this.anims.create({
 			key: 'prompt',
 			frames: this.anims.generateFrameNumbers('prompt', { start: 1, end: 4 }),
 			frameRate: 6,
@@ -636,7 +648,7 @@ export default class BattleScene extends Phaser.Scene {
 			showOnStart: true
 		});
 
-		this.anims.create({
+		if (!this.anims.exists('tera_sparkle')) this.anims.create({
 			key: 'tera_sparkle',
 			frames: this.anims.generateFrameNumbers('tera_sparkle', { start: 0, end: 12 }),
 			frameRate: 18,
@@ -659,10 +671,33 @@ export default class BattleScene extends Phaser.Scene {
 			initCommonAnims().then(() => loadCommonAnimAssets(this, true)),
 			initMoveAnim(Moves.STRUGGLE).then(() => loadMoveAnimAssets(this, [ Moves.STRUGGLE ], true))
 		]).then(() => {
-			for (const phase of entryPhases(this, !!(window as any).__COOP_PLAY__,
-				new URLSearchParams(location.search).get('solo') === '1')) this.pushPhase(phase);
+			const route = this.appUrl ?? new URL(location.href);
+			for (const phase of entryPhases(this, route.pathname === '/coop-play.html' || (!this.appUrl && !!(window as any).__COOP_PLAY__),
+				route.searchParams.get('solo') === '1')) this.pushPhase(phase);
 
 			this.shiftPhase();
+			this.events.emit('app-ready');
+			this.appReady?.();
+		});
+	}
+
+	/** Cooperative scenes load only the arena being presented, using the exact
+	 * original biome aliases, bases, props and animated atlas paths. */
+	ensureArenaAssets(biome: Biome): Promise<void> {
+		const key=getBiomeKey(biome),keys=[`${key}_bg`,`${key}_a`,`${key}_b`];
+		if(getBiomeHasProps(biome))for(let p=1;p<=3;p++)keys.push(`${key}_b_${p}`);
+		if(keys.every(key=>this.textures.exists(key)))return Promise.resolve();
+		return new Promise((resolve,reject)=>{
+			const clean=()=>{clearTimeout(timer);this.load.off('complete',complete);this.events.off('shutdown',cancel);};
+			const cancel=()=>{clean();reject(new Error('ARENA_LOAD_CANCELLED'));};
+			const complete=()=>{clean();keys.every(key=>this.textures.exists(key))?resolve():reject(new Error('ARENA_ASSETS_MISSING'));};
+			const timer=setTimeout(cancel,60000);
+			this.events.once('shutdown',cancel);this.load.once('complete',complete);
+			for(const asset of keys){
+				const animated=key==='end'&&(asset.endsWith('_a')||asset.endsWith('_b'))||asset.endsWith('_b_3')&&['power_plant','end'].includes(key);
+				if(animated)this.loadAtlas(asset,'arenas');else this.loadImage(asset,'arenas');
+			}
+			if(!this.load.isLoading())this.load.start();
 		});
 	}
 
@@ -729,7 +764,8 @@ export default class BattleScene extends Phaser.Scene {
 			this.buttonKeys[b] = keys;
 		}
 
-		initTouchControls(mobileKeyConfig, () => this.checkInput());
+		const releaseControls = initTouchControls(mobileKeyConfig, () => this.checkInput());
+		this.events.once('shutdown', releaseControls);
 	}
 
 	getParty(): PlayerPokemon[] {
@@ -1582,10 +1618,12 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	pushPhase(phase: Phase, defer: boolean = false): void {
+		if(this.appRetired)return;
 		pushPhase(this, phase, defer);
 	}
 
 	unshiftPhase(phase: Phase): void {
+		if(this.appRetired)return;
 		prependPhase(this, phase);
 	}
 
@@ -1602,6 +1640,7 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	shiftPhase(): void {
+		if(this.appRetired)return;
 		const next = selectNextPhase(this, () => this.populatePhaseQueue());
 		if (next.start)
 			next.phase.start();

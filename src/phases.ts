@@ -94,6 +94,7 @@ export class LoginPhase extends Phase {
       if (bypassLogin) await (await import('./local-meta/services')).prepareProfileGameData(this.scene);
       return Utils.executeIf(bypassLogin || !!Utils.getCookie(Utils.sessionIdKey), () => this.scene.gameData.refreshUserInfo());
     }).then(success => {
+      if(this.scene.appRetired)return;
       if (!success) {
         if (this.showText)
           this.scene.ui.showText(i18next.t("menu:logInOrCreateAccount"));
@@ -137,6 +138,7 @@ export class LoginPhase extends Phase {
         });
       }
     }).catch(error => {
+      if(this.scene.appRetired)return;
       console.error('Local save unavailable', error);
       this.scene.ui.setMode(Mode.MESSAGE);
       void import('./local-meta/services').then(({localProfileError}) => this.scene.ui.showText(error?.code
@@ -144,7 +146,7 @@ export class LoginPhase extends Phase {
       if(!document.getElementById('local-profile-return')) {
         const back=document.createElement('button');back.id='local-profile-return';back.textContent=i18next.t('localMeta:back');
         Object.assign(back.style,{position:'fixed',bottom:'8px',left:'8px',zIndex:'1000'});
-        back.addEventListener('click',()=>location.assign('/'));document.body.append(back);
+        back.addEventListener('click',()=>{if(this.scene.navigateApp)void this.scene.navigateApp('/');else location.assign('/');});document.body.append(back);
         this.scene.events?.once('shutdown',()=>back.remove());
       }
     });
@@ -153,7 +155,7 @@ export class LoginPhase extends Phase {
   end(): void {
     this.scene.ui.setMode(Mode.MESSAGE);
 
-    if ((window as any).__COOP_PLAY__) {
+    if (this.scene.appUrl ? this.scene.appUrl.pathname==='/coop-play.html' : (window as any).__COOP_PLAY__) {
       super.end();
       return;
     }
@@ -183,6 +185,7 @@ export class TitlePhase extends Phase {
     this.scene.fadeOutBgm(0, false);
 
     this.scene.gameData.getSession(loggedInUser.lastSessionSlot).then(sessionData => {
+      if(this.scene.appRetired)return;
       if (sessionData) {
         this.lastSessionData = sessionData;
         const biomeKey = getBiomeKey(sessionData.arena.biome);
@@ -191,6 +194,7 @@ export class TitlePhase extends Phase {
       }
       this.showOptions();
     }).catch(err => {
+      if(this.scene.appRetired)return;
       console.error(err);
       this.showOptions();
     });
@@ -222,7 +226,7 @@ export class TitlePhase extends Phase {
         }
       )
     });
-    options.push({ label: '返回初始界面', handler: () => location.assign('/') });
+    options.push({ label: '返回初始界面', handler: () => this.scene.navigateApp ? void this.scene.navigateApp('/') : location.assign('/') });
     const config: OptionSelectConfig = {
       options: options,
       noCancel: true,

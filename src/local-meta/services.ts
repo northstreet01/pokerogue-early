@@ -23,11 +23,12 @@ export function localProfileError(error:any):string {
 
 export async function prepareProfileGameData(scene:any) {
   if(scene.gameData.localProfileId)return;
-  const repository=profileRepository(),index=await repository.list();
-  const requested=new URLSearchParams(location.search).get('profile');
+  const repository=profileRepository(()=>!scene.appRetired),index=await repository.list();
+  if(scene.appRetired)throw new Error('LOCAL_PROFILE_CLOSED');
+  const requested=(scene.appUrl?.searchParams??new URLSearchParams(location.search)).get('profile');
   if(requested&&requested!==index.activeProfileId)throw Object.assign(new Error('LOCAL_PROFILE_CHANGED'),{code:'LOCAL_PROFILE_CHANGED'});
   if(!index.activeProfileId)return; // Explicit legacy compatibility; no migration.
-  const mode=(globalThis as any).window?.__COOP_PLAY__?'coop':'solo';
+  const mode=scene.appUrl ? scene.appUrl.pathname==='/coop-play.html'?'coop':'solo' : (globalThis as any).window?.__COOP_PLAY__?'coop':'solo';
   let io:any;
   const data=scene.gameData;
   const button=document.createElement('button');button.id='local-profile-return';button.type='button';
@@ -35,17 +36,20 @@ export async function prepareProfileGameData(scene:any) {
   Object.assign(button.style,{position:'fixed',bottom:'8px',left:'8px',zIndex:'1000',padding:'8px 12px',font:'14px system-ui'});
   for(const name of ['keydown','keyup'])button.addEventListener(name,event=>event.stopPropagation());
   let unsaved=false;
+  const goHome=(discard=false)=>scene.navigateApp?scene.navigateApp('/',{discard}):location.assign('/');
   button.addEventListener('click',()=>{
-    if(unsaved||!io){io?.invalidate();location.assign('/');return;}
-    button.disabled=true;void data.closeProfile().then(()=>location.assign('/')).catch(error=>{
+    if(unsaved||!io){io?.invalidate();void goHome(true);return;}
+    button.disabled=true;void data.closeProfile().then(()=>goHome()).catch(error=>{
       unsaved=true;button.disabled=false;button.textContent=i18next.t('localMeta:returnUnsaved');
       scene.ui.setMode(Mode.MESSAGE);scene.ui.showText(localProfileError(error));
     });
   });
   document.body.append(button);
+  scene.events?.once('shutdown',()=>button.remove());
   io=await openGameProfileIO(repository,index.activeProfileId,{mode,onLost:error=>{
     scene.blockInput=true;scene.ui.setMode(Mode.MESSAGE);scene.ui.showText(localProfileError(error));
   }});
+  if(scene.appRetired){io.invalidate();button.remove();throw new Error('LOCAL_PROFILE_CLOSED');}
   data.bindProfileIO(io);
   // Coop already has a bounded, connection-independent exit entry.
   if(mode==='coop')button.remove();

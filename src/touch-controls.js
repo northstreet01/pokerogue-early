@@ -1,18 +1,24 @@
 export const keys = new Map();
 export const keysDown = new Map();
 let lastTouchedId;
+let releaseBinding;
 
 export function initTouchControls(buttonMap, onDesktopPress) {
+  releaseBinding?.();
+  const binding=new window.AbortController(),signal=binding.signal;
   for (const button of document.querySelectorAll('[data-desktop-key]')) {
     button.addEventListener('click', () => {
-      simulateKeyboardInput(button.dataset.desktopKey, buttonMap);
+      simulateKeyboardInput(button.dataset.desktopKey, buttonMap,signal);
       onDesktopPress?.();
-    });
+    },{signal});
   }
   for (const button of document.querySelectorAll('[data-key]')) {
     // @ts-ignore
-    bindKey(button, button.dataset.key, buttonMap);
+    bindKey(button, button.dataset.key, buttonMap,signal);
   }
+  const release=()=>{binding.abort();keys.clear();keysDown.clear();lastTouchedId=undefined;
+    for(const button of document.querySelectorAll('[data-key].active'))button.classList.remove('active');};
+  releaseBinding=release;return release;
 }
 
 export function hasTouchscreen() {
@@ -54,10 +60,10 @@ function simulateKeyboardEvent(eventType, button, buttonMap) {
  * @param {string} key Key to simulate
  * @param {object} buttonMap Map of buttons to key objects
  */
-function simulateKeyboardInput(key, buttonMap) {
+function simulateKeyboardInput(key, buttonMap,signal) {
   simulateKeyboardEvent('keydown', key, buttonMap);
   window.setTimeout(() => {
-    simulateKeyboardEvent('keyup', key, buttonMap);
+    if(!signal?.aborted)simulateKeyboardEvent('keyup', key, buttonMap);
   }, 100);
 }
 
@@ -68,7 +74,7 @@ function simulateKeyboardInput(key, buttonMap) {
  * @param {string} key Key to simulate
  * @param {object} buttonMap Map of buttons to key objects
  */
-function bindKey(node, key, buttonMap) {
+function bindKey(node, key, buttonMap,signal) {
   keys.set(node.id, key);
 
   node.addEventListener('touchstart', event => {
@@ -76,7 +82,7 @@ function bindKey(node, key, buttonMap) {
     simulateKeyboardEvent('keydown', key, buttonMap);
     keysDown.set(event.target.id, node.id);
     node.classList.add('active');
-  });
+  },{signal});
 
   node.addEventListener('touchend', event => {
     event.preventDefault();
@@ -91,9 +97,9 @@ function bindKey(node, key, buttonMap) {
     node.classList.remove('active');
 
     if (lastTouchedId) {
-      document.getElementById(lastTouchedId).classList.remove('active');
+      document.getElementById(lastTouchedId)?.classList.remove('active');
     }
-  });
+  },{signal});
 
   // Inspired by https://github.com/pulsejet/mkxp-web/blob/262a2254b684567311c9f0e135ee29f6e8c3613e/extra/js/dpad.js
   node.addEventListener('touchmove', event => {
@@ -117,5 +123,5 @@ function bindKey(node, key, buttonMap) {
       lastTouchedId = nextTargetId;
       document.getElementById(nextTargetId).classList.add('active');
     }
-  });
+  },{signal});
 }

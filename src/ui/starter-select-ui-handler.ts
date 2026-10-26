@@ -193,7 +193,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     this.pokemonNatureText.setOrigin(0, 0);
     this.starterSelectContainer.add(this.pokemonNatureText);
 
-    this.pokemonCaughtCountLabelText = addTextObject(this.scene, 6, 144, 'Caught/Hatched:', TextStyle.SUMMARY, { fontSize: '56px' });
+    this.pokemonCaughtCountLabelText = addTextObject(this.scene, 6, 144, i18next.t('starterSelectUiHandler:caughtHatched'), TextStyle.SUMMARY, { fontSize: '56px' });
     this.pokemonCaughtCountLabelText.setOrigin(0, 0);
     this.pokemonCaughtCountLabelText.setVisible(false);
     this.starterSelectContainer.add(this.pokemonCaughtCountLabelText);
@@ -830,15 +830,15 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     let cycleInstructionLines = [];
     if (this.speciesStarterDexEntry?.caughtAttr) {
       if (this.canCycleShiny)
-        cycleInstructionLines.push('R: Cycle Shiny');
+        cycleInstructionLines.push('R'+i18next.t('starterSelectUiHandler:cycleShiny'));
       if (this.canCycleForm)
-        cycleInstructionLines.push('F: Cycle Form');
+        cycleInstructionLines.push('F'+i18next.t('starterSelectUiHandler:cycleForm'));
       if (this.canCycleGender)
-        cycleInstructionLines.push('G: Cycle Gender');
+        cycleInstructionLines.push('G'+i18next.t('starterSelectUiHandler:cycleGender'));
       if (this.canCycleAbility)
-        cycleInstructionLines.push('E: Cycle Ability');
+        cycleInstructionLines.push('E'+i18next.t('starterSelectUiHandler:cycleAbility'));
       if (this.canCycleNature)
-        cycleInstructionLines.push('N: Cycle Nature');
+        cycleInstructionLines.push('N'+i18next.t('starterSelectUiHandler:cycleNature'));
     }
 
     if (cycleInstructionLines.length > 2) {

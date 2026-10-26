@@ -558,6 +558,8 @@ export class CoopBattlePresentation {
     const batch = { snapshot, applied, entries, field: [] as (Pokemon | null)[], replay, preserveFieldBinding: !!options.preserveFieldBinding };
     this.pending = batch;
     try {
+      if(this.scene.ensureArenaAssets)await this.scene.ensureArenaAssets(shared.biome);
+      if(signal.aborted)return;
       if (!options.preserveFieldBinding) this.attachField(this.field, shared);
       const assetTasks: Promise<void>[] = [];
       for (const view of shared.pokemon) {

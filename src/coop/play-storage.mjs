@@ -48,7 +48,8 @@ export function createPlayStorage(factory = globalThis.indexedDB) {
           const value = cursor.value;
           if (String(cursor.key).startsWith(origin + '|') && /^[A-Z0-9]{6}$/i.test(value?.roomId)
             && [0, 1].includes(value.seat) && typeof value.token === 'string' && value.token)
-            out.push({ roomId: value.roomId, seat: value.seat, ...(value.profileId ? {profileId:value.profileId} : {}) });
+            out.push({ roomId: value.roomId, seat: value.seat, ...(value.profileId ? {profileId:value.profileId} : {}),
+              ...(value.hostId?{hostId:value.hostId,endpoint:value.endpoint}: {}) });
           cursor.continue();
         };
       });

@@ -64,7 +64,8 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
 
   updatePlayerCount(): void {
     this.playerCountLabel.setText(this.config?.contextLabel ?? i18next.t('earlyBattle:localSolo'));
-    this.playerCountLabel.setY(this.config?.contextLabel ? 80 : 90);
+    this.playerCountLabel.setPosition(this.config?.contextLabel?16:(this.scene.game.canvas.width/6)-2,this.config?.contextLabel?42:90);
+    this.playerCountLabel.setOrigin(this.config?.contextLabel?0:1,0);
   }
 
   show(args: any[]): boolean {
@@ -81,7 +82,7 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
       this.titleLogo?.setVisible(!this.config?.contextLabel);
       this.splashMessage.setVisible(!this.config?.contextLabel);
       this.homeHeading?.setVisible(!!this.config?.contextLabel);
-      this.homeHeading?.setText(this.config?.contextLabel ?? '');
+      this.homeHeading?.setText(this.config?.contextLabel ? '宝可梦肉鸽 · 冒险大厅' : '');
       this.updatePlayerCount();
 
       this.playerCountTimer = setInterval(() => this.updatePlayerCount(), 10000);

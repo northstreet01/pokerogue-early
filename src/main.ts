@@ -80,6 +80,13 @@ Phaser.GameObjects.Rectangle.prototype.setPositionRelative = setPositionRelative
 document.fonts.load('16px emerald').then(() => document.fonts.load('10px pkmnems'));
 
 const game = new Phaser.Game(config);
+let desktopScene=initialScene;
+// Desktop close drains the same profile/connection boundary as in-app exit.
+(globalThis as any).__desktopPrepareClose=async()=>{
+  const saved=await desktopScene.prepareAppLeave?.();
+  if(saved===false)return false;
+  await desktopScene.gameData?.closeProfile();return true;
+};
 game.sound.pauseOnBlur = false;
 let sceneSequence=0;
 const documentId=crypto.randomUUID();let entryStartedAt=0,entryResourceStart=0;
@@ -100,9 +107,9 @@ const navigate=createAppNavigation({base:location.href,
   start:(old:BattleScene,url:URL)=>new Promise<void>((resolve,reject)=>{
     const screen=beginLoading('正在切换冒险模式…',null);
     try {
-      const next=new BattleScene(`adventure-${++sceneSequence}`);next.appUrl=url;
+      const next=new BattleScene(`adventure-${++sceneSequence}`);next.appUrl=url;desktopScene=next;
       next.navigateApp=(value,options)=>navigate(next,value,options);
-      next.appReady=()=>{markSceneReady(url);screen.complete();resolve();};
+      next.appReady=()=>{desktopScene=next;markSceneReady(url);screen.complete();resolve();};
       old.ui?.getHandler?.(Mode.TITLE)?.clear();
       old.appRetired=true;
       game.scene.stop(old.sys.settings.key);game.scene.remove(old.sys.settings.key);

@@ -83,6 +83,40 @@ function uiPhase(t){
  const scene={gameData:{localProfileName:'小智'},events:{once(){}},fadeOutBgm(){},ui:{setMode:async()=>{}},getPlayerField:()=>[]};
  const p=new api.CoopPlayPhase(scene);p.createOverlay();t.after(()=>p.stopSession());return {p,scene};
 }
+
+test('desktop entry waits for explicit host choice and invokes the bounded native host port',async t=>{
+ const calls=[];
+ globalThis.pokerogueDesktop={version:1,startHost:async port=>{
+  calls.push(port);return {ok:true,value:{hostId:hostA,port,endpoint:'http://127.0.0.1:'+port,addresses:['http://192.168.1.8:'+port]}};
+ }};t.after(()=>delete globalThis.pokerogueDesktop);
+ const {p,scene}=uiPhase(t);scene.gameData.loadSystem=async()=>true;
+ p.connect=async endpoint=>calls.push(endpoint);
+ await p.loadProfileAndConnect();assert.deepEqual(calls,[]);
+ assert.ok(document.querySelector('input[aria-label="本机房主端口"]'));
+ const button=[...p.controls.querySelectorAll('button')].find(b=>b.textContent==='启动本机房主');
+ assert.ok(button);button.click();await new Promise(r=>setTimeout(r,0));
+ assert.deepEqual(calls,[18735,'http://127.0.0.1:18735']);assert.equal(p.hostId,hostA);
+});
+
+test('late native host startup cannot reconnect a retired cooperative scene',async t=>{
+ let finish,connections=0;
+ globalThis.pokerogueDesktop={version:1,startHost:()=>new Promise(resolve=>{finish=resolve;})};
+ t.after(()=>delete globalThis.pokerogueDesktop);
+ const {p}=uiPhase(t);p.connect=async()=>connections++;
+ p.renderLobbyControls();[...p.controls.querySelectorAll('button')].find(b=>b.textContent==='启动本机房主').click();
+ await new Promise(r=>setTimeout(r,0));p.stopSession();
+ finish({ok:true,value:{hostId:hostA,port:18735,endpoint:'http://127.0.0.1:18735',addresses:[]}});
+ await new Promise(r=>setTimeout(r,0));assert.equal(connections,0);
+});
+
+test('native port conflict is shown without claiming connection or changing the existing endpoint',async t=>{
+ globalThis.pokerogueDesktop={version:1,startHost:async()=>({ok:false,code:'EADDRINUSE'})};
+ t.after(()=>delete globalThis.pokerogueDesktop);
+ const {p}=uiPhase(t);let connected=false;p.connect=async()=>{connected=true;};const endpoint=p.endpoint;
+ p.renderLobbyControls();[...p.controls.querySelectorAll('button')].find(b=>b.textContent==='启动本机房主').click();
+ await new Promise(r=>setTimeout(r,0));assert.equal(connected,false);assert.equal(p.endpoint,endpoint);
+ assert.match(p.status.textContent,/EADDRINUSE/);
+});
 test('separate waiting room exposes both seats and return, and does not allow preparation or automatic selection before peer arrives',async t=>{
  const {p}=uiPhase(t);p.roomId='ABC123';p.seat=0;p.runId='run';p.playerNames=['小智',null];p.online=[true,false];
  p.latest={revision:1,runId:'run',personal:{decision:{kind:'lobby'}},shared:{ready:[false,false]}};

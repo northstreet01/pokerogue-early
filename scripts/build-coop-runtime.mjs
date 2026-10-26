@@ -5,7 +5,7 @@ import { isBuiltin } from 'node:module';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 // Separate from the browser build: never replace Phaser for / or /coop.html.
-export async function buildCoopRuntime() {
+export async function buildCoopRuntime({ outDir = resolve(root, 'build/coop-runtime') } = {}) {
   return build({
     configFile: false, root, publicDir: false, logLevel: 'warn',
     resolve: { alias: [
@@ -16,7 +16,7 @@ export async function buildCoopRuntime() {
     esbuild: { keepNames: true },
     build: {
       ssr: resolve(root, 'src/server/original-runtime.ts'),
-      outDir: resolve(root, 'build/coop-runtime'), emptyOutDir: true,
+      outDir, emptyOutDir: true,
       minify: false, sourcemap: false,
       rollupOptions: {
         external: isBuiltin,

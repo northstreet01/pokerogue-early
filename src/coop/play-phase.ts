@@ -22,6 +22,7 @@ import { preparationItemTarget } from './preparation-item';
 import { captureModifierState, restoreModifierState } from '../modifier/modifier';
 import i18next from '../i18n';
 import {identifyHost,normalizeEndpoint,hostSocketUrl,hostScope,readHosts,rememberHost,hostConnectionError} from './host-connection.mjs';
+import {desktopHost,startDesktopHost} from '../desktop-host.mjs';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -114,7 +115,13 @@ export default class CoopPlayPhase extends Phase {
     const loaded = await this.scene.gameData.loadSystem();
     if (!this.current(lifecycle)) return;
     if (!loaded && !await this.scene.gameData.saveSystem()) throw new Error('INITIAL_PROFILE_SAVE_FAILED');
-    if (this.current(lifecycle)) this.connect();
+    if (this.current(lifecycle)) {
+      const query=this.scene.appUrl?.searchParams??new URLSearchParams(location.search);
+      if(desktopHost()&&!query.get('host')&&!query.get('resumeRoom')&&!readHosts().selected){
+        this.setStatus('请启动本机房主，或填写地址连接房主。个人档案和资源保存在本机。');
+        this.renderLobbyControls();
+      }else this.connect();
+    }
   }
 
   private current(lifecycle = this.lifecycle) { return !this.disposed && lifecycle === this.lifecycle; }
@@ -265,6 +272,19 @@ export default class CoopPlayPhase extends Phase {
       }));
       this.controls.append(row);
       return;
+    }
+    if(desktopHost()){
+      const local=document.createElement('div');local.className='row';
+      const port=document.createElement('input');port.type='number';port.min='1024';port.max='65535';port.value='18735';
+      port.setAttribute('aria-label','本机房主端口');port.style.width='6em';
+      local.append(port,this.button('启动本机房主',async()=>{
+        const lifecycle=this.lifecycle;
+        const host=await startDesktopHost(Number(port.value));
+        if(!this.current(lifecycle))return;
+        this.hostId=host.hostId;await this.connect(host.endpoint);
+        if(!this.disposed)this.setStatus('房主已启动。端口 '+host.port+'，队友地址 '+(host.addresses.join(' 或 ')||host.endpoint)+'。详情见程序菜单。');
+      },true));
+      this.controls.append(local);
     }
     const hostRow=document.createElement('div');hostRow.className='row host-address';
     const address=document.createElement('input');address.id='coop-host-address';address.setAttribute('aria-label','房主地址');

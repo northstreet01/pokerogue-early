@@ -1,10 +1,12 @@
 # Windows局域网桌面版（联机准备与信息展示）
 
-当前手测包：`build/coop-ready/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe`。整个目录一起保留。前两批 `build/desktop/release`、`build/desktop-storage/release` 保留为历史包；升级后统一使用当前包，避免不同版本分开保存进度。
+当前手测包：`build/input-solo-fix/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe`。整个目录一起保留。历史包 `build/desktop/release`、`build/desktop-storage/release`、`build/coop-ready/release` 保留；升级后统一使用当前包，避免不同版本分开保存进度。
+
+10月27日修复：房间码输入保留内容和焦点，显示0/6计数，支持粘贴时清除空白及转换全角；单人选队后淡出当前场景音乐，避免旧音轨导致开局中断；存档槽支持鼠标点击。手测时可新建可丢弃档案，选队后鼠标选择空槽，确认第一波出现并可行动；合作页输入完整六位房间码，计数应为6/6。
 
 选队页点击“完成选队”后回到房间，此时只是保存队伍。查看自己与队友两排精灵后，各自点击“提交准备”；全员准备并加载完成才开局。已准备时先取消准备才能重新选队。局内本人道具使用图标及数量展示，可悬停、键盘聚焦或点击查看效果、携带者及剩余次数；队友鼠标暂未接入。
 
-本批开发输出设置为 `$env:POKEROGUE_DESKTOP_OUTPUT='build/coop-ready'`，再执行 `npm run build:desktop`、`npm run package:desktop`。测试说明见 `docs/coop-ready-ui-review.md`。
+本批开发输出设置为 `$env:POKEROGUE_DESKTOP_OUTPUT='build/input-solo-fix'`，再执行 `npm run build:desktop`、`npm run package:desktop`。本轮测试说明见 `docs/input-solo-fix-review.md`，准备页批历史说明见 `docs/coop-ready-ui-review.md`。
 
 解压完整发行目录，双击PokeRogue-LAN.exe；必须保留旁边的resources、DLL及其他文件，不能只复制EXE。无需安装Node或开启外部浏览器。素材随程序本地读取；程序启动不会自动对LAN开放房主服务。
 

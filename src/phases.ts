@@ -466,7 +466,9 @@ export class SelectStarterPhase extends Phase {
           loadPokemonAssets.push(starterPokemon.loadAssets());
         });
         Promise.all(loadPokemonAssets).then(() => {
-          SoundFade.fadeOut(this.scene, this.scene.sound.get('menu'), 500, true);
+          // The shared sound manager may still contain a stopped menu sound
+          // from the home scene. Fade only this scene's current BGM.
+          this.scene.fadeOutBgm(500, true);
           this.scene.time.delayedCall(500, () => this.scene.playBgm());
           if (this.scene.gameMode.isClassic)
             this.scene.gameData.gameStats.classicSessionsPlayed++;

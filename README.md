@@ -2,7 +2,7 @@
 
 基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的 early 版本，保留原版单人玩法，开发玩家自己托管房间的 LAN Host-Client 双人合作。资源与个人存档保存在各自设备，房主电脑运行原规则 Worker 并保存合作冒险，不依赖开发者服务器计算对局。
 
-更新日期：2026-10-26。当前已交付 Windows x64 测试程序、本地 SQLite 存档和原版联机可玩流程，仍处于开发与手测阶段；不是全部原版功能或所有设备环境均已验收。
+更新日期：2026-10-27。当前已交付 Windows x64 测试程序、本地 SQLite 存档和原版联机可玩流程，仍处于开发与手测阶段；不是全部原版功能或所有设备环境均已验收。
 
 ## 已实现与后续范围
 
@@ -23,7 +23,7 @@
 本机最新产物：
 
 ```text
-build/coop-ready/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe
+build/input-solo-fix/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe
 ```
 
 双击 EXE，必须保留整个发行文件夹，不能只复制 EXE。`build/` 不纳入 Git；拉取源码后需按下方步骤构建，不会随源码推送取得二进制程序。
@@ -58,12 +58,12 @@ Windows 正常数据目录为 `%APPDATA%\PokeRogue-LAN`，程序菜单可以打�
 ```powershell
 npm ci --ignore-scripts
 node node_modules/electron/install.js
-$env:POKEROGUE_DESKTOP_OUTPUT='build/coop-ready'
+$env:POKEROGUE_DESKTOP_OUTPUT='build/input-solo-fix'
 npm run build:desktop
 npm run package:desktop
 ```
 
-输出包含独立原 Worker、前端与完整素材，不覆盖原 `dist` 或 `build/coop-runtime`。开发运行该产物可执行 `.\node_modules\electron\dist\electron.exe build/coop-ready/app`。省略输出环境变量时，构建／封装默认使用 `build/desktop`；`npm run start:desktop` 也固定运行该默认目录。
+输出包含独立原 Worker、前端与完整素材，不覆盖原 `dist` 或 `build/coop-runtime`。开发运行该产物可执行 `.\node_modules\electron\dist\electron.exe build/input-solo-fix/app`。省略输出环境变量时，构建／封装默认使用 `build/desktop`；`npm run start:desktop` 也固定运行该默认目录。
 
 ## 浏览器开发入口
 
@@ -84,6 +84,8 @@ npm run start:local
 `start:local` 显式启用正式 profile 大厅，默认监听本机 8020；需要 LAN 监听时执行 `npm run start:local -- --host`。与 Vite 开发服务择一运行，不能只上传静态 `dist` 代替 Node 服务。旧实验说明见 [COOP.md](COOP.md)，不代表正式原规则链路的当前状态。
 
 ## 验证与开发记录
+
+10 月 27 日修复房间码输入被大厅刷新打断、单人选队并确认存档槽后开局中断，以及存档槽不能鼠标点击。相关 19 项回归、类型及独立构建通过；隔离 Electron 中验证了鼠标选槽、第一波行动、存档读取和六位房间码输入。详见 [本轮修复记录](docs/input-solo-fix-review.md)。
 
 最近准备页／展示批相关测试 130/130、显示收尾复测 3/3、正式协议与原 profile 大厅 23/23 通过；类型、独立 Worker、最终前端、封装及 EXE 合成流程检查通过。这些是分开的相关验证，不相加为一次完整回归。程序 QA 使用临时合成资料、协议队友和隐藏窗口专用帧驱动；道具截图使用明确的展示夹具，不等于真实掉落／授予完成。
 

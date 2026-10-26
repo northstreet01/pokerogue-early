@@ -84,6 +84,33 @@ function uiPhase(t){
  const p=new api.CoopPlayPhase(scene);p.createOverlay();t.after(()=>p.stopSession());return {p,scene};
 }
 
+test('room code accepts sixth character across lobby refresh, keeps focus, and isolates game keys',t=>{
+ const {p}=uiPhase(t);p.renderLobbyControls();
+ let input=document.querySelector('#coop-room-code');input.focus();input.value='ABC12';
+ input.dispatchEvent(new window.Event('input',{bubbles:true}));input.setSelectionRange(5,5);
+ p.renderLobbyControls();input=document.querySelector('#coop-room-code');
+ assert.equal(input.value,'ABC12');assert.equal(document.activeElement,input);assert.equal(input.selectionStart,5);
+ input.value+='3';input.dispatchEvent(new window.Event('input',{bubbles:true}));
+ assert.equal(input.value,'ABC123');assert.equal(document.querySelector('#coop-room-code-count').textContent,'6/6');
+ let leaked=0;window.addEventListener('keydown',()=>leaked++);
+ input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'c',bubbles:true}));assert.equal(leaked,0);
+ input.value='  ａｂｃ１２３\n';input.dispatchEvent(new window.Event('input',{bubbles:true}));assert.equal(input.value,'ABC123');
+});
+
+test('solo start fades the current scene BGM rather than a stale shared menu sound',async()=>{
+ let choose,slot,starts=0,ends=0,fades=0;const party=[];
+ const pokemon={tryPopulateMoveset(){},setVisible(){},loadAssets:async()=>{}};
+ const scene={playBgm(){},ui:{clearText(){},setMode(mode,callback){if(mode===api.Mode.STARTER_SELECT)choose=callback;else if(mode===api.Mode.SAVE_SLOT)slot=arguments[2];}},
+  gameData:{getSpeciesDexAttrProps:()=>({formIndex:0,abilityIndex:0}),dexData:{1:{ivs:[1,2,3,4,5,6]}},gameStats:{classicSessionsPlayed:0}},
+  getParty:()=>party,gameMode:{getStartingLevel:()=>5,isClassic:true},addPlayerPokemon:()=>pokemon,
+  sound:{get(){throw Error('stale shared menu lookup');}},fadeOutBgm(duration,destroy){assert.equal(duration,500);assert.equal(destroy,true);fades++;},
+  time:{delayedCall(){}},newBattle(){starts++;},shiftPhase(){ends++;}};
+ const phase=new api.SelectStarterPhase(scene);phase.start();
+ choose([{species:{speciesId:1,forms:[],malePercent:50},dexAttr:1n,nature:0}]);slot(0);
+ await new Promise(r=>setTimeout(r,0));
+ assert.equal(fades,1);assert.equal(starts,1);assert.equal(ends,1);assert.deepEqual(party,[pokemon]);
+});
+
 test('desktop entry waits for explicit host choice and invokes the bounded native host port',async t=>{
  const calls=[];
  globalThis.pokerogueDesktop={version:1,startHost:async port=>{

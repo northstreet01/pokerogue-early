@@ -89,6 +89,8 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
     let error = false;
 
     if (button === Button.ACTION || button === Button.CANCEL) {
+      if (!this.saveSlotSelectCallback) return false;
+      if (button === Button.ACTION && !this.sessionSlots[this.cursor]?.loaded) return false;
       const originalCallback = this.saveSlotSelectCallback;
       if (button === Button.ACTION) {
         if (this.uiMode === SaveSlotUiMode.LOAD && !this.sessionSlots[this.cursor].hasData)
@@ -152,6 +154,7 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
       this.scene.add.existing(sessionSlot);
       this.sessionSlotsContainer.add(sessionSlot);
       this.sessionSlots.push(sessionSlot);
+      this.bindPointer(sessionSlot.slotWindow, () => { this.setCursor(s); });
     }
   }
 
@@ -205,6 +208,8 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
 class SessionSlot extends Phaser.GameObjects.Container {
   public slotId: integer;
   public hasData: boolean;
+  public loaded = false;
+  public slotWindow: Phaser.GameObjects.NineSlice;
   private loadingLabel: Phaser.GameObjects.Text;
 
   constructor(scene: BattleScene, slotId: integer) {
@@ -218,6 +223,7 @@ class SessionSlot extends Phaser.GameObjects.Container {
 
   setup() {
     const slotWindow = addWindow(this.scene, 0, 0, 304, 52);
+    this.slotWindow = slotWindow;
     this.add(slotWindow);
 
     this.loadingLabel = addTextObject(this.scene, 152, 26, i18next.t("saveSlotSelectUiHandler:loading"), TextStyle.WINDOW);
@@ -285,11 +291,13 @@ class SessionSlot extends Phaser.GameObjects.Container {
       this.scene.gameData.getSession(this.slotId).then(async sessionData => {
         if (!sessionData) {
           this.loadingLabel.setText(i18next.t("saveSlotSelectUiHandler:empty"));
+          this.loaded = true;
           resolve(false);
           return;
         }
         this.hasData = true;
         await this.setupWithData(sessionData);
+        this.loaded = true;
         resolve(true);
       });
     });

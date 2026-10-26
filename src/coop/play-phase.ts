@@ -36,6 +36,7 @@ export default class CoopPlayPhase extends Phase {
   private roomLine!: HTMLDivElement;
   private presenceLine: HTMLDivElement | null = null;
   private controls!: HTMLDivElement;
+  private roomCodeDraft = '';
   private reserveLine!: HTMLDivElement;
   private modifierLine: HTMLDivElement | null = null;
   private releaseTeamParty: (() => void) | null = null;
@@ -240,6 +241,10 @@ export default class CoopPlayPhase extends Phase {
   }
   private renderLobbyControls() {
     if (this.disposed) return;
+    const previous = this.controls.querySelector<HTMLInputElement>('#coop-room-code');
+    const focused = previous === document.activeElement;
+    const caret = focused ? previous?.selectionStart : null;
+    if (previous) this.roomCodeDraft = previous.value;
     this.controls.replaceChildren();
     const inLobby=!this.latest||this.latest.personal.decision.kind==='lobby';
     this.overlay?.classList.toggle('room-lobby',inLobby);
@@ -297,12 +302,25 @@ export default class CoopPlayPhase extends Phase {
     hostRow.append(address,this.button('连接房主',async()=>{this.hostId=null;await this.connect(normalizeEndpoint(address.value));},true));
     this.controls.append(hostRow);
     const row = document.createElement('div'); row.className = 'row';
-    const input = document.createElement('input'); input.placeholder = '房间码'; input.maxLength = 6;
-    input.style.width = '8em'; input.id = 'coop-room-code';
+    const input = document.createElement('input'); input.placeholder = '6位房间码';
+    input.style.width = '12em'; input.id = 'coop-room-code';
+    input.setAttribute('aria-label', '6位房间码');
+    input.autocomplete = 'off'; input.spellcheck = false;
+    const count = document.createElement('span'); count.id = 'coop-room-code-count';
+    input.setAttribute('aria-describedby', count.id);
+    const update = () => {
+      // Normalize before limiting length: pasted whitespace must not consume a slot.
+      input.value = input.value.normalize('NFKC').replace(/\s/g, '').toUpperCase().slice(0, 6);
+      this.roomCodeDraft = input.value; count.textContent = `${input.value.length}/6`;
+    };
+    input.value = this.roomCodeDraft; update();
+    input.addEventListener('input', update);
+    for (const name of ['keydown', 'keypress', 'keyup']) input.addEventListener(name, event => event.stopPropagation());
     const join=this.button('加入房间', () => this.joinRoom(input.value.trim().toUpperCase())),create=this.button('创建房间', () => this.createRoom(), true);
     join.disabled=create.disabled=!this.versions||this.joining;
-    row.append(input,join,create);
+    row.append(input,count,join,create);
     this.controls.append(row);
+    if (focused) { input.focus(); if (caret !== null) input.setSelectionRange(caret, caret); }
   }
 
   private async connect(endpoint?:string) {

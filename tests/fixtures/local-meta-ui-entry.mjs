@@ -2,7 +2,7 @@ export * from './local-meta-original-entry.mjs';
 export {createOriginalRuntime,constructOriginalPokemon,withStarterRandomContext,describeOriginalCatalogs} from '../../src/server/original-runtime';
 export {withOriginalRules} from '../../server/original-random-context.mjs';
 export {HomePhase,entryPhases} from '../../src/home-phase';
-export {LoginPhase,EncounterPhase,GameOverPhase} from '../../src/phases';
+export {LoginPhase,SelectStarterPhase,EncounterPhase,GameOverPhase} from '../../src/phases';
 export {Mode} from '../../src/ui/ui';
 export {default as CoopPlayPhase} from '../../src/coop/play-phase';
 export {profileRepository,prepareProfileGameData} from '../../src/local-meta/services';

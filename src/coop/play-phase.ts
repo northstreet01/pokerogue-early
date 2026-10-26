@@ -1360,6 +1360,7 @@ export default class CoopPlayPhase extends Phase {
   private async openStarterSelect() {
     if (this.disposed || this.starterOpen || !this.inputReady) return;
     this.overlay?.classList.add('selecting-team');
+    this.scene.scale?.getParentBounds?.();
     this.scene.scale?.refresh?.();
     const lifecycle = this.lifecycle;
     this.starterOpen = true;
@@ -1401,6 +1402,7 @@ export default class CoopPlayPhase extends Phase {
 
   private closeStarterSelect() {
     this.overlay?.classList.remove('selecting-team');
+    this.scene.scale?.getParentBounds?.();
     this.scene.scale?.refresh?.();
     this.starterOpen = false; this.starterMenuEpoch++;
     const lifecycle = this.lifecycle;

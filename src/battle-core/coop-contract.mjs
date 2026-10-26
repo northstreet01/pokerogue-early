@@ -46,6 +46,7 @@ const fields = {
   stateAck: { ...state, connectionEpoch: string, sharedHash: digest, personalHash: digest },
   grantAck: { ...identity, connectionEpoch: string, grantIds: v => Array.isArray(v) && v.length <= 100 && v.every(string) },
   requestSnapshot: { ...identity, knownRevision: integer, reason: string },
+  recoverDecision: { ...state, connectionEpoch: string },
   welcome: { ...versions, roomId: v => v === null || string(v), seat: v => v === null || seat(v), connectionEpoch: v => v === null || string(v), resumeToken: v => v === null || string(v) },
   roomPresence: {...identity, players:v=>Array.isArray(v)&&v.length===2&&v.every(name=>name===null||string(name)&&name.length<=24)},
   actionReceipt: { ...state, actionId: string, accepted: v => typeof v === 'boolean', code: string },
@@ -53,7 +54,7 @@ const fields = {
   syncStatus: { ...identity, revision: integer, online: v => Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'boolean'), acked: v => Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'boolean'), submitted: v => Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'boolean'), blocked: v => typeof v === 'boolean', reason: string },
   error: { code: string }
 };
-const clientTypes = new Set(['hello','createRoom','joinRoom','resumeSeat','submitAction','stateAck','grantAck','requestSnapshot']);
+const clientTypes = new Set(['hello','createRoom','joinRoom','resumeSeat','submitAction','stateAck','grantAck','requestSnapshot','recoverDecision']);
 export function validateMessage(message, direction = 'client') {
   canonical(message);
   requireContract(object(message) && typeof message.type === 'string' && Object.hasOwn(fields, message.type));

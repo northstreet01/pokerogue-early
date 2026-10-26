@@ -31,6 +31,30 @@ async function prep(seed) {
   throw new Error('PREPARATION_NOT_REACHED');
 }
 
+test('real Worker can buy Revive then Potion for the same fainted Pokemon', async () => {
+  const { h, c } = await prep('potion-d');
+  try {
+    c.players[0].money = 100000;
+    const target = c.roster.entries.find(entry => entry.owner === 0 && entry.group === 'party');
+    const pokemon = api.restorePokemonState(target.pokemon);
+    pokemon.hp = 0;
+    pokemon.status = new api.Status(api.StatusEffect.FAINT);
+    target.pokemon = api.capturePokemonState(pokemon);
+    let checkpoint = c;
+    for (const catalogId of ['REVIVE', 'POTION']) {
+      const option = checkpoint.decision.players[0].shop.find(option => option.type.catalogId === catalogId);
+      assert.ok(option, catalogId);
+      const action = { kind: 'preparation', operation: 'buy', optionId: option.id,
+        pokemonId: pokemon.id, moveIndex: null, fusionId: null };
+      await h.request('native-validate-preparation', { checkpoint, seat: 0, action });
+      checkpoint = (await h.request('native-prepare-action', { checkpoint, seat: 0, action })).checkpoint;
+      const after = api.restorePokemonState(checkpoint.roster.entries.find(entry => entry.pokemon.fields.id === pokemon.id).pokemon);
+      assert.ok(after.hp > 0);
+      assert.equal(after.status, undefined);
+    }
+  } finally { await h.close(); }
+});
+
 test('real Worker grants an original Pokeball reward once with unchanged peer/RNG', async t => {
   const { h, c } = await prep('mvp-native-entry');
   try {

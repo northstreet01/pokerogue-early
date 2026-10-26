@@ -496,6 +496,23 @@ test('DOM exit remains outside replaced controls with input blocked and hung men
   assert.equal(document.getElementById('coop-play-overlay'), null);
 });
 
+test('emergency reload is outside stalled controls and resumes the exact host seat without exposing its token', async () => {
+  const {p}=phase();exitEnvironment(p);const navigations=[];
+  p.scene.navigateApp=async url=>{navigations.push(url);};
+  p.createOverlay();p.roomId='ABCDEF';p.seat=1;p.token='private-synthetic-token';p.hostId='owned-host';p.endpoint='http://127.0.0.1:8034';
+  p.messageChain=new Promise(()=>{});p.controls.replaceChildren();p.scene.ui.setMode=()=>new Promise(()=>{});
+  const button=document.getElementById('coop-reload-checkpoint');
+  assert.ok(button);assert.ok(!p.controls.contains(button));
+  button.click();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(navigations.length,1);
+  const url=new URL(navigations[0],origin);
+  assert.equal(url.pathname,'/coop-play.html');assert.equal(url.searchParams.get('resumeRoom'),'ABCDEF');
+  assert.equal(url.searchParams.get('resumeSeat'),'1');assert.equal(url.searchParams.get('hostId'),'owned-host');
+  assert.equal(url.searchParams.get('host'),'http://127.0.0.1:8034');
+  assert.ok(!navigations[0].includes(p.token));
+  p.stopSession();
+});
+
 test('return notice offers explicit fresh cooperative entry, explains failed persistence and preserves the solo page', () => {
   for (const result of ['saved', 'limited', 'defeat', 'victory', 'unknown', '']) {
     const dom = new JSDOM('<body><div id="app">original solo</div></body>', { url: `${origin}/?coopExit=${result}` });

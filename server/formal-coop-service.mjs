@@ -29,6 +29,7 @@ export class FormalRoomStore {
 export async function attachFormalCoopServer(httpServer, { adapter = null, store = new FormalRoomStore(), heartbeatMs = 15000, allowedOrigins=[] } = {}) {
   const versions = { protocolVersion: PROTOCOL_VERSION, checkpointVersion: CHECKPOINT_VERSION, rulesVersion: adapter?.rulesVersion ?? 'early-unavailable', contentHash: adapter?.contentHash ?? 'unavailable' };
   const rooms = new Map(), connections = new Map(), queues = new Map(), confirmations = new Map(), faults = new Map();
+  const recoveryVotes = new Map();
   // Load without rewriting incompatible saves. Compatibility is checked on resume.
   for (const room of await store.load()) {
     check(room && /^[A-F0-9]{6}$/.test(room.roomId) && !rooms.has(room.roomId), 'INVALID_ROOM');
@@ -51,7 +52,7 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
   const invalidate = room => [0, 1].forEach(seat => confirmations.delete(key(room.roomId, seat)));
   const send = (socket, message) => { validateMessage(message, 'server'); if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
   function status(room) {
-    const message = { type: 'syncStatus', roomId: room.roomId, runId: room.runId, revision: room.revision, online: online(room), acked: acked(room), submitted: [0, 1].map(seat => Object.hasOwn(room.inputs, seat)), blocked: blocked(room), reason: faults.get(room.roomId) ?? (!online(room).every(Boolean) ? 'DISCONNECTED' : blocked(room) ? 'WAITING_ACK' : 'READY') };
+    const message = { type: 'syncStatus', roomId: room.roomId, runId: room.runId, revision: room.revision, online: online(room), acked: acked(room), submitted: [0, 1].map(seat => Object.hasOwn(room.inputs, seat)), blocked: blocked(room), reason: recoveryVotes.has(room.roomId) ? 'RECOVERY_PENDING' : faults.get(room.roomId) ?? (!online(room).every(Boolean) ? 'DISCONNECTED' : blocked(room) ? 'WAITING_ACK' : 'READY') };
     for (const seat of [0, 1]) { const socket = connections.get(key(room.roomId, seat)); if (socket) {
       send(socket,{type:'roomPresence',roomId:room.roomId,runId:room.runId,players:room.seats.map(player=>player?.name??null)});
       send(socket, message);
@@ -66,6 +67,7 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
   async function commitTransition(room) {
     try { await store.save(copy(room)); }
     catch {
+      recoveryVotes.delete(room.roomId);
       faults.set(room.roomId, 'STORAGE_FAILED'); invalidate(room);
       if (rooms.has(room.roomId)) status(rooms.get(room.roomId));
       throw new ContractError('STORAGE_FAILED');
@@ -112,6 +114,7 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
     status(room);
   }
   function bind(socket, room, seat) {
+    recoveryVotes.delete(room.roomId);
     const old = connections.get(key(room.roomId, seat));
     socket.roomId = room.roomId; socket.seat = seat; socket.epoch = randomUUID();
     connections.set(key(room.roomId, seat), socket); invalidate(room);
@@ -184,7 +187,24 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
       }
       check(socket.roomId === room.roomId && current(socket), 'CONNECTION_REPLACED'); check(message.runId === room.runId, 'RUN_MISMATCH');
       const seat = socket.seat;
+      if (message.type === 'recoverDecision') {
+        check(message.connectionEpoch === socket.epoch, 'CONNECTION_REPLACED');
+        check(message.revision === room.revision && message.decisionId === room.decisionId, 'STALE_DECISION');
+        check(faults.get(room.roomId) === 'RUNNER_FAILED', 'RECOVERY_NOT_AVAILABLE');
+        check(online(room).every(Boolean), 'SYNC_BLOCKED');
+        // Only abandon inputs whose candidate never committed. Both current
+        // seats must agree; successful purchases, RNG and grants stay intact.
+        const votes = recoveryVotes.get(room.roomId) ?? new Set();
+        votes.add(seat); recoveryVotes.set(room.roomId, votes);
+        if (votes.size < 2) { status(room); return; }
+        await context(room);
+        room.inputs = {}; room.events = []; room.revision++;
+        await commitTransition(room);
+        recoveryVotes.delete(room.roomId); faults.delete(room.roomId);
+        invalidate(room); await publish(room); return;
+      }
       if (message.type === 'requestSnapshot') {
+        recoveryVotes.delete(room.roomId);
         if (faults.has(room.roomId)) { await context(room); await commitTransition(room); faults.delete(room.roomId); invalidate(room); }
         // A resync request withdraws previous confirmations even at the same revision.
         invalidate(room);
@@ -250,6 +270,7 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
     socket.on('close', () => {
       if (connections.get(key(socket.roomId, socket.seat)) !== socket) return;
       connections.delete(key(socket.roomId, socket.seat));
+      recoveryVotes.delete(socket.roomId);
       const room = rooms.get(socket.roomId); if (room) { invalidate(room); status(room); }
     });
   });

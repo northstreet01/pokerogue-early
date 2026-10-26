@@ -192,6 +192,10 @@ export default class CoopPlayPhase extends Phase {
     const note = document.createElement('span'); note.id = 'coop-exit-note'; note.className = 'status';
     note.textContent = '仅本人离开，房间保留';
     this.panel.append(exit, note);
+    const recover = this.button('卡住脱离／重载存档', () => this.reloadCheckpoint());
+    recover.id = 'coop-reload-checkpoint';
+    recover.title = '房主在每个可操作节点自动保存；重载最近已保存状态，已提交行动保留，不回滚已完成购买';
+    this.panel.append(recover);
     this.overlay.append(this.panel);
     document.body.append(this.overlay);
     this.renderLobbyControls();
@@ -201,6 +205,21 @@ export default class CoopPlayPhase extends Phase {
     if (this.disposed) return;
     this.status.textContent = text;
     this.status.className = error ? 'error' : 'status';
+  }
+  private async reloadCheckpoint() {
+    if (!this.roomId || this.seat === null || !this.token) {
+      this.setStatus('尚未加入房间，没有可恢复的联机存档', true); return;
+    }
+    const url = new URL('/coop-play.html', location.origin);
+    url.searchParams.set('resumeRoom', this.roomId);
+    url.searchParams.set('resumeSeat', String(this.seat));
+    url.searchParams.set('host', this.endpoint);
+    if (this.hostId) url.searchParams.set('hostId', this.hostId);
+    else if (this.origin === location.origin) url.searchParams.set('legacy', '1');
+    // Navigation stops old rendering/network queues with the bounded exit port.
+    // Resume credentials stay in IDB; never put the private token in the URL.
+    if (this.scene.navigateApp) await this.scene.navigateApp(url.pathname + url.search);
+    else location.assign(url.pathname + url.search);
   }
   private button(label: string, handler: () => void, primary = false) {
     const button = document.createElement('button');
@@ -373,10 +392,15 @@ export default class CoopPlayPhase extends Phase {
             if (this.latest.personal.decision.kind !== 'lobby') await this.scene.ui.setMode(Mode.MESSAGE);
           } else await this.openDecisionInput();
           if (!current()) return;
-          if (['RUNNER_FAILED', 'STORAGE_FAILED'].includes(message.reason)) {
-            this.setStatus(`结算已暂停：${message.reason}，已提交行动仍保留`, true);
+          if (['RUNNER_FAILED', 'STORAGE_FAILED', 'RECOVERY_PENDING'].includes(message.reason)) {
+            this.setStatus(message.reason === 'RECOVERY_PENDING'
+              ? '等待双方确认撤回未结算行动；已完成的购买与战斗结果保留'
+              : `结算已暂停：${message.reason}，已提交行动仍保留`, true);
             this.controls.replaceChildren(this.button('重新同步', () => this.send({ type: 'requestSnapshot',
               roomId: this.roomId, runId: this.runId, knownRevision: this.latest.revision, reason: 'USER_RETRY' })));
+            if (message.reason !== 'STORAGE_FAILED') this.controls.append(this.button('确认撤回失败行动（需双方）', () => this.send({
+              type: 'recoverDecision', roomId: this.roomId, runId: this.runId,
+              revision: this.latest.revision, decisionId: this.latest.decisionId, connectionEpoch: this.epoch })));
           } else if (message.reason === 'DISCONNECTED') this.setStatus(this.playerNames.every(Boolean)?'队友连接已断开，等待恢复…':'等待队友加入房间…');
           if (this.latest.personal.decision.kind === 'lobby' && this.inputReady && this.lastProfile && !this.actionId)
             this.setStatus(this.latest.shared.ready?.[this.seat!] ? '已准备，等待队友…' : '选队已保留，可以提交准备');

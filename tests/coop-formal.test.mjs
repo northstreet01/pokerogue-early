@@ -204,6 +204,55 @@ test('transition write failure preserves durable inputs and a restart settles ex
   } finally { await f.close(); }
 });
 
+const recover = s => ({ type:'recoverDecision',roomId:s.roomId,runId:s.runId,revision:s.revision,
+  decisionId:s.decisionId,connectionEpoch:s.connectionEpoch });
+test('both authenticated seats can abandon only an uncommitted failed candidate; old receipts cannot replay', async () => {
+  let fail = true;
+  const f = await server({adapter:{...adapter,advanceToDecision(...args){if(fail)throw Error('stuck');return adapter.advanceToDecision(...args);}}});
+  try {
+    const p=await start(f);await ready(p);
+    p.a.send(recover(p.sa));assert.equal((await p.a.wait(m=>m.type==='error')).code,'RECOVERY_NOT_AVAILABLE');
+    const first=action(p.sa,'stuck-a'),second=action(p.sb,'stuck-b');
+    await receipt(p.a,first);await receipt(p.b,second);
+    await p.b.wait(m=>m.type==='error'&&m.code==='RUNNER_FAILED');
+    const before=copy(f.store.data.get(p.ia.roomId));
+    p.a.send({...recover(p.sa),connectionEpoch:'old'});
+    assert.equal((await p.a.wait(m=>m.type==='error')).code,'CONNECTION_REPLACED');
+    p.a.send(recover(p.sa));await p.a.wait(m=>m.type==='syncStatus'&&m.reason==='RECOVERY_PENDING');
+    p.a.send(recover(p.sa));await p.a.wait(m=>m.type==='syncStatus'&&m.reason==='RECOVERY_PENDING');
+    assert.deepEqual(f.store.data.get(p.ia.roomId),before,'one seat cannot reset the other input');
+    p.b.send(recover(p.sb));
+    const sa=await p.a.wait(m=>m.type==='snapshot'&&m.revision===1),sb=await p.b.wait(m=>m.type==='snapshot'&&m.revision===1);
+    assert.deepEqual(f.rooms.get(p.ia.roomId).checkpoint,before.checkpoint);
+    assert.deepEqual(f.rooms.get(p.ia.roomId).inputs,{});
+    assert.equal(sa.sharedHash,p.sa.sharedHash);assert.equal(sa.personalHash,p.sa.personalHash);
+    assert.deepEqual(f.rooms.get(p.ia.roomId).receipts,before.receipts);
+    assert.deepEqual(f.rooms.get(p.ia.roomId).grants,before.grants);
+    await ready({a:p.a,b:p.b,sa,sb});
+    assert.equal((await receipt(p.a,first)).revision,0);
+    assert.deepEqual(f.rooms.get(p.ia.roomId).inputs,{});
+    p.a.send(recover(p.sa));assert.equal((await p.a.wait(m=>m.type==='error')).code,'STALE_DECISION');
+    fail=false;
+    await receipt(p.a,action(sa,'new-a'));await receipt(p.b,action(sb,'new-b'));
+    assert.equal((await p.a.wait(m=>m.type==='snapshot'&&m.revision===2)).shared.total,2);
+  }finally{await f.close();}
+});
+
+test('recovery refuses storage faults and a failed reset save keeps the last durable candidate',async()=>{
+  const store=memoryStore();
+  const f=await server({store,adapter:{...adapter,advanceToDecision(){throw Error('stuck');}}});
+  try{
+    const p=await start(f);await ready(p);await receipt(p.a,action(p.sa,'a'));await receipt(p.b,action(p.sb,'b'));
+    await p.b.wait(m=>m.type==='error'&&m.code==='RUNNER_FAILED');
+    const before=copy(store.data.get(p.ia.roomId));
+    p.a.send(recover(p.sa));await p.a.wait(m=>m.type==='syncStatus'&&m.reason==='RECOVERY_PENDING');
+    store.fail=true;p.b.send(recover(p.sb));
+    await p.b.wait(m=>m.type==='error'&&m.code==='STORAGE_FAILED');
+    assert.deepEqual(store.data.get(p.ia.roomId),before);assert.deepEqual(f.rooms.get(p.ia.roomId),before);
+    p.a.send(recover(p.sa));assert.equal((await p.a.wait(m=>m.type==='error')).code,'RECOVERY_NOT_AVAILABLE');
+  }finally{await f.close();}
+});
+
 test('connection invalidation during an awaited local transaction suppresses every old ACK', async () => {
   const f = await server();
   try {

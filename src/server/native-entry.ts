@@ -306,6 +306,11 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.load = { atlas() {}, image() {}, spritesheet() {}, audio() {},
     isLoading() { return false; }, start() {},
     once(event, fn) { if (event === 'complete') schedule(fn); } };
+  // Original asset helpers now inspect the browser cache before loading.
+  // The authority has no renderer/cache: keep using its bounded no-op loader,
+  // including trainer encounters reached after finishing preparation.
+  root.textures = { exists: () => false };
+  root.cache = { audio: { exists: () => false } };
   root.anims = { generateFrameNames() { return []; }, create() {} };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
   root.validateAchv = (achv) => { intents.push({ kind: 'achievement-check', id: achv.id }); return false; };

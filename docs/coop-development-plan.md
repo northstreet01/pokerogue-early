@@ -1,3 +1,11 @@
+<!-- COOP-RECOVERY final 2026-10-26 -->
+用户8034手测“复活后伤药RUNNER_FAILED”本轮已修，最终源码／测试5f9a1fab6cd58e074976f60a3162ed02fbc73d2a。只读故障房间副本复现：伤药本身成功，最后一项实际为免费POTION；整备结束进入第5波训练家时原loadAtlas读不存在的textures.exists。native绑定补空纹理／音频缓存端口，复用原loader，不改规则。真实Worker重放同一副本到wave5／wait-actions；诊断未改写原房间。
+正式联机本已每个安全决策节点原子自动保存。本轮新增常驻“卡住脱离／重载存档”，同Game停止旧队列后恢复精确host／profile／run／seat，token不进URL；运行器故障另提供双方确认撤回未成功结算输入。保留原检查点、已完成购买、RNG、回执和grants，revision递增并重新ACK，旧actionId不重放；存储故障拒绝强清。不是任意回档，也未改单人存档频率。
+独立四文件176/176退出0，154803.3101ms；另双WS协议14/14退出0，515.4061ms；最终类型／Worker／生产均0（47.46s）。真实浏览器隔离8035新房间D648C0重载回同房同席，单canvas、同documentId、660.9ms／0新增素材条目；没有手动跑完整战斗故障脱离或真实两设备／声音。失败日志和沙箱回环EACCES均保留。不拼接上批结果、不跑全套／200。
+8034已更新并回环HTTP200，隐藏node PID38868（仅历史，恢复必须查实际进程），原preview-formal/preview-legacy与host-id不变，前端仍为保留旧资产的build/local-meta-04/dist-final；本批完整产物build/revive-recovery/dist，完整证据final-evidence.json。中断曾结束前台会话，已改隐藏后台进程，勿把旧exec41567/46225等当运行事实。隔离8035测试已收尾，原8020／隧道未改。用户原房间84D87A保留，未替其操控席位，待其刷新恢复重试。
+实时远端feature92a6b0b6/main86798227已只读成功复核；本批仅本地提交，未push/merge/deploy。用户要求修完交其测试并提供新窗口提示词；下一窗口先按docs/AGENT-MAINTAINER-NEXT-WINDOW-PROMPT.md恢复，等待反馈，不自动下一批。第五批永久grants／蛋进度及延迟孵化只有本地任务书，未实施；扭蛋／完整离线仍后续。只early、不创建联系agent，SPEC和全部AGENT/PROMPT忽略不提交。
+见[本轮故障与恢复验收](coop-checkpoint-recovery-review.md)、[第四批验收](local-meta-04-review.md)、[操作说明](local-meta-04-usage.md)。下方状态均为历史，不能盖过本段。
+<!-- /COOP-RECOVERY final -->
 <!-- LOCAL-META-04 final -->
 2026-10-26 局外第四批完成，待用户手测。最终源码／测试5efc9c7e95cf11d042400521f7b7e247905576a4；统一原城镇大厅、同一Phaser.Game场景切换与缓存、独立等人房间、各自本机入口连接房主、host/profile/run/seat隔离和重连。单人首次仍保留原地图／训练家完整预加载。终局清槽前排空旧快照，防止旧保存提前删槽。
 自动验收：f8fbefd3独立相关13文件306/306退出0；其后仅保存排队与画布边界修订，e63保存19/19、最终5ef UI131/131退出0，最终类型／隔离Worker／生产均0。不拼接成最终全套通过，不重跑200。实测IAB+Chrome独立来源：等待到齐、原选队、准备1/2停留、双方首战真实攻击到回合2同步、一端退出大厅无残图且对端等待恢复。同文档退出保持一个画布；真实两设备LAN／n2n、声音及手动恢复仍待用户。

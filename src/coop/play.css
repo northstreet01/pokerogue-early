@@ -21,5 +21,39 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #coop-play-overlay.selecting-team h1{font-size:14px;margin:0}
 #coop-play-overlay.selecting-team{position:relative;inset:auto;order:-1;flex:none}
 #coop-play-overlay.selecting-team .coop-room-controls{display:none}
+#coop-play-overlay:not(.room-lobby){position:relative;inset:auto;order:-1;flex:none}
 #coop-play-overlay [hidden]{display:none!important}
 @media(max-width:600px){#coop-play-overlay.room-lobby:not(.selecting-team) .panel{padding:12px}#coop-play-overlay .room-players{grid-template-columns:1fr}#coop-play-overlay.room-lobby h1{font-size:20px}}
+
+#coop-play-overlay .coop-team-preview{width:100%;margin:8px 0}
+#coop-play-overlay .panel:has(.coop-team-row) .room-players{display:none}
+#coop-play-overlay #coop-exit-session,#coop-play-overlay #coop-reload-checkpoint{font-size:14px;margin-top:4px}
+#coop-play-overlay #coop-exit-note{display:inline-block;max-width:120px;margin:0 8px;font-size:12px;vertical-align:middle}
+#coop-play-overlay .coop-team-row{margin:6px 0;padding:6px;border:2px solid #aab0c5;background:#e6e9f1;border-radius:2px}
+#coop-play-overlay .coop-team-row.ready{border-color:#508362;background:#e2f0e5}
+#coop-play-overlay .coop-team-heading{font-size:14px;margin-bottom:4px;overflow-wrap:anywhere;color:#303044}
+#coop-play-overlay .coop-team-slots{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px}
+#coop-play-overlay .coop-team-slot{display:flex;min-width:0;align-items:center;flex-direction:column;justify-content:center;background:#f8f8fc;color:#252638;border:1px solid #aab0c5;font-size:12px;min-height:66px}
+#coop-play-overlay .coop-team-slot>span:not(.coop-atlas-icon){width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+#coop-play-overlay .coop-team-slot small{font-size:11px}
+#coop-play-overlay .coop-team-slot.empty{opacity:.65}
+#coop-play-overlay .coop-atlas-icon{display:inline-flex;width:48px;height:36px;align-items:center;justify-content:center;overflow:hidden;flex:none}
+#coop-play-overlay .coop-atlas-frame{display:block;flex:none;max-width:100%;max-height:100%;background-repeat:no-repeat;background-size:contain;background-position:center;image-rendering:pixelated}
+#coop-play-overlay.selecting-team .coop-team-row{margin:2px 0;padding:2px 6px}
+#coop-play-overlay.selecting-team .coop-team-slot{min-height:36px}
+#coop-play-overlay.selecting-team .coop-team-slot>span:not(.coop-atlas-icon),#coop-play-overlay.selecting-team .coop-team-slot small{display:none}
+#coop-play-overlay.selecting-team .coop-team-preview{margin:0}
+#coop-play-overlay .coop-progress{font-size:13px;color:#cde1f5;overflow-wrap:anywhere}
+#coop-play-overlay.room-lobby .coop-progress{color:#334b66}
+#coop-play-overlay.selecting-team .coop-progress{color:#cde1f5}
+#coop-play-overlay .coop-inventory{display:flex;align-items:center;gap:8px;flex-basis:100%;min-width:0}
+#coop-play-overlay .coop-inventory-label{font-size:12px;flex:none}
+#coop-play-overlay .coop-item-strip{display:flex;flex-wrap:wrap;gap:3px;min-width:0}
+#coop-play-overlay button.coop-item{position:relative;display:flex;align-items:center;justify-content:center;padding:0;width:44px;height:36px;min-height:36px;background:#253b56;border-color:#8298b5;color:#fff}
+#coop-play-overlay .coop-item-count{position:absolute;right:1px;bottom:0;font:12px/1.2 emerald,system-ui;text-shadow:1px 1px #111;background:#17263bd9}
+#coop-play-overlay .coop-item-description{display:none;position:fixed;z-index:120;width:min(320px,calc(100vw - 32px));max-height:174px;overflow:auto;padding:8px;border:2px solid #899bb3;background:#f8f8fc;color:#252638;font:14px/1.5 emerald,system-ui;box-shadow:0 3px 0 #142035}
+#coop-play-overlay .coop-item-description strong{display:block;margin-bottom:4px}
+#coop-play-overlay .coop-item-entry:hover .coop-item-description,#coop-play-overlay .coop-item:focus-visible+.coop-item-description,#coop-play-overlay .coop-item[aria-expanded=true]+.coop-item-description{display:block}
+#coop-play-overlay .coop-item:focus-visible{outline:3px solid #e6c65c}
+#coop-play-overlay .coop-item[data-dismissed=true]+.coop-item-description{display:none}
+@media(max-width:600px){#coop-play-overlay .coop-team-slot{font-size:10px}#coop-play-overlay .coop-team-heading{font-size:12px}#coop-play-overlay .coop-atlas-icon{width:36px}#coop-play-overlay .coop-inventory{align-items:flex-start}}

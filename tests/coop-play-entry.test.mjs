@@ -69,6 +69,8 @@ async function commitDraftForUi(p, action, revision) {
   const next = await snapshot(revision);
   next.personal.profile = structuredClone(action.profile);
   next.personal.priced = api.priceProfileDraft(action.profile);
+  next.shared.selections=[{seat:p.seat,state:action.kind==='profile-draft'?'draft':'confirmed',ready:action.ready,total:next.personal.priced.total,starters:[]}];
+  next.shared.ready[p.seat]=action.ready;
   next.shared.budget.used = next.personal.priced.total;
   next.shared.budget.remaining = 14 - next.shared.budget.used;
   next.personalHash = await digestProjection(next.personal); next.sharedHash = await digestProjection(next.shared);
@@ -77,7 +79,7 @@ async function commitDraftForUi(p, action, revision) {
     blocked: false, submitted: [false, false], reason: 'READY' });
 }
 
-test('real IDB draft queue coalesces unsent edits, keeps durable bytes, preserves open Starter and readies only accepted selection', async () => {
+test('real IDB draft queue coalesces edits and confirms the accepted team without preparing until an explicit click', async () => {
   const { p, config, confirm, sent, modes } = await draftPhase();
   config.onChange(draftStarters([1]));
   config.onChange(draftStarters([1, 4]));
@@ -98,8 +100,13 @@ test('real IDB draft queue coalesces unsent edits, keeps durable bytes, preserve
   await commitDraftForUi(p, actions[1].action, 2);
   await waitUntil(() => sent.filter(message => message.type === 'submitAction').length === 3);
   const ready = sent.filter(message => message.type === 'submitAction')[2];
-  assert.equal(ready.action.kind, 'profile-ready'); assert.equal(ready.action.ready, true);
+  assert.equal(ready.action.kind, 'profile-ready'); assert.equal(ready.action.ready, false);
   assert.deepEqual(ready.action.profile, actions[1].action.profile);
+  await commitDraftForUi(p,ready.action,3);
+  assert.equal(sent.filter(m=>m.type==='submitAction').length,3,'confirm and peer updates cannot auto-prepare');
+  await p.sendProfile(true);
+  const explicit=sent.filter(m=>m.type==='submitAction')[3];
+  assert.equal(explicit.action.ready,true);assert.equal(explicit.action.kind,'profile-ready');
 });
 
 test('budget rejection retains local draft and stops automatic retries; a new edit can submit without closing Starter', async () => {
@@ -197,7 +204,7 @@ test('original Starter restores selected attributes and moves through its detail
 test('public lobby renders both authoritative selections and fractional budget without replacing a dirty local draft or menu', async () => {
   const { p, config, modes } = await draftPhase();
   p.inputReady = false; config.onChange(draftStarters([1]));
-  p.roomLine = {}; p.budget = {}; p.lobbySelections = {};
+  p.roomLine = {}; p.budget = {}; p.lobbySelections = document.createElement('div');
   const next = await snapshot(1);
   next.shared.selections = [
     { seat: 0, state: 'draft', ready: false, total: 0.5, starters: [{ speciesId: 10, cost: 0.5, formIndex: 0 }] },
@@ -206,8 +213,9 @@ test('public lobby renders both authoritative selections and fractional budget w
   next.shared.ready = [false, true]; next.shared.budget.used = 3.5; next.shared.budget.remaining = 10.5;
   next.personal.profile = { synthetic: 'old-accepted' }; next.personal.priced = { total: 0.5 };
   await api.CoopPlayPhase.prototype.updateLobbyView.call(p, next);
-  assert.match(p.lobbySelections.textContent, /席位1 编辑中/);
-  assert.match(p.lobbySelections.textContent, /0.5点/); assert.match(p.lobbySelections.textContent, /席位2 已准备/);
+  assert.equal(p.lobbySelections.querySelectorAll('.coop-team-row').length,2);
+  assert.match(p.lobbySelections.textContent, /你.*选队中/);
+  assert.match(p.lobbySelections.textContent, /0.5点/); assert.match(p.lobbySelections.textContent, /队友.*已准备/);
   assert.match(p.budget.textContent, /剩余 10.5/);
   assert.equal(p.lastProfile.starters[0].speciesId, 1); assert.equal(modes.length, 1);
 });
@@ -1193,9 +1201,11 @@ test('committed personal modifiers render localized original names and stacks an
   s.shared.pokemon=[];s.personal.party=[{id:entry.id,owner:0,index:0,group:'party',pokemon:api.capturePokemonState(entry.pokemon)}];
   s.personal.resources={money:100,pokeballs:{0:5,1:0,2:0,3:0,4:0},modifiers:[state]};model.applySnapshot(s);
   assert.deepEqual(model.captureAppliedState().personal.resources.modifiers,[state]);
-  p.model=model;p.modifierLine={hidden:true,textContent:''};p.renderPersonalModifiers();
-  assert.equal(p.modifierLine.hidden,false);assert.equal(p.modifierLine.textContent,language==='zh-Hans'
-    ? '本人持久道具：幸运蛋 ×2（妙蛙种子）' : '本人持久道具：Lucky Egg ×2（Bulbasaur）');
+  p.model=model;p.modifierLine=document.createElement('div');p.renderPersonalModifiers();
+  assert.equal(p.modifierLine.hidden,false);
+  assert.match(p.modifierLine.querySelector('button').getAttribute('aria-label'),language==='zh-Hans'?/幸运蛋 ×2.*妙蛙种子/:/Lucky Egg ×2.*Bulbasaur/);
+  assert.ok(p.modifierLine.querySelector('[role=tooltip]').textContent.length>20);
+  assert.deepEqual(model.captureAppliedState().personal.resources.modifiers,[state],'rendering never changes verified inventory');
   model.applied.personal.resources.modifiers[0].stackCount=3;
   assert.notDeepEqual(model.captureAppliedState().personal.resources.modifiers,[state]);
   } } finally { await api.i18next.changeLanguage(previous); }

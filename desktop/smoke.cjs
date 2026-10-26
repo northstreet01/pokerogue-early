@@ -76,6 +76,7 @@ module.exports=async({app,window,hosts,origin,dataRoot})=>{
     const foreign=await evaluate(`performance.getEntriesByType('resource').map(e=>e.name).filter(u=>!u.startsWith(location.origin+'/')&&!u.startsWith('blob:')&&!u.startsWith('data:'))`);
     assert.deepEqual(foreign,[]);
     report.checks.push('same-game-coop-entry','native-host-controls','original-ui-create-room','resources-local-only');
+    if(process.env.POKEROGUE_DESKTOP_READY_SMOKE==='1')await require('./ready-smoke.cjs')({app,window,hosts,evaluate,until,peer,peers,hello,report,evidence});
     // DOM readiness precedes compositor presentation, particularly in a hidden window.
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     await delay(150);

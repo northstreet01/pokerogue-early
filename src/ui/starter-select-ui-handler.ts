@@ -113,7 +113,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
 
   private starterSelectCallback: StarterSelectCallback;
   private starterSelectOptions: { gameMode?: GameModes; onCancel?: () => void;
-    onChange?: StarterSelectCallback; starters?: Starter[]; readOnly?: boolean } = {};
+    onChange?: StarterSelectCallback; starters?: Starter[]; readOnly?: boolean; confirmOnly?: boolean } = {};
   private startLabel: Phaser.GameObjects.Text;
   private starterChangeSignature = '';
   private restoringStarters = false;
@@ -485,6 +485,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       this.starterSelectCallback = args[0] as StarterSelectCallback;
       this.starterSelectOptions = args[1] ?? {};
       this.startLabel.setVisible(!this.starterSelectOptions.readOnly);
+      this.startLabel.setText(i18next.t(this.starterSelectOptions.confirmOnly ? 'coop:finishTeam' : 'common:start'));
       this.valueLimitLabel.setVisible(!this.starterSelectOptions.readOnly);
 
       this.starterSelectContainer.setVisible(true);
@@ -1330,7 +1331,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       this.clearText();
     };
 
-    ui.showText(i18next.t("starterSelectUiHandler:confirmStartTeam"), null, () => {
+    ui.showText(i18next.t(this.starterSelectOptions.confirmOnly ? 'coop:confirmTeam' : 'starterSelectUiHandler:confirmStartTeam'), null, () => {
       ui.setModeWithoutClear(Mode.CONFIRM, () => {
         const startRun = (gameMode: GameModes) => {
           this.scene.gameMode = gameModes[gameMode];

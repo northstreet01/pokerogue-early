@@ -1,3 +1,7 @@
+<!-- COOP-READY-UI current 2026-10-26 -->
+用户明确授权联机准备与信息展示批：原选队确认只保存队伍，回房间手动准备；公开投影显示本人/队友两排原图标；本人道具用原图集、层数、原说明、携带者和剩余次数展示；新增连接/加载/行动/整备提示，HUD为画面留空间。不改规则、协议字段或存档schema，不接队友鼠标或原第五批。相关130/130、展示收尾3/3、原profile大厅与正式协议23/23、类型和独立Worker/前端构建通过。最终封装EXE从Windows目录启动退出0：真实原选队输入、确认后未准备、手动准备进入原战斗、合成道具说明及HUD/canvas无覆盖断言已验证；见 docs/coop-ready-ui-review.md 和 build/coop-ready/final-evidence.json。新包 build/coop-ready/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe，前两批保留。QA仅临时合成资料、协议队友，隐藏窗口用测试帧驱动，不等于真人两设备/正常前台/声音/长局或真实奖励通过；交用户手测后停止扩展。仅early、不创建联系agent、不改真实资料/服务/隧道、不推送合并。
+<!-- /COOP-READY-UI current -->
+
 <!-- DESKTOP-STORAGE current 2026-10-26 -->
 用户再度要求继续施工，第二批 Windows 本地数据库已实现：main 独占 SQLite，个人 meta/旧存档/席位/outbox/偏好原子事务与 revision CAS；确认迁移保留旧 IDB，增加菜单整库备份和恢复重启。原 codec/档案 CAS/租约/历史和房主房间协议保留。用户新增参考《杀戮尖塔 2》，已核实开发者文章并记录其确定性同步与当前房主计算的区别，见 docs/slay-the-spire-2-reference.md；未切换双端规则计算。详见 docs/desktop-storage-review.md 与 desktop-lan-usage.md。新包 build/desktop-storage/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe，保留第一批 build/desktop 产物。新增存储9项通过；相关207候选206通过1项测试依赖缺失，补齐后该语言文件9/9，其余198项通过；类型/独立Worker/前端/封装和开发/真实封装EXE合成资料验证退出0，原生持久化跨进程1→2。真实资料迁移、菜单交互、两设备/穿透/声音/长局仍待用户；不自动原第五批/Android/全套或200。仅early、不创建联系agent、未改真实档案/房间/隧道、不推送合并。新包手测反馈前停止扩展；下方等待/未做文件后端是历史。
 <!-- /DESKTOP-STORAGE current -->

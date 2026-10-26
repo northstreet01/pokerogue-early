@@ -23,6 +23,7 @@ import { captureModifierState, restoreModifierState } from '../modifier/modifier
 import i18next from '../i18n';
 import {identifyHost,normalizeEndpoint,hostSocketUrl,hostScope,readHosts,rememberHost,hostConnectionError} from './host-connection.mjs';
 import {desktopHost,startDesktopHost} from '../desktop-host.mjs';
+import {renderTeams,renderInventory,progressText} from './room-display.mjs';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -72,6 +73,8 @@ export default class CoopPlayPhase extends Phase {
   private profileDirty = false;
   private lobbyDraft: { profile: any; retries: number; error: string | null } | null = null;
   private draftFinal = false;
+  private confirmSelectionPending = false;
+  private progressLine: HTMLDivElement | null = null;
   private draftResync = false;
   private lobbySelections: HTMLDivElement | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -137,7 +140,7 @@ export default class CoopPlayPhase extends Phase {
     this.epoch = null; this.consumer = null;
     this.inputReady = false; this.battleInputActive = false; this.starterOpen = false;
     this.starterMenuEpoch++;
-    this.lobbyDraft = null; this.draftFinal = false;
+    this.lobbyDraft = null; this.draftFinal = false; this.confirmSelectionPending=false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     const socket = this.socket; this.socket = null;
@@ -185,11 +188,12 @@ export default class CoopPlayPhase extends Phase {
     this.budget = document.createElement('div'); this.budget.className = 'status';
     this.roomLine = document.createElement('div'); this.roomLine.className = 'status';
     this.presenceLine=document.createElement('div');this.presenceLine.className='room-players';
-    this.lobbySelections = document.createElement('div'); this.lobbySelections.className = 'status';
+    this.lobbySelections = document.createElement('div'); this.lobbySelections.className = 'coop-team-preview';
+    this.progressLine=document.createElement('div');this.progressLine.className='coop-progress';this.progressLine.setAttribute('aria-live','polite');
     this.controls = document.createElement('div');this.controls.className='coop-room-controls';
     this.reserveLine = document.createElement('div'); this.reserveLine.className = 'status'; this.reserveLine.hidden = true;
-    this.modifierLine = document.createElement('div'); this.modifierLine.className = 'status'; this.modifierLine.hidden = true;
-    this.panel.append(title, this.status, this.roomLine,this.presenceLine, this.budget, this.lobbySelections, this.reserveLine, this.modifierLine, this.controls);
+    this.modifierLine = document.createElement('div'); this.modifierLine.className = 'coop-inventory'; this.modifierLine.hidden = true;
+    this.panel.append(title, this.status, this.roomLine,this.presenceLine, this.budget, this.lobbySelections, this.progressLine, this.reserveLine, this.modifierLine, this.controls);
     // Keep this outside the decision controls: no sync/menu state may hide it.
     const exit = this.button('退出本局／返回首页', () => this.leaveSession());
     exit.id = 'coop-exit-session'; exit.type = 'button';
@@ -258,7 +262,8 @@ export default class CoopPlayPhase extends Phase {
       }
       const ready = !!this.latest?.shared.ready?.[this.seat!];
       const readyButton=this.button(ready ? '取消准备' : '提交准备', () => this.sendProfile(!ready));
-      readyButton.disabled=!this.lastProfile&&!this.latest?.personal.profile;
+      readyButton.disabled=(!this.lastProfile&&!this.latest?.personal.profile)||this.starterOpen||!!this.actionId||!!this.lobbyDraft?.error||this.confirmSelectionPending
+        ||(!ready&&this.latest?.shared.selections?.find(p=>p.seat===this.seat)?.state==='draft');
       row.append(readyButton,
         this.button(this.lastProfile?'重新选队':'选择队伍', async () => {
           if (this.actionId || !this.inputReady) return;
@@ -401,6 +406,7 @@ export default class CoopPlayPhase extends Phase {
         if (this.latest && message.roomId === this.roomId && message.runId === this.runId
           && message.revision === this.latest.revision) {
           if (Array.isArray(message.online)) this.online = [...message.online];
+          if(this.progressLine)this.progressLine.textContent=progressText(message,this.latest,this.seat,(key,values)=>i18next.t('coop:'+key,values));
           this.inputReady = !message.blocked;
           this.submitted = !!message.submitted?.[this.seat!];
           if ((this.submitted || !this.inputReady) && !(this.latest.personal.decision.kind === 'preparation'
@@ -539,11 +545,8 @@ export default class CoopPlayPhase extends Phase {
         + ` · 准备 ${shared.ready.filter(Boolean).length}/2`;
       if (this.lobbySelections) {
         this.lobbySelections.hidden = false;
-        this.lobbySelections.textContent = (shared.selections ?? []).map((player: any) =>
-          `席位${player.seat + 1} ${player.ready ? '已准备' : player.state === 'draft' ? '编辑中' : '未准备'}：`
-          + (player.starters.map((starter: any) => `${getPokemonSpecies(starter.speciesId).name}`
-            + `${starter.formIndex ? `（形态${starter.formIndex}）` : ''} ${starter.cost}点`).join('、') || '未选')
-          + `（${player.total}/10）`).join(' ｜ ');
+        renderTeams(this.lobbySelections,this.scene,shared.selections??[],this.seat,{species:getPokemonSpecies,
+          names:this.playerNames,t:(key,values)=>i18next.t('coop:'+key,values)});
       }
       if (!this.profileDirty) this.lastProfile = snapshot.personal.profile ?? this.lastProfile;
       if (snapshot.personal.profile) this.setStatus('已导入选队，等待队友…');
@@ -551,6 +554,7 @@ export default class CoopPlayPhase extends Phase {
       this.renderDraftStatus();
       return;
     }
+    this.panel?.querySelector('h1')?.replaceChildren(document.createTextNode('联机冒险'));
     this.roomLine.textContent = `房间 ${snapshot.roomId} · 席位 ${snapshot.seat + 1}`;
     this.budget.textContent = `波次 ${snapshot.shared.waveIndex} · 回合 ${snapshot.shared.turn} · 状态已同步`;
     this.controls.replaceChildren();
@@ -1285,13 +1289,18 @@ export default class CoopPlayPhase extends Phase {
   private renderPersonalModifiers() {
     if (!this.modifierLine) return;
     const personal = this.model.applied?.personal;
-    const modifiers = personal?.resources?.modifiers ?? [];
-    this.modifierLine.hidden = modifiers.length === 0;
-    this.modifierLine.textContent = modifiers.length ? '本人持久道具：' + modifiers.map(modifier => {
-      const target = personal.party.find(entry => entry.id === modifier.pokemonId);
-      return `${modifier.type.getDisplayName()} ×${modifier.stackCount}${target ? `（${getPokemonSpecies(target.pokemon.species.speciesId).name}）` : ''}`
-        + (Number.isInteger(modifier.battlesLeft) ? ` 剩余${modifier.battlesLeft}战` : '');
-    }).join('、') : '';
+    const modifiers = (personal?.resources?.modifiers ?? []).map(m=>restoreModifierState(captureModifierState(m)));
+    const party=(personal?.party??[]).map(entry=>restorePokemonState(capturePokemonState(entry.pokemon)));
+    const view=Object.create(this.scene);
+    Object.assign(view,{party,modifiers,getParty:()=>party,getPokemonById:id=>party.find(p=>p.id===id)});
+    for(const pokemon of party)pokemon.scene=view;
+    const items=modifiers.map(modifier=>{
+      const heldBy=party.find(p=>p.id===modifier.pokemonId);
+      return {name:modifier.type.getDisplayName(),description:modifier.type.getDescription(view),icon:modifier.type.iconImage,
+        count:modifier.stackCount,owner:heldBy?getPokemonSpecies(heldBy.species.speciesId).getName(heldBy.formIndex):null,
+        battlesLeft:modifier.battlesLeft};
+    });
+    renderInventory(this.modifierLine,this.scene,items,(key,values)=>i18next.t('coop:'+key,values));
   }
 
   private openBattleCommand() {
@@ -1408,7 +1417,7 @@ export default class CoopPlayPhase extends Phase {
     this.scene.scale?.refresh?.();
     const lifecycle = this.lifecycle;
     this.starterOpen = true;
-    this.draftFinal = false;
+    this.draftFinal = false; this.confirmSelectionPending=false;
     const menuEpoch = ++this.starterMenuEpoch;
     const roomId = this.roomId, runId = this.runId;
     const current = () => this.current(lifecycle) && this.roomId === roomId && this.runId === runId
@@ -1421,14 +1430,14 @@ export default class CoopPlayPhase extends Phase {
         try {
           const profile = captureProfile(this.scene.gameData, starters);
           this.queueLobbyDraft(profile);
-          this.draftFinal = true;
+          this.draftFinal = false; this.confirmSelectionPending=true;
           this.closeStarterSelect();
           void this.flushLobbyDraft().catch(error => this.setStatus(`选队提交失败：${error?.message ?? error}`, true));
         } catch (error: any) {
           this.closeStarterSelect(); // The original callback was consumed; leave before reopening it.
           this.setStatus(`选队失败：${error?.message ?? error}`, true);
         }
-      }, { gameMode: GameModes.CLASSIC,
+      }, { gameMode: GameModes.CLASSIC, confirmOnly:true,
         starters: this.lastProfile?.starters.map(restoreStarterSelection),
         onChange: (starters: any[]) => {
           if (!current() || !this.starterOpen) return;
@@ -1436,7 +1445,7 @@ export default class CoopPlayPhase extends Phase {
           catch (error: any) { this.setStatus(`选队草稿失败：${error?.message ?? error}`, true); }
         }, onCancel: () => {
           if (!current()) return;
-          this.draftFinal = false;
+          this.draftFinal = false; this.confirmSelectionPending=false;
           this.closeStarterSelect();
           this.setStatus('已返回大厅，可重新选队');
         } });
@@ -1482,6 +1491,10 @@ export default class CoopPlayPhase extends Phase {
       || this.latest?.personal.decision.kind !== 'lobby' || this.latest.shared.ready?.[this.seat!]) return;
     if (this.sameProfile(draft.profile, this.latest.personal.profile)) {
       this.profileDirty = false;
+      if(this.confirmSelectionPending&&!this.starterOpen){
+        if(await this.sendAction({kind:'profile-ready',profile:draft.profile,ready:false},i18next.t('coop:teamSaved')))this.confirmSelectionPending=false;
+        return;
+      }
       if (this.draftFinal && !this.starterOpen) {
         this.draftFinal = false;
         await this.sendAction({ kind: 'profile-ready', profile: draft.profile, ready: true }, '准备已提交，等待回执…');
@@ -1543,6 +1556,8 @@ export default class CoopPlayPhase extends Phase {
   private async sendProfile(ready: boolean, profile = this.lastProfile) {
     if (!profile || !this.latest || this.seat === null || !this.roomId) return;
     if (this.latest.personal.decision.kind !== 'lobby') return;
+    if(ready&&this.confirmSelectionPending){this.setStatus(i18next.t('coop:teamSaving'));return;}
+    if(ready&&this.latest.shared.selections?.find(p=>p.seat===this.seat)?.state==='draft'){this.setStatus(i18next.t('coop:confirmTeamFirst'));return;}
     if (ready && !profile.starters?.length) { this.setStatus('请至少选择一只精灵再准备', true); return; }
     if (ready && this.lobbyDraft) {
       if (this.starterOpen) { this.setStatus('请先在原选队界面确认队伍', true); return; }

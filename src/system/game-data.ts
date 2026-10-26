@@ -746,7 +746,10 @@ export class GameData {
 
   tryClearSession(scene: BattleScene, slotId: integer): Promise<[success: boolean, newClear: boolean]> {
     if (this.profileClosing) return Promise.resolve([false, false]);
-    if (this.profileIO) return Promise.resolve(this.profileIO.beginClear(slotId));
+    // Earlier System snapshots must finish before a terminal clear is staged;
+    // otherwise one of those snapshots could delete the slot without victory
+    // statistics. The following original terminal save commits both together.
+    if (this.profileIO) return this.localSystemSaveQueue.catch(()=>{}).then(()=>this.profileIO.beginClear(slotId));
     return new Promise<[boolean, boolean]>(resolve => {
       if (bypassLogin) {
         deleteLocalSave(sessionSaveKey(slotId)).then(() => {

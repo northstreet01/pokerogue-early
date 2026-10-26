@@ -132,6 +132,16 @@ test('terminal clear remains pending until the same transaction saves victory st
   const saved=await r.read(p.profileId);assert.equal(saved.soloRuns.length,0);assert.equal(saved.originalSystem.gameStats.sessionsWon,1);
   assert.equal(await g.data.getSession(0),null);
 });
+
+test('terminal clear cannot be consumed by original system saves queued before the victory statistics',async t=>{
+  const {r,p}=await created(),io=await writer(t,p.profileId),g=game(io);await g.data.loadSystem();await g.data.saveEncounter(g.scene);
+  g.data.gameStats.battles=12;const first=g.data.saveSystem();
+  g.data.gameStats.battles=13;const second=g.data.saveSystem();
+  const clearing=g.data.tryClearSession(g.scene,0);await Promise.all([first,second,clearing]);
+  assert.equal((await r.read(p.profileId)).soloRuns.length,1,'queued pre-terminal snapshots must not delete the adventure');
+  g.data.gameStats.sessionsWon=1;assert.equal(await g.data.saveSystem(),true);
+  const saved=await r.read(p.profileId);assert.equal(saved.soloRuns.length,0);assert.equal(saved.originalSystem.gameStats.sessionsWon,1);
+});
 test('stale callbacks after invalidation cannot write, and the lost page cannot overwrite another active profile',async t=>{
   const {r,p}=await created(),other=await r.create({...base.system,trainerId:99}),io=await writer(t,p.profileId),g=game(io);await g.data.loadSystem();
   io.invalidate();g.data.gameStats.battles=999;assert.equal(await g.data.saveSystem(),false);

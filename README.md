@@ -1,84 +1,117 @@
-# PokéRogue Early — 单人游戏与双人合作开发
+# PokéRogue Early — 本地程序与双人局域网合作
 
-基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的 early 版本，保留原版单人游戏、本地收藏和存档，逐步接入服务器权威的双人合作。
+基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的 early 版本，保留原版单人玩法，开发玩家自己托管房间的 LAN Host-Client 双人合作。资源与个人存档保存在各自设备，房主电脑运行原规则 Worker 并保存合作冒险，不依赖开发者服务器计算对局。
 
-**当前仍处于合作开发阶段，尚未完成原画面双浏览器可玩的 MVP。** 独立合作实验页可以运行；原类联机链路已经通过真实 WebSocket 和磁盘恢复测试，但原合作 UI、真实个人选队及跨设备验收仍待完成。
+更新日期：2026-10-26。当前已交付 Windows x64 测试程序、本地 SQLite 存档和原版联机可玩流程，仍处于开发与手测阶段；不是全部原版功能或所有设备环境均已验收。
 
-## 当前进度
+## 已实现与后续范围
 
-更新日期：2026-10-18。
-
-| 部分 | 当前状态 |
+| 部分 | 当前实现 |
 | --- | --- |
-| 单人游戏与本地存档 | 保留原版入口，支持本地存档及备份管理 |
-| 合作实验页 | 独立有限实验引擎，可验证房间、选队、战斗和整备；不代表原版合作已完成 |
-| 原规则运行器 | 房间独立 Worker 调用原类，固定夹具已走通首战→整备→战前换人／拒绝→第二战 FIGHT |
-| 正式联机接缝 | 正式协调器、八方法 adapter、shared／personal 投影、本人原模型恢复和 consumer ACK 已贯通 |
-| 入局与基础续局 | 内部 lobby 与 envelope 已接；真实双 WS 验证关服重启、席位恢复、回执重放和只结算一次 |
-| 原合作界面与跨设备 | 尚未接通；真实个人资料／原收藏选队、IndexedDB outbox 与连续游玩验收待完成 |
-| 永久收藏事务 | M6 未完成，捕获／孵化结果尚不能通过正式链路永久授予 |
+| Windows 程序 | Electron EXE，游戏图片、音乐及其他资源随程序本地加载，无需玩家安装 Node 或开启外部浏览器 |
+| 玩家托管 LAN 房主 | 显式启动／停止房主；队友通过房主地址与房间码加入；房主运行原 Worker，客户端接收快照与事件 |
+| 大厅与准备 | 同一程序内切换单人／合作；双方各一排队伍预览；完成选队只保存队伍，全员手动准备并同步完成后开始 |
+| 局内流程 | 已接战斗、捕获、换人、战后奖励／共享限量商店、升级学招与进化等主要原版链路；特殊分支和道具仍有缺口 |
+| 局内信息 | 本人道具图标、数量、原效果说明、携带者及剩余次数；连接、加载、行动和整备状态提示 |
+| 个人本地资料 | 桌面 SQLite 保存档案、单人进度、设置、席位及待发行动，保留原校验、档案版本、单写者与历史备份 |
+| 迁移与恢复 | 旧桌面 IndexedDB 确认迁移且保留原库；个人数据库备份／恢复；合作局按已保存检查点与原席位恢复 |
 
-最新源码验收：**完整串行回归 935/935、退出码 0；定向 35/35；类型检查和生产构建通过**。这是 2026-10-18 已验收版本的实际结果，不代表任意后续修改自动通过，也不代表全部机制或双设备游玩验收完成。证据见 [发布记录](docs/coop-progress-release-2026-10-18.md) 与 [VS-02 维护者验收](docs/mvp-vs-02-review-2026-10-18.md)。
+后续仍包括：永久合作成果完整写回收藏、蛋进度与终局孵化／扭蛋闭环、更多特殊道具与道具转移、Android 和队友鼠标提示。当前没有改为各客户端独立运行整套战斗规则。
 
-当前原类链路仍使用内部测试身份、队伍和种子，其他可达机制可能在未支持的原 Phase 安全停止。正式 `/coop/v1/ws` 在默认开发／服务入口未注入 adapter 时仍返回 `ADAPTER_UNAVAILABLE`；构建运行器不会自动启用正式合作。
+## 运行 Windows 测试程序
 
-## 本地运行
+本机最新产物：
 
-需要 Node.js 和 npm。项目声明 Node.js >=18；最近一次完整验收使用 Node.js 24.15.0，未单独验证全部旧版本环境。
+```text
+build/coop-ready/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe
+```
 
-```sh
+双击 EXE，必须保留整个发行文件夹，不能只复制 EXE。`build/` 不纳入 Git；拉取源码后需按下方步骤构建，不会随源码推送取得二进制程序。
+
+1. 房主进入“联机冒险”，点击“启动本机房主”（默认 TCP 18735），再创建房间。
+2. 队友在自己的程序中填写房主地址，例如 `http://192.168.1.8:18735`，连接后输入房间码。
+3. 双方选择本人精灵并确认“完成选队”，返回房间查看两排队伍，再各自点击“提交准备”。已准备后需先取消准备才能重新编辑队伍。
+4. 房主退出会使队友断线；保留原房主数据目录，重新启动后恢复原局与席位。首版不提供自动房主迁移。
+
+程序的资源入口固定为 `127.0.0.1:18734`，只监听本机；LAN 房主端口默认为 `18735`，可在界面选择。远程联机由玩家自行使用端口映射或 n2n 等组网工具：端口映射时连接映射后的房主地址；虚拟局域网时连接房主的虚拟网卡 IP。游戏不负责配置隧道或运营中继，不能直接把 n2n 协调服务器 IP 当作游戏房主地址。
+
+一个人可先用 EXE 开房，再用独立浏览器访问 `http://127.0.0.1:18734` 作为另一玩家，两端都连接房主 `http://127.0.0.1:18735`。这只能辅助测试双端操作，不代替真实两设备和穿透验收。
+
+## 存档与数据目录
+
+Windows 正常数据目录为 `%APPDATA%\PokeRogue-LAN`，程序菜单可以打开：
+
+| 路径 | 用途 |
+| --- | --- |
+| `storage/personal.sqlite` | 本人的档案、单人存档、偏好、私有席位与待发行动 |
+| `storage/backups/` | 菜单生成的个人数据库一致备份 |
+| `hosts/formal-rooms/` | 房主保存的合作局、检查点及主机身份 |
+
+个人数据库与房主房间备份不能互相替代。使用菜单备份个人库；备份完整房主目录或整个数据目录前先退出程序。运行中不要只复制 SQLite 主文件而遗漏 WAL。备份含私有恢复凭据，不要当房间邀请码分享。升级替换程序目录，保留数据目录。
+
+桌面首次检测到同一应用来源的旧资料时请求确认迁移；取消不创建空档替代。外部浏览器资料不会被直接读取，需要从原入口显式导出、再在档案管理中导入。普通浏览器继续使用 IndexedDB／localStorage，资料按浏览器和访问来源隔离；旧合作实验资料保持隔离。
+
+## 从源码构建桌面版
+
+建议使用已验证的 Node.js 24.15.0 与 npm；玩家使用 EXE 无需这些依赖。先准备依赖和固定版本的 Electron 运行时：
+
+```powershell
 npm ci --ignore-scripts
+node node_modules/electron/install.js
+$env:POKEROGUE_DESKTOP_OUTPUT='build/coop-ready'
+npm run build:desktop
+npm run package:desktop
+```
+
+输出包含独立原 Worker、前端与完整素材，不覆盖原 `dist` 或 `build/coop-runtime`。开发运行该产物可执行 `.\node_modules\electron\dist\electron.exe build/coop-ready/app`。省略输出环境变量时，构建／封装默认使用 `build/desktop`；`npm run start:desktop` 也固定运行该默认目录。
+
+## 浏览器开发入口
+
+```powershell
 npm run start
 ```
 
-默认地址：
+默认开发地址 `http://localhost:8020/`，监听本机。根路径为统一大厅；`/coop-play.html` 为正式原版联机界面；`/coop.html` 保留旧实验引擎；`/save-tools.html` 为旧版存档工具。普通 `start`／`start:server` 未启用 profile adapter 时，正式 WS 返回 `ADAPTER_UNAVAILABLE`。
 
-| 地址 | 用途 |
-| --- | --- |
-| `http://localhost:8020/` | 原版单人游戏 |
-| `http://localhost:8020/save-tools.html` | 本地存档与备份管理 |
-| `http://localhost:8020/coop.html` | 独立合作实验页 |
+需要运行正式浏览器合作入口时：
 
-开发服务监听局域网地址；实验双端连接方法和限制见 [COOP.md](COOP.md)。该页面使用实验协议／引擎，与正式原类联机链路分开。
-
-构建后使用 Node 服务提供静态页面与实验 WebSocket：
-
-```sh
+```powershell
+npm run build:coop-runtime
 npm run build
-npm run start:server
+npm run start:local
 ```
 
-默认端口同为 8020，与开发服务择一启动。服务需要项目中的 Node 服务代码及依赖，不能仅上传 `dist`。原类 Worker bundle 可通过 `npm run build:coop-runtime` 单独生成，当前主要用于内部接缝与回归验证。
-
-## 存档与数据边界
-
-收藏、图鉴、扭蛋数据和单人进度保存在浏览器 IndexedDB；设置和教程使用 localStorage。存档按浏览器和访问地址隔离，localhost、局域网 IP 与域名之间不会自动共享数据，迁移时使用备份工具。
-
-合作实验收藏与正式收藏隔离，不将实验捕获结果写回正式图鉴。正式房间检查点由服务器保存，个人收藏仍由本人浏览器保存；两种备份不能互相替代。仓库不包含个人存档、房间凭据、依赖目录或构建产物。
+`start:local` 显式启用正式 profile 大厅，默认监听本机 8020；需要 LAN 监听时执行 `npm run start:local -- --host`。与 Vite 开发服务择一运行，不能只上传静态 `dist` 代替 Node 服务。旧实验说明见 [COOP.md](COOP.md)，不代表正式原规则链路的当前状态。
 
 ## 验证与开发记录
 
-```sh
+最近准备页／展示批相关测试 130/130、显示收尾复测 3/3、正式协议与原 profile 大厅 23/23 通过；类型、独立 Worker、最终前端、封装及 EXE 合成流程检查通过。这些是分开的相关验证，不相加为一次完整回归。程序 QA 使用临时合成资料、协议队友和隐藏窗口专用帧驱动；道具截图使用明确的展示夹具，不等于真实掉落／授予完成。
+
+正常前台操作、真实获得的道具、完整购物、真实两设备 LAN／穿透、声音与长局仍待手测。本次没有重跑全套或 200 波，不能用历史通过记录代替当前版本的全面验收。
+
+可按修改范围选择检查：
+
+```powershell
 npm run typecheck
-npm run build
-npm run build:coop-runtime
-node --test --test-concurrency=1 tests/battle-core*.test.mjs tests/coop*.test.mjs tests/local-save.test.mjs tests/localization.test.mjs tests/outsourcing-locale-placeholders.test.mjs
+node --test tests/coop-room-display.test.mjs tests/coop-play-entry.test.mjs tests/localization.test.mjs
+node --test tests/coop-profile-lobby-vs02b03.test.mjs tests/coop-formal.test.mjs
+node --test tests/desktop-runtime.test.mjs tests/desktop-storage.test.mjs
 ```
 
-完整回归包含真实 Worker、WebSocket 和临时文件原子保存，用时约 15 分钟；环境需要允许本机回环连接及测试目录读写。单项命令见 package.json。
+部分测试会启动本机 HTTP／WebSocket 和原 Worker，需要回环网络及临时目录读写权限。不要在真实游戏服务运行时重建它正在使用的运行器。
 
-- [开发交接与当前缺口](docs/DEVELOPMENT-HANDOFF.md)
-- [模块计划](docs/coop-development-plan.md)
-- [最快双端可玩架构](docs/mvp-delivery-architecture-2026-10-18.md)
-- [原 UI 接入资料](docs/outsourcing/MVP-UI-01-reuse-inventory.md)
-- [本地基础与历史记录](LOCAL-FOUNDATION.md)
-- [原版来源调查](docs/early-baseline-2026-10-13.md)
+- [桌面操作与手测](docs/desktop-lan-usage.md)
+- [准备页与局内展示验收](docs/coop-ready-ui-review.md)
+- [本地数据库、迁移与备份](docs/desktop-storage-review.md)
+- [Windows 首批交付](docs/desktop-lan-review.md)
+- [架构转型路线](docs/desktop-lan-transition.md)
+- [开发交接](docs/DEVELOPMENT-HANDOFF.md)与[模块计划](docs/coop-development-plan.md)
 
 ## 原版来源与许可证
 
-源码与资源基线为固定历史提交 `ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9`。该提交用于标识来源和规则对照，项目不据此限制精灵种类、世代或数量；尚未接入内容属于开发缺口。
+源码与资源基线为固定历史提交 `ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9`。该提交标识来源与规则对照，不据此限制精灵种类、世代或数量。
 
-保留原版 AGPL-3.0 许可证、资源与贡献者说明。以下是该历史快照的原版 README，其功能、环境与部署描述属于历史记录；本项目当前运行方式以上文为准。
+保留原版 AGPL-3.0 许可证、资源与贡献者说明。以下为该历史快照的原版 README，其功能、环境与部署描述属于历史记录；本项目当前运行方式以上文为准。
 
 ---
 

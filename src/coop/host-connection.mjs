@@ -1,3 +1,4 @@
+import {deviceStorage} from '../platform/preferences.mjs';
 const HOSTS_KEY='coop-local-hosts-v1';
 const localBase=()=>globalThis.location?.href??`${globalThis.location?.origin??'http://localhost'}/`;
 export function normalizeEndpoint(value,base=localBase()){
@@ -7,14 +8,14 @@ export function normalizeEndpoint(value,base=localBase()){
  return url.origin;
 }
 export function hostScope(origin,hostId,profileId=null){if(!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(hostId))throw Error('INVALID_HOST_ID');return `${origin}::host:${hostId}${profileId?'::profile:'+encodeURIComponent(profileId):''}`;}
-export function readHosts(storage=globalThis.localStorage){
+export function readHosts(storage=deviceStorage()){
  if(!storage)return {selected:null,hosts:[]};
  const raw=storage.getItem(HOSTS_KEY);if(!raw)return {selected:null,hosts:[]};
  const value=JSON.parse(raw);if(value?.version!==1||!Array.isArray(value.hosts))throw Error('INVALID_HOST_DIRECTORY');
  for(const row of value.hosts) {hostScope('local',row.hostId);normalizeEndpoint(row.endpoint);}
  return value;
 }
-export function rememberHost(host,storage=globalThis.localStorage){
+export function rememberHost(host,storage=deviceStorage()){
  const old=readHosts(storage);const value={version:1,selected:host.endpoint,
   hosts:[{hostId:host.hostId,endpoint:host.endpoint},...old.hosts.filter(row=>row.hostId!==host.hostId)].slice(0,20)};
  storage.setItem(HOSTS_KEY,JSON.stringify(value));return value;

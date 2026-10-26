@@ -1,3 +1,5 @@
+import {nativeStorageBridge} from '../platform/native-storage.mjs';
+import {createNativePlayStorage} from './native-play-storage.mjs';
 const DB_NAME = 'coop-play-v1';
 const SEATS = 'seats', OUTBOX = 'outbox';
 const seatKey = (origin, roomId, seat) => `${origin}|${roomId}|${seat}`;
@@ -5,6 +7,7 @@ const actionKey = (origin, roomId, seat, actionId) => `${seatKey(origin, roomId,
 
 // Resolve only after transaction commit, and close every opened connection.
 export function createPlayStorage(factory = globalThis.indexedDB) {
+  if(factory===globalThis.indexedDB&&nativeStorageBridge())return createNativePlayStorage(nativeStorageBridge());
   async function transact(store, mode, operation) {
     const db = await new Promise((resolve, reject) => {
       const request = factory.open(DB_NAME, 1);

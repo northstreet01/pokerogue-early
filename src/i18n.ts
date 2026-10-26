@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import {deviceStorage} from './platform/preferences.mjs';
 // Adapted from pagefaultgames/pokerogue's i18next namespaces, interpolation,
 // English fallback and prLang preference. Bundle both locales for offline play.
 import i18next from 'i18next';
@@ -13,8 +14,8 @@ for (const [path, data] of Object.entries(files)) {
   const namespace = namespaceMap[file] || file.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
   (resources[language] ||= {})[namespace] = data;
 }
-let storage: Storage;
-try { storage = globalThis.localStorage; } catch { /* unavailable storage uses the default */ }
+let storage: Pick<Storage, 'getItem'>;
+try { storage = deviceStorage(); } catch { /* unavailable storage uses the default */ }
 i18next.init({
   resources, lng: readLanguage(storage), fallbackLng: 'en', supportedLngs: ['zh-Hans', 'en'],
   defaultNS: 'menu', ns: Object.keys(resources.en), initAsync: false,

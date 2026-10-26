@@ -1,3 +1,4 @@
+import {deviceStorage} from '../platform/preferences.mjs';
 import BattleScene, { Button } from "../battle-scene";
 import { Setting, settingDefaults, settingOptions } from "../system/settings";
 import { hasTouchscreen, isMobile } from "../touch-controls";
@@ -112,10 +113,10 @@ export default class SettingsUiHandler extends UiHandler {
   show(args: any[]): boolean {
     super.show(args);
     
-    const settings: object = localStorage.hasOwnProperty('settings') ? JSON.parse(localStorage.getItem('settings')) : {};
+    const settings: object = deviceStorage().hasOwnProperty('settings') ? JSON.parse(deviceStorage().getItem('settings')) : {};
 
     Object.keys(settingDefaults).forEach((setting, s) => this.setOptionCursor(s, setting === Setting.Language
-      ? Object.keys(SUPPORTED_LANGUAGE_ENTRIES).indexOf(readLanguage(localStorage))
+      ? Object.keys(SUPPORTED_LANGUAGE_ENTRIES).indexOf(readLanguage(deviceStorage()))
       : settings.hasOwnProperty(setting) ? settings[setting] : settingDefaults[setting]));
 
     this.settingsContainer.setVisible(true);
@@ -192,7 +193,7 @@ export default class SettingsUiHandler extends UiHandler {
     if (save && setting === Setting.Language) {
       // Upstream requires a reload for static translations. Persist now and let
       // the player reload after saving; never discard an in-progress early turn.
-      try { saveLanguage(localStorage, Object.keys(SUPPORTED_LANGUAGE_ENTRIES)[cursor]); }
+      try { saveLanguage(deviceStorage(), Object.keys(SUPPORTED_LANGUAGE_ENTRIES)[cursor]); }
       catch { this.getUi().playError(); return false; }
     }
 

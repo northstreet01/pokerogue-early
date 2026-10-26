@@ -1,3 +1,5 @@
+import {nativeStorageBridge,createNativeStore} from '../platform/native-storage.mjs';
+const native=()=>nativeStorageBridge()?createNativeStore('legacy'):null;
 const DB_NAME = 'pokerogue-early-local';
 const DB_VERSION = 1;
 const STORE = 'saves';
@@ -39,6 +41,13 @@ export function sessionSaveKey(slot: number): string {
 /** Resolve writes only after the complete IndexedDB transaction is committed. */
 export async function writeLocalSave(key: string, value: string, expectedValue?: string | null): Promise<void> {
   JSON.parse(value);
+  const port=native();if(port){
+    await port.transact([...new Set([key,key+':backup','coop-profile-lease'])],r=>{
+      if(key==='data'&&r['coop-profile-lease']&&JSON.parse(validateRecord(r['coop-profile-lease'])).expires>Date.now())throw Error('合作冒险正在使用收藏存档，请先退出合作页面再保存单人游戏');
+      if(expectedValue!==undefined&&(r[key]?validateRecord(r[key]):null)!==expectedValue)throw Error('本地收藏已被其他页面更新，请重新进入游戏后再保存');
+      return {changes:{...(r[key]?{[key+':backup']:r[key]}:{}),[key]:{schema:1,value,updatedAt:Date.now()}}};
+    });return;
+  }
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(STORE, 'readwrite');
@@ -73,6 +82,7 @@ export async function readLocalSave(key: string): Promise<string | null> {
 
 /** Read collection and receipt records from one consistent database snapshot. */
 export async function readLocalSaveSnapshot(keys: string[]): Promise<Record<string, string | null>> {
+  const port=native();if(port){const r=await port.read(keys);return Object.fromEntries(keys.map(key=>[key,r[key]?validateRecord(r[key]):null]));}
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE, 'readonly');
@@ -91,6 +101,7 @@ export async function readLocalSaveSnapshot(keys: string[]): Promise<Record<stri
 }
 
 export async function deleteLocalSave(key: string): Promise<void> {
+  const port=native();if(port){await port.transact([key,key+':backup'],r=>({changes:{...(r[key]?{[key+':backup']:r[key]}:{}),[key]:null}}));return;}
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(STORE, 'readwrite');
@@ -115,6 +126,15 @@ export async function restoreLocalSaves(records: Record<string, string>): Promis
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('备份记录格式无效');
   }
   if (!records.data && !primary.some(key => records[key])) throw new Error('备份没有可恢复的存档');
+  const port=native();if(port){
+    await port.transact([...allowed,'coop-profile-lease'],r=>{
+      if(r['coop-profile-lease']&&JSON.parse(validateRecord(r['coop-profile-lease'])).expires>Date.now())throw Error('合作页面正在使用收藏，请先退出合作连接再恢复备份');
+      const changes={};for(const key of primary){
+        if(r[key])changes[key+':backup']=r[key];else if(records[key+':backup'])changes[key+':backup']={schema:1,value:records[key+':backup'],updatedAt:Date.now()};
+        changes[key]=records[key]?{schema:1,value:records[key],updatedAt:Date.now()}:null;
+      }return {changes};
+    });return;
+  }
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(STORE, 'readwrite');
@@ -140,6 +160,16 @@ export async function restoreLocalSaves(records: Record<string, string>): Promis
 
 /** Synchronous mutation after all reads, in one transaction; no network awaits inside it. */
 export async function mutateLocalSaves(keys: string[], mutation: (records: Record<string, string | null>) => Record<string, string | null>): Promise<void> {
+  const port=native();if(port){
+    await port.transact([...new Set([...keys,...keys.filter(k=>k!=='coop-profile-lease').map(k=>k+':backup')])],r=>{
+      const values=Object.fromEntries(keys.map(key=>[key,r[key]?validateRecord(r[key]):null])),updates=mutation(values),changes={};
+      for(const [key,value] of Object.entries(updates)){
+        if(!keys.includes(key))throw Error('事务不能修改未读取的记录');if(value!==null)JSON.parse(value);
+        if(r[key]&&key!=='coop-profile-lease')changes[key+':backup']=r[key];
+        changes[key]=value===null?null:{schema:1,value,updatedAt:Date.now()};
+      }return {changes};
+    });return;
+  }
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(STORE, 'readwrite'), store = transaction.objectStore(STORE);

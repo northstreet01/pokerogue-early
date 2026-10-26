@@ -1,3 +1,4 @@
+import {deviceStorage} from '../platform/preferences.mjs';
 import BattleScene, { PokeballCounts, bypassLogin } from "../battle-scene";
 import i18next from '../i18n';
 import Pokemon, { EnemyPokemon, PlayerPokemon } from "../field/pokemon";
@@ -457,8 +458,8 @@ export class GameData {
   public saveSetting(setting: Setting, valueIndex: integer): boolean {
     if (this.readonlyView) return false;
     let settings: object = {};
-    if (localStorage.hasOwnProperty('settings'))
-      settings = JSON.parse(localStorage.getItem('settings'));
+    if (deviceStorage().hasOwnProperty('settings'))
+      settings = JSON.parse(deviceStorage().getItem('settings'));
 
     setSetting(this.scene, setting as Setting, valueIndex);
 
@@ -467,7 +468,7 @@ export class GameData {
         settings[s] = valueIndex;
     });
 
-    localStorage.setItem('settings', JSON.stringify(settings));
+    deviceStorage().setItem('settings', JSON.stringify(settings));
 
     return true;
   }
@@ -475,10 +476,10 @@ export class GameData {
   private loadSettings(): boolean {
     Object.values(Setting).map(setting => setting as Setting).forEach(setting => setSetting(this.scene, setting, settingDefaults[setting]));
 
-    if (!localStorage.hasOwnProperty('settings'))
+    if (!deviceStorage().hasOwnProperty('settings'))
       return false;
 
-    const settings = JSON.parse(localStorage.getItem('settings'));
+    const settings = JSON.parse(deviceStorage().getItem('settings'));
 
     for (let setting of Object.keys(settings))
       setSetting(this.scene, setting as Setting, settings[setting]);
@@ -486,8 +487,8 @@ export class GameData {
 
   public saveTutorialFlag(tutorial: Tutorial, flag: boolean): boolean {
     let tutorials: object = {};
-    if (localStorage.hasOwnProperty('tutorials'))
-      tutorials = JSON.parse(localStorage.getItem('tutorials'));
+    if (deviceStorage().hasOwnProperty('tutorials'))
+      tutorials = JSON.parse(deviceStorage().getItem('tutorials'));
 
     Object.keys(Tutorial).map(t => t as Tutorial).forEach(t => {
       const key = Tutorial[t];
@@ -497,7 +498,7 @@ export class GameData {
         tutorials[key] ??= false;
     });
 
-    localStorage.setItem('tutorials', JSON.stringify(tutorials));
+    deviceStorage().setItem('tutorials', JSON.stringify(tutorials));
 
     return true;
   }
@@ -506,10 +507,10 @@ export class GameData {
     const ret: TutorialFlags = {};
     Object.values(Tutorial).map(tutorial => tutorial as Tutorial).forEach(tutorial => ret[Tutorial[tutorial]] = false);
 
-    if (!localStorage.hasOwnProperty('tutorials'))
+    if (!deviceStorage().hasOwnProperty('tutorials'))
       return ret;
 
-    const tutorials = JSON.parse(localStorage.getItem('tutorials'));
+    const tutorials = JSON.parse(deviceStorage().getItem('tutorials'));
 
     for (let tutorial of Object.keys(tutorials))
       ret[tutorial] = tutorials[tutorial];
@@ -842,7 +843,7 @@ export class GameData {
             resolve(true);
           });
       } else {
-        const reading = dataType < GameDataType.SETTINGS ? this.readLocalData(dataKey) : Promise.resolve(localStorage.getItem(dataKey));
+        const reading = dataType < GameDataType.SETTINGS ? this.readLocalData(dataKey) : Promise.resolve(deviceStorage().getItem(dataKey));
         reading.then(data => {
           if (data) handleData(data);
           resolve(!!data);
@@ -932,7 +933,7 @@ export class GameData {
                     });
                   } else {
                     const writing = dataType < GameDataType.SETTINGS ? writeLocalSave(dataKey, dataStr)
-                      : Promise.resolve(localStorage.setItem(dataKey, dataStr));
+                      : Promise.resolve(deviceStorage().setItem(dataKey, dataStr));
                     writing.then(() => window.location.reload())
                       .catch(error => { console.error(error); displayError((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:dataImportFailed'):'Local save could not be imported.'); });
                   }

@@ -1,3 +1,4 @@
+import {deviceStorage} from './platform/preferences.mjs';
 import { readLocalSaveSnapshot, sessionSaveKey, restoreLocalSaves } from './system/local-save-store';
 
 const status = document.getElementById('status');
@@ -32,7 +33,7 @@ exportButton.addEventListener('click', async () => {
   await refresh();
   if (exportButton.disabled) return;
   const backup = { format: 'pokerogue-early-backup', version: 1, createdAt: new Date().toISOString(), records: snapshot,
-    settings: localStorage.getItem('settings'), tutorials: localStorage.getItem('tutorials') };
+    settings: deviceStorage().getItem('settings'), tutorials: deviceStorage().getItem('tutorials') };
   const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a'); link.href = url; link.download = 'pokerogue-early-backup.json'; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -54,7 +55,7 @@ restoreButton.addEventListener('click', async () => {
     for (const key of ['settings', 'tutorials']) if (backup[key] != null) JSON.parse(backup[key]);
     if (!confirm('将用所选备份替换当前收藏与单人进度。当前存档会保留为上一份快照。确认恢复？')) return;
     await restoreLocalSaves(backup.records);
-    for (const key of ['settings', 'tutorials']) if (typeof backup[key] === 'string') localStorage.setItem(key, backup[key]);
+    for (const key of ['settings', 'tutorials']) if (typeof backup[key] === 'string') deviceStorage().setItem(key, backup[key]);
     await refresh();
     status.textContent = '备份恢复成功，请重新进入游戏。';
   } catch (error) { status.textContent = `恢复失败：${error instanceof Error ? error.message : String(error)}`; }

@@ -29,7 +29,8 @@ function loadTs(path, dependencies, globals = {}) {
 }
 function initialize(storage) {
   const instance = i18next.createInstance();
-  loadTs('src/i18n.ts', { i18next: { default: instance }, './system/language.mjs': language,'./system/presentation-text.mjs':presentationText }, { localStorage: storage });
+  loadTs('src/i18n.ts', { i18next: { default: instance }, './system/language.mjs': language,'./system/presentation-text.mjs':presentationText,
+    './platform/preferences.mjs':{deviceStorage:()=>storage} }, { localStorage: storage });
   return instance;
 }
 
@@ -161,6 +162,7 @@ test('language selection persists until reload and never writes a game save or r
   const saved = storage(null), current = initialize(saved);
   const settings = { Setting: { Language: 'LANGUAGE', Touch_Controls: 'TOUCH_CONTROLS' } };
   const Handler = loadTs('src/ui/settings-ui-handler.ts', {
+    '../platform/preferences.mjs':{deviceStorage:()=>saved},
     '../battle-scene': {}, '../system/settings': settings,
     '../touch-controls': { hasTouchscreen: () => false, isMobile: () => false },
     './text': { TextStyle: { WINDOW: 0, SETTINGS_SELECTED: 1 }, getTextColor: () => '' },

@@ -1,8 +1,14 @@
-# Windows局域网桌面版（首个实施批）
+# Windows局域网桌面版（第二批本地存储）
+
+当前手测包：`build/desktop-storage/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe`。整个目录一起保留。第一批 `build/desktop/release` 是历史包；升级后不要再使用旧包保存个人资料，以免继续写入旧 IndexedDB 形成两份进度。
 
 解压完整发行目录，双击PokeRogue-LAN.exe；必须保留旁边的resources、DLL及其他文件，不能只复制EXE。无需安装Node或开启外部浏览器。素材随程序本地读取；程序启动不会自动对LAN开放房主服务。
 
 原浏览器档案不会自动出现在程序中。可在旧入口导出完整个人备份，再从程序内“档案管理”导入；不要删除旧浏览器资料。程序数据存放于系统应用数据目录的PokeRogue-LAN，包含个人资料、设置、席位/outbox和hosts/formal-rooms。程序菜单可打开目录；备份该目录前先退出程序，备份含私有恢复凭据，不要当邀请码分享。
+
+第二批将个人资料写入上述目录的 `storage/personal.sqlite`。首次检测到旧桌面资料会请求确认迁移；取消不会清除旧资料，也不会以空档覆盖。确认后一次迁入，原 IndexedDB 保留。迁移后不要清除程序数据目录；正常升级只替换程序目录。
+
+菜单“备份个人存档数据库”可在程序运行时生成一致备份；“恢复个人存档数据库”会要求确认，保存当前进度、留下保护备份后恢复并重启。备份含私有席位，别分享。该备份不含房主合作房间；需要备份整局时，退出程序后另存 `hosts/formal-rooms` 完整目录及原 host-id。不要在程序运行时只复制 `personal.sqlite` 主文件，因为还有 WAL 文件参与保存。
 
 房主：进入联机冒险，选择本机房主端口（默认18735），点“启动本机房主”，再创建房间。程序菜单“房主连接信息”可查看地址。队友：在自己程序里进入联机，填写房主HTTP地址（例如http://192.168.1.8:18735），连接后输入房间码。双方到齐、同步及准备完成才进入战斗。个人收藏仍在各自程序内。
 
@@ -15,3 +21,14 @@
 本批只交付Windows桌面基础，永久合作成果、蛋进度/终局孵化与扭蛋完整事务仍后续；不是Android版、完整游戏机制或真实两设备穿透验收。首次本地资源解码仍可能等待，本地加载不等于所有动画永远无卡顿。
 
 开发打包需要Node 22.12及以上，本次使用24.15.0；玩家运行EXE无需安装Node。开发命令：npm run build:desktop（独立构建到build/desktop/app）；npm run start:desktop（运行该产物）；npm run package:desktop（生成build/desktop/release中的Windows目录）。Electron 45需要先执行其显式安装器（node node_modules/electron/install.js）取得运行时，或按该版本官方安装说明准备缓存。不覆盖原dist或build/coop-runtime。
+
+第二批隔离构建使用 PowerShell 环境变量 `$env:POKEROGUE_DESKTOP_OUTPUT='build/desktop-storage'`，随后运行 `npm run build:desktop` 和 `npm run package:desktop`；开发启动使用 `node_modules/electron/dist/electron.exe build/desktop-storage/app`。SQLite 由 Electron 内置，玩家无需安装数据库服务。
+
+本批手测建议：
+
+1. 用新包打开程序；有迁移提示时确认，检查原档案、单人槽位和设置。
+2. 改一个设置或完成一次正常保存，退出后重新打开，确认保留。
+3. 用菜单生成个人数据库备份；在可丢弃的测试档案上修改，再恢复备份，确认程序重启后回到备份状态。
+4. 开房并让另一客户端加入，正常保存后退出房主；原房主重开、双方恢复原席位，检查仍是同一局。
+
+一个人可用 EXE 作房主，再用独立浏览器打开 `http://127.0.0.1:18734` 作另一玩家，连接 `http://127.0.0.1:18735`。两端个人资料独立；不要把同一个席位凭据复制给两端。该办法能测双端操作，真实两设备、声音和穿透仍需另测。

@@ -15,6 +15,8 @@ export function profileRepository(isCurrent=()=>true){
 }
 export function localProfileError(error:any):string {
   const key=String(error?.code??error?.message??'');
+  if(key==='DESKTOP_MIGRATION_REQUIRED')return '尚未确认旧桌面资料迁移。原资料保留，请重试并确认迁移，或退出程序。';
+  if(key==='DESKTOP_MIGRATION_CHANGED')return '迁移期间旧资料发生变化，尚未写入。请停止其他保存操作后重试。';
   const map={LOCAL_WRITER_BUSY:'busy',LOCAL_WRITER_LOST:'lost',LOCAL_PROFILE_CLOSED:'closed',LOCAL_REVISION_CONFLICT:'conflict',
     LOCAL_SOLO_OWNERSHIP_REQUIRED:'ownershipRequired',LOCAL_EGGS_RESERVED:'eggsReserved',LOCAL_ARCHIVE_CORRUPT:'archiveCorrupt',
     LOCAL_VERSION_MISMATCH:'unsupported',ORIGINAL_SAVE_VERSION_MISMATCH:'unsupported',LOCAL_SOURCE_ALREADY_MIGRATED:'sourceConflict',LOCAL_PROFILE_CHANGED:'profileChanged'};

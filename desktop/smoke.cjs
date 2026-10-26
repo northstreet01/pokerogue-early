@@ -27,6 +27,19 @@ module.exports=async({app,window,hosts,origin,dataRoot})=>{
     assert.equal((await evaluate('pokerogueDesktop.hostState()')).value.running,false);
     assert.equal(await evaluate('document.querySelectorAll("canvas").length'),1);
     report.checks.push('local-home','sandboxed-renderer','no-auto-host','single-canvas');
+    const status=await evaluate('pokerogueDesktop.storageStatus()');
+    assert.equal(status.ok,true,status.code);assert.equal(status.value.initialized,true);
+    report.nativeLaunches=await evaluate(`(async()=>{
+      const before=await pokerogueDesktop.storageSnapshot({scope:'legacy',keys:['desktop-smoke-marker']});
+      if(!before.ok)throw Error(before.code);
+      const count=JSON.parse(before.value.records['desktop-smoke-marker']?.value??'0')+1;
+      const reply=await pokerogueDesktop.storageCommit({scope:'legacy',keys:['desktop-smoke-marker'],expectedRevision:before.value.revision,
+        changes:{'desktop-smoke-marker':{schema:1,value:JSON.stringify(count),updatedAt:Date.now()}}});
+      if(!reply.ok)throw Error(reply.code);return count;
+    })()`);
+    assert.equal(await evaluate(`pokerogueDesktop.preference({action:'set',key:'prLang',value:'zh-Hans'}).ok`),true);
+    assert.equal(await evaluate(`pokerogueDesktop.preference({action:'get',key:'prLang'}).value.value`),'zh-Hans');
+    report.checks.push('native-sqlite-initialized','native-save-persistence','native-preferences-ipc');
     report.persistedLaunches=await evaluate(`new Promise((resolve,reject)=>{
       const req=indexedDB.open('desktop-smoke-persistence',1);
       req.onupgradeneeded=()=>req.result.createObjectStore('records');

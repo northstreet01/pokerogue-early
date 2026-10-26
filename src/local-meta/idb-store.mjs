@@ -1,7 +1,9 @@
 import { check, json } from './codec.mjs';
+import {nativeStorageBridge,createNativeStore} from '../platform/native-storage.mjs';
 
 // Separate database: importing this module neither opens nor upgrades the old DB.
 export function createMetaStore({ indexedDB = globalThis.indexedDB, name = 'pokerogue-local-meta' } = {}) {
+  if(name==='pokerogue-local-meta'&&indexedDB===globalThis.indexedDB&&nativeStorageBridge())return createNativeStore('meta');
   async function run(keys, write, mutation) {
     check(Array.isArray(keys) && keys.length > 0 && new Set(keys).size === keys.length
       && keys.every(k => typeof k === 'string' && !['__proto__','prototype','constructor'].includes(k)), 'INVALID_STORE_KEYS');

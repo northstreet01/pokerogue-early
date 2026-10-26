@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {createRequire} from 'node:module';
 import ts from 'typescript';
 import { indexedDB } from 'fake-indexeddb';
 
@@ -9,7 +10,7 @@ const source = fs.readFileSync(new URL('../src/system/local-save-store.ts', impo
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 function load() {
   const exports = {};
-  vm.runInNewContext(code, { exports, indexedDB, console });
+  vm.runInNewContext(code, { exports, indexedDB, console, require:createRequire(new URL('../src/system/local-save-store.ts',import.meta.url)) });
   return exports;
 }
 const saves = load();

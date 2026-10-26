@@ -1,3 +1,7 @@
+<!-- DESKTOP-STORAGE current 2026-10-26 -->
+用户再度要求继续施工，第二批 Windows 本地数据库已实现：main 独占 SQLite，个人 meta/旧存档/席位/outbox/偏好原子事务与 revision CAS；确认迁移保留旧 IDB，增加菜单整库备份和恢复重启。原 codec/档案 CAS/租约/历史和房主房间协议保留。用户新增参考《杀戮尖塔 2》，已核实开发者文章并记录其确定性同步与当前房主计算的区别，见 docs/slay-the-spire-2-reference.md；未切换双端规则计算。详见 docs/desktop-storage-review.md 与 desktop-lan-usage.md。新包 build/desktop-storage/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe，保留第一批 build/desktop 产物。新增存储9项通过；相关207候选206通过1项测试依赖缺失，补齐后该语言文件9/9，其余198项通过；类型/独立Worker/前端/封装和开发/真实封装EXE合成资料验证退出0，原生持久化跨进程1→2。真实资料迁移、菜单交互、两设备/穿透/声音/长局仍待用户；不自动原第五批/Android/全套或200。仅early、不创建联系agent、未改真实档案/房间/隧道、不推送合并。新包手测反馈前停止扩展；下方等待/未做文件后端是历史。
+<!-- /DESKTOP-STORAGE current -->
+
 <!-- DESKTOP-LAN current 2026-10-26 -->
 用户确认EXE/APK、本地资源/个人档案、玩家电脑托管LAN房主及自行穿透，并在文档停止后明确“继续施工吧”。Windows首个桌面批已实现：Electron受限桥、loopback资源18734与按需LAN房主18735分离、固定AppData个人IDB/席位/outbox与房间目录、原Worker/正式协议/同Game切换和关闭保存；不改原规则、不做中央对局或穿透服务。6/6平台、3文件149/149相关、类型/独立Worker/最终前端/封装均退出0。真实封装EXE从Windows CWD启动，通过原Worker房间/双WS/磁盘恢复、界面开房和跨进程本地测试DB保留；不是双设备、声音、完整单人/长局或永久grants验收。
 产物build/desktop/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe（整个目录保留），本批证据build/desktop/final-evidence.json。详见[架构转型](desktop-lan-transition.md)、[实施验收](desktop-lan-review.md)和[使用/手测](desktop-lan-usage.md)。第五批、Android和文件repository后端仍后续，不自动推进。仅early、未创建联系agent；原8034启动核对已无监听，本批未重启、未改真实档案/房间/隧道，不推送合并部署；Git/进程以实际复查为准。下方旧“等待用户手测/未实施桌面”仅为当时历史。

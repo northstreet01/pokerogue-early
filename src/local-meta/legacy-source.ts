@@ -1,9 +1,10 @@
+import {deviceStorage} from '../platform/preferences.mjs';
 import { readLocalSaveSnapshot, sessionSaveKey } from '../system/local-save-store';
 import { check } from './codec.mjs';
 import { originalSaveCodec } from './original-save-codec';
 
 /** Explicit read only. Never called by startup and never changes old records. */
-export async function captureLegacySource(storage: Pick<Storage, 'getItem'> = localStorage) {
+export async function captureLegacySource(storage: Pick<Storage, 'getItem'> = deviceStorage()) {
   const primary = ['data','coop-grants','coop-experiment-data','coop-experiment-grants','coop-seats',...[0,1,2].map(sessionSaveKey)];
   const keys = [...primary,...primary.map(k => `${k}:backup`),'coop-profile-lease'];
   const snapshot = await readLocalSaveSnapshot(keys);

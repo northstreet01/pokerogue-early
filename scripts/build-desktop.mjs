@@ -2,7 +2,8 @@ import {build} from 'vite';
 import {resolve,join} from 'node:path';
 import {mkdir,cp,writeFile,readFile} from 'node:fs/promises';
 import {buildCoopRuntime} from './build-coop-runtime.mjs';
-const root=resolve('build/desktop/app');
+import {desktopOutput} from './desktop-output.mjs';
+const root=join(desktopOutput(),'app');
 await mkdir(root,{recursive:true});
 // Never overwrite dist/runtime belonging to an active browser service.
 await buildCoopRuntime({outDir:join(root,'build/coop-runtime')});
@@ -13,6 +14,8 @@ for(const name of ['formal-coop-service.mjs','host-identity.mjs','original-coop-
   await cp(join('server',name),join(root,'server',name));
 await mkdir(join(root,'src/battle-core'),{recursive:true});
 await cp('src/battle-core/coop-contract.mjs',join(root,'src/battle-core/coop-contract.mjs'));
+await mkdir(join(root,'src/local-meta'),{recursive:true});
+await cp('src/local-meta/codec.mjs',join(root,'src/local-meta/codec.mjs'));
 await mkdir(join(root,'node_modules'),{recursive:true});
 await cp('node_modules/ws',join(root,'node_modules/ws'),{recursive:true});
 const pkg=JSON.parse(await readFile('package.json','utf8'));

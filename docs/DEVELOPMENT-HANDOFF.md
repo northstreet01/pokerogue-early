@@ -1,3 +1,8 @@
+<!-- DESKTOP-LAN current 2026-10-26 -->
+用户确认EXE/APK、本地资源/个人档案、玩家电脑托管LAN房主及自行穿透，并在文档停止后明确“继续施工吧”。Windows首个桌面批已实现：Electron受限桥、loopback资源18734与按需LAN房主18735分离、固定AppData个人IDB/席位/outbox与房间目录、原Worker/正式协议/同Game切换和关闭保存；不改原规则、不做中央对局或穿透服务。6/6平台、3文件149/149相关、类型/独立Worker/最终前端/封装均退出0。真实封装EXE从Windows CWD启动，通过原Worker房间/双WS/磁盘恢复、界面开房和跨进程本地测试DB保留；不是双设备、声音、完整单人/长局或永久grants验收。
+产物build/desktop/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe（整个目录保留），本批证据build/desktop/final-evidence.json。详见[架构转型](desktop-lan-transition.md)、[实施验收](desktop-lan-review.md)和[使用/手测](desktop-lan-usage.md)。第五批、Android和文件repository后端仍后续，不自动推进。仅early、未创建联系agent；原8034启动核对已无监听，本批未重启、未改真实档案/房间/隧道，不推送合并部署；Git/进程以实际复查为准。下方旧“等待用户手测/未实施桌面”仅为当时历史。
+<!-- /DESKTOP-LAN current -->
+
 <!-- COOP-RECOVERY final 2026-10-26 -->
 用户8034手测“复活后伤药RUNNER_FAILED”本轮已修，最终源码／测试5f9a1fab6cd58e074976f60a3162ed02fbc73d2a。只读故障房间副本复现：伤药本身成功，最后一项实际为免费POTION；整备结束进入第5波训练家时原loadAtlas读不存在的textures.exists。native绑定补空纹理／音频缓存端口，复用原loader，不改规则。真实Worker重放同一副本到wave5／wait-actions；诊断未改写原房间。
 正式联机本已每个安全决策节点原子自动保存。本轮新增常驻“卡住脱离／重载存档”，同Game停止旧队列后恢复精确host／profile／run／seat，token不进URL；运行器故障另提供双方确认撤回未成功结算输入。保留原检查点、已完成购买、RNG、回执和grants，revision递增并重新ACK，旧actionId不重放；存储故障拒绝强清。不是任意回档，也未改单人存档频率。

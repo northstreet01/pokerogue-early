@@ -1,3 +1,7 @@
+<!-- DESKTOP-LAN current 2026-10-26 -->
+用户最新“继续施工吧”已授权Windows桌面首批，实际交付与边界见[桌面实施验收](desktop-lan-review.md)。保留原规则/adapter/正式房间和个人repository，新增本地资源程序与按需LAN房主、固定应用数据和生命周期；6项平台及149项相关、类型/Worker/前端/EXE封装通过，真实封装进程独立CWD启动/开房/恢复和本地DB保留已验。双设备/自行穿透/声音/正常长局仍待用户，永久grants/蛋、Android和文件后端不因此完成，不自动下一批。先交用户测试Windows产物，再按[转型路线](desktop-lan-transition.md)安排后续；不重跑旧全套或200。仅early、不创建联系agent，真实服务/档案/房间/隧道未改。
+<!-- /DESKTOP-LAN current -->
+
 <!-- COOP-RECOVERY final 2026-10-26 -->
 用户8034手测“复活后伤药RUNNER_FAILED”本轮已修，最终源码／测试5f9a1fab6cd58e074976f60a3162ed02fbc73d2a。只读故障房间副本复现：伤药本身成功，最后一项实际为免费POTION；整备结束进入第5波训练家时原loadAtlas读不存在的textures.exists。native绑定补空纹理／音频缓存端口，复用原loader，不改规则。真实Worker重放同一副本到wave5／wait-actions；诊断未改写原房间。
 正式联机本已每个安全决策节点原子自动保存。本轮新增常驻“卡住脱离／重载存档”，同Game停止旧队列后恢复精确host／profile／run／seat，token不进URL；运行器故障另提供双方确认撤回未成功结算输入。保留原检查点、已完成购买、RNG、回执和grants，revision递增并重新ACK，旧actionId不重放；存储故障拒绝强清。不是任意回档，也未改单人存档频率。

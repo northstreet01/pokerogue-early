@@ -5,7 +5,6 @@ import { resolve } from 'node:path';
 import { build } from 'vite';
 import { IDBFactory } from 'fake-indexeddb';
 import { JSDOM } from 'jsdom';
-import { showCoopExitReturn } from '../src/coop/exit-home.mjs';
 import { createPlayStorage } from '../src/coop/play-storage.mjs';
 import { pauseAutoResume, autoResumePaused, allowAutoResume } from '../src/coop/exit-recovery.mjs';
 import { digestProjection } from '../src/battle-core/coop-client.mjs';
@@ -521,20 +520,29 @@ test('emergency reload is outside stalled controls and resumes the exact host se
   p.stopSession();
 });
 
-test('return notice offers explicit fresh cooperative entry, explains failed persistence and preserves the solo page', () => {
-  for (const result of ['saved', 'limited', 'defeat', 'victory', 'unknown', '']) {
-    const dom = new JSDOM('<body><div id="app">original solo</div></body>', { url: `${origin}/?coopExit=${result}` });
-    try {
-      const notice = showCoopExitReturn(dom.window.document, dom.window.location);
-      assert.equal(dom.window.document.getElementById('app').textContent, 'original solo');
-      if (!['saved', 'limited', 'defeat', 'victory'].includes(result)) { assert.equal(notice, null); continue; }
-      assert.equal(showCoopExitReturn(dom.window.document, dom.window.location), notice);
-      assert.equal(notice.querySelector('a').getAttribute('href'), '/coop-play.html?fresh=1');
-      assert.match(notice.textContent, result === 'victory' ? /第200波通关.*权益已记录/ : result === 'defeat' ? /双方队伍已全部倒下.*冒险结束/ : result === 'limited' ? /未确认保存/ : /未清除/);
-      notice.querySelector('button').click();
-      assert.equal(dom.window.document.getElementById('coop-exit-return'), null);
-    } finally { dom.window.close(); }
+test('fresh lobby returns repeatedly over a previously paused seat without changing its credentials', async () => {
+  const {p}=phase(); exitEnvironment(p);
+  await p.storage.beginSession(origin,p.session());
+  await p.storage.saveSeat(origin,{roomId:'ABCDEF',seat:0,token:'retained'},p.session());
+  await p.storage.pauseSession(origin,p.session());
+  const store=p.storage;
+  for(let i=0;i<3;i++) {
+    const {p:next}=phase();exitEnvironment(next);next.storage=store;
+    assert.equal(await next.pauseForNavigation(),true);
+    assert.equal(await store.loadSeat(origin),null);
+    assert.equal((await store.listSeats(origin)).length,1);
   }
+});
+
+test('guarded return failure keeps the live lobby and retries persistence rather than caching false',async()=>{
+  const {p}=phase(),env=exitEnvironment(p);p.createOverlay();
+  const overlay=p.overlay;let attempts=0;
+  p.storage={pauseSession:async()=>++attempts>1};
+  assert.equal(await p.pauseForNavigation(),false);
+  assert.equal(p.disposed,false);assert.equal(overlay.isConnected,true);assert.equal(env.closed(),0);
+  assert.equal(await p.pauseForNavigation(),true);assert.equal(attempts,2);
+  // Teardown belongs to successful scene shutdown, after closeProfile succeeds.
+  assert.equal(p.disposed,false);p.stopSession();
 });
 
 test('explicit activation clears fallback pause only after its IDB commit and failed activation preserves it', async () => {

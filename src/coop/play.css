@@ -56,4 +56,6 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #coop-play-overlay .coop-item-entry:hover .coop-item-description,#coop-play-overlay .coop-item:focus-visible+.coop-item-description,#coop-play-overlay .coop-item[aria-expanded=true]+.coop-item-description{display:block}
 #coop-play-overlay .coop-item:focus-visible{outline:3px solid #e6c65c}
 #coop-play-overlay .coop-item[data-dismissed=true]+.coop-item-description{display:none}
+#desktopControls { color: #dae7f7; }
+#app-navigation-error { flex-basis: 100%; color: #ffd4bc; }
 @media(max-width:600px){#coop-play-overlay .coop-team-slot{font-size:10px}#coop-play-overlay .coop-team-heading{font-size:12px}#coop-play-overlay .coop-atlas-icon{width:36px}#coop-play-overlay .coop-inventory{align-items:flex-start}}

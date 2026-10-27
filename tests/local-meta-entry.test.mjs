@@ -209,7 +209,10 @@ test('failed identity discovery retries owned rooms, clears an older retry on re
 });
 test('return uses the same app navigation and closes the cooperative writer before switching',async t=>{
  const {p,scene}=uiPhase(t),events=[];
- scene.gameData.closeProfile=async()=>events.push('close');scene.navigateApp=async()=>events.push('navigate');
+ scene.prepareAppLeave=()=>p.pauseForNavigation();
+ scene.gameData.closeProfile=async()=>events.push('close');scene.navigateApp=async()=>{
+   await closeAppScene(scene);events.push('navigate');
+ };
  p.storage={pauseSession:async()=>{events.push('pause');return true;}};
  const first=p.leaveSession(),second=p.leaveSession();assert.equal(first,second);await first;
  assert.deepEqual(events,['pause','close','navigate']);assert.equal(document.querySelector('#coop-play-overlay'),null);

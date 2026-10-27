@@ -14,7 +14,6 @@ import {legacyBackupSource} from './local-meta/repository.mjs';
 import {digest} from './local-meta/codec.mjs';
 import i18next from './i18n';
 import {readHosts,hostScope} from './coop/host-connection.mjs';
-import {showCoopExitReturn} from './coop/exit-home.mjs';
 
 /** Root has no login/save/room side effects. Direct game entries retain login. */
 export function entryPhases(scene: BattleScene, coop: boolean, solo: boolean): Phase[] {
@@ -41,7 +40,6 @@ export class HomePhase extends Phase {
     this.scene.fadeOutBgm(0, false);
     this.scene.playBgm?.('menu', false, this.music.signal);
     this.scene.ui.fadeIn(250);
-    showCoopExitReturn(document,this.scene.appUrl??location,url=>this.navigate(url));
     // Original town art, without any party, enemy, battle HUD or old scene.
     if(this.scene.add?.nineslice){
       this.backdrop=this.scene.add.nineslice(0,0,'town_bg',null,320,180,0,0,132,0);
@@ -58,7 +56,6 @@ export class HomePhase extends Phase {
     this.music.abort(); this.scene.fadeOutBgm?.(150, true);
     this.fileInput?.remove();
     this.backdrop?.destroy();
-    document.getElementById('coop-exit-return')?.remove();
     this.releaseView();
   }
 
@@ -115,13 +112,16 @@ export class HomePhase extends Phase {
       this.activeProfile=index.activeProfileId;
       this.profileName=index.profiles.find(p=>p.profileId===this.activeProfile)?.displayName??'';
     }catch(error){if(this.current(epoch))await this.menu(epoch,[[this.t('retry'),()=>this.showHome()]],localProfileError(error));return;}
+    const outcome = this.scene.appUrl?.searchParams.get('coopExit');
+    const outcomeText = outcome === 'victory' ? '经典模式通关！永久收藏与扭蛋结算待接入。'
+      : outcome === 'defeat' ? '双方队伍已倒下，本次冒险结束。' : undefined;
     return this.menu(epoch, [
       ['单人冒险', () => this.navigate('/?solo=1')],
       ['联机冒险', () => this.navigate('/coop-play.html?fresh=1')],
       ['恢复已有联机', () => { void this.showRecovery(); }],
       ['个人收藏 / 蛋 / 券', () => { void this.showPersonal(); }],
       [this.t('profiles'),()=>this.showProfiles()],
-    ]);
+    ], outcomeText);
   }
 
   private showPersonal(): Promise<void> {

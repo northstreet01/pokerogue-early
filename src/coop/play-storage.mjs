@@ -122,6 +122,9 @@ export function createPlayStorage(factory = globalThis.indexedDB) {
         target.get(`active:${origin}`).onsuccess = event => {
           const active = event.target.result;
           // Do not let an old page's late leave clear a newer explicit session.
+          // A fresh lobby may never acquire a seat; an already paused record
+          // needs no write and must not trap repeated home/lobby navigation.
+          if (active?.paused) { done(true); return; }
           if (active?.sessionId && active.sessionId !== session.id) { done(false); return; }
           target.put({ sessionId: session.id, key: null, paused: true }, `active:${origin}`);
           done(true);

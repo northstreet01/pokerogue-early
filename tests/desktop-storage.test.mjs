@@ -120,6 +120,9 @@ test('native seats/outbox preserve identity and reject delayed old sessions even
     assert.deepEqual(await play.resumeSession(origin,second,'ABC123',0),seat);
     assert.deepEqual(await play.pendingActions('different-host','ABC123',0),[]);
     await play.pauseSession(origin,second);assert.equal(await play.beginSession(origin,second,true),null);
+    const paused=e.db.snapshot('seats',null).records;
+    assert.equal(await play.pauseSession(origin,{id:'fresh-lobby',isCurrent:()=>true}),true);
+    assert.deepEqual(e.db.snapshot('seats',null).records,paused,'already paused record remains unchanged');
     e.db.close();const reopened=openDesktopStorage(e.dir);
     try{const next=createNativePlayStorage(bridgeFor(reopened));assert.equal(await next.loadSeat(origin),null);assert.deepEqual(await next.pendingActions(origin,'ABC123',0),[action]);}finally{reopened.close();}
   }catch(error){try{e.db.close();}catch{}throw error;}

@@ -154,17 +154,18 @@ export default class CoopPlayPhase extends Phase {
 
   private pauseForNavigation():Promise<boolean>{
     if(this.pauseTask)return this.pauseTask;
-    pauseAutoResume();
-    this.stopSession();
     // Neither network nor a stalled IDB open may hold the player in this page.
     this.pauseTask = (async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const committed = await Promise.race([
-        Promise.all([this.storage.pauseSession(this.origin, this.session()).catch(() => false),
-          (this.scene.gameData?.closeProfile?.()??Promise.resolve()).then(()=>true,()=>false)]).then(([saved,profileSaved])=>saved&&profileSaved),
+        this.storage.pauseSession(this.origin, this.session()).catch(() => false),
         new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 500); }),
       ]);
       if (timer) clearTimeout(timer);
+      // The shared navigation owner closes the profile and then shuts down the
+      // scene. A rejected save must not destroy its overlay/socket beforehand.
+      if (committed) pauseAutoResume();
+      else this.pauseTask = null;
       return committed;
     })();return this.pauseTask;
   }
@@ -172,6 +173,8 @@ export default class CoopPlayPhase extends Phase {
     if(this.exitTask)return this.exitTask;
     this.exitTask=(async()=>{
       const committed=await this.pauseForNavigation();
+      // The explicit emergency exit retains its existing bounded fallback.
+      pauseAutoResume(); this.stopSession();
       const url=reason?`/?coopExit=${reason}`:committed ? '/?coopExit=saved' : '/?coopExit=limited';
       if(this.scene.navigateApp)await this.scene.navigateApp(url,{discard:!committed});else location.assign(url);
     })();

@@ -34,6 +34,7 @@ export function createNativePlayStorage(bridge){
       });
     },
     pauseSession(origin,session){const active=`active:${origin}`;return seats.transact([active],r=>{
+      if(r[active]?.paused)return {changes:{},result:true};
       if(r[active]?.sessionId&&r[active].sessionId!==session.id)return {changes:{},result:false};
       return {changes:{[active]:{sessionId:session.id,key:null,paused:true}},result:true};
     });},

@@ -1,8 +1,18 @@
-# PokéRogue Early — 本地程序与双人局域网合作
+# PokéRogue LAN — 本地程序与双人局域网合作
 
-基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的 early 版本，保留原版单人玩法，开发玩家自己托管房间的 LAN Host-Client 双人合作。资源与个人存档保存在各自设备，房主电脑运行原规则 Worker 并保存合作冒险，不依赖开发者服务器计算对局。
+基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的历史版本，保留原版单人玩法，开发玩家自己托管房间的 LAN Host-Client 双人合作。资源与个人存档保存在各自设备，房主电脑运行原规则 Worker 并保存合作冒险，不依赖开发者服务器计算对局。
 
-更新日期：2026-10-28。当前已交付 Windows x64 测试程序、本地 SQLite 存档和原版联机可玩流程，仍处于开发与手测阶段；不是全部原版功能或所有设备环境均已验收。
+源码仓库：[northstreet01/pokerogue-lan](https://github.com/northstreet01/pokerogue-lan)。原仓库 `pokerogue-early` 已更名，本地目录可继续使用原名；已有克隆执行 `git remote set-url origin https://github.com/northstreet01/pokerogue-lan.git` 更新远端。
+
+## 安全与维护
+
+安全说明及漏洞私下报告方式见 [SECURITY.md](SECURITY.md)。存档、SQLite 数据库、房主目录、恢复凭据、环境配置和诊断副本均属于私人数据，不要上传到仓库或公开 Issue；截图和日志也须先脱敏。六位房间码用于加入房间，不能替代私有席位恢复凭据。
+
+依赖更新由 Dependabot 定期检查；安全工作流检查依赖漏洞、扫描 Git 历史中的密钥并运行 CodeQL。自动扫描不能保证不存在泄露。提交前检查暂存差异，安装依赖使用 `npm ci --ignore-scripts`，定期执行 `npm audit`。公网连接优先使用可信虚拟局域网或 TLS 入口，普通 HTTP/WS 不加密房间通信。
+
+默认分支 `main` 展示已提交且检查通过的发布内容。功能分支和本机未提交的修复不代表已经发布；Git 推送也不会上传被忽略的 Windows 发行包。
+
+更新日期：2026-10-29。当前已交付 Windows x64 测试程序、本地 SQLite 存档和原版联机可玩流程，仍处于开发与手测阶段；不是全部原版功能或所有设备环境均已验收。
 
 最新完成：局域网自动发现／远程IP入口、原版常规道具、Mega／超极巨化／太晶化及本人队伍DNA融合。形态机制复用原表和素材，已验证部分代表形态；全形态、特殊触发与主动开关尚未逐项补齐。经典模式目前按原路线与种子自动换区，地图道具手动选路仍未接入。
 

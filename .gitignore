@@ -47,3 +47,27 @@ pokerogue-early-backup*.json
 audit-output/
 build/
 server/data/
+
+# Credentials, private player/host data and local diagnostics
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.netrc
+.aws/
+.ssh/
+storage/
+hosts/
+backups/
+*.dmp
+*.har
+
+# Local planning and agent handoff material
+SPEC*.md
+**/AGENT*.md
+**/*PROMPT*.md

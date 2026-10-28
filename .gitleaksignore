@@ -1,0 +1,3 @@
+# Upstream's public AES passphrase for legacy save import/export, not a service
+# credential. Keep this exact historical finding only; scan all other findings.
+2499edd78c696c9d61dec0dfc9e660e27df654dd:src/system/game-data.ts:generic-api-key:32

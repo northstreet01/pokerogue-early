@@ -16,6 +16,7 @@ import { createModifierPoolState } from '../battle-core/modifier-pool-state.mjs'
 import { withOriginalRules } from '../../server/original-random-context.mjs';
 import { captureStarterSelection, restoreStarterSelection, starterFormIndex, starterGender } from '../coop/original-starter-selection';
 import { validateProfile, priceProfile, validateProfileDraft, priceProfileDraft, projectProfileSelection } from '../coop/original-profile-entry';
+import {mergeRoomCatalogs,validateRoomSelection} from '../coop/room-catalog';
 import { openNativeBattle, openNativeSelectedBattle, stepNativeEntry, openNativeBattleToInput,
   openNativeSelectedBattleToInput, validateNativeAction, submitNativeActions,
   openNativePreparation, chooseNativePreparation, nextNativeBattle, chooseNativeSwitch, runNativeUntilBoundary,
@@ -175,6 +176,8 @@ export async function executeRuntimeOperation(runtime: ReturnType<typeof createO
   if (operation === 'validate-profile') return priceProfile(payload);
   if (operation === 'normalize-profile') return { profile: validateProfile(payload), priced: priceProfile(payload) };
   if (operation === 'normalize-profile-draft') return { profile: validateProfileDraft(payload), priced: priceProfileDraft(payload) };
+  if (operation === 'merge-room-catalogs') return mergeRoomCatalogs(payload);
+  if (operation === 'validate-room-selection') return validateRoomSelection(payload.profile,payload.catalogs);
   if (operation === 'project-profile-selection') return projectProfileSelection(payload);
   if (operation === 'construct') {
     if (!payload || Object.keys(payload).sort().join(',') !== 'enemy,level,speciesId' || typeof payload.enemy !== 'boolean')

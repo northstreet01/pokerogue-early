@@ -2,6 +2,7 @@ import { GameData } from '../system/game-data';
 import { allSpecies, getPokemonSpecies, speciesStarters } from '../data/pokemon-species';
 import { originalOwnedEggStateCodec } from '../original-phase-checkpoints';
 import { captureStarterSelection, restoreStarterSelection, validateStarterSelection } from './original-starter-selection';
+import {validateRoomCatalog} from './room-catalog';
 
 // Minimal imported-profile bridge. It is an explicit local-mirror import, not
 // an authenticated account or a claim that the client owns the original save.
@@ -32,7 +33,7 @@ const identity = value => {
 };
 
 function validateProfileSelection(value, allowEmpty: boolean) {
-  exact(value, KEYS);
+  exact(value, Object.prototype.hasOwnProperty.call(value??{},'catalog')?[...KEYS,'catalog']:KEYS);
   if (value.version !== PROFILE_VERSION) fail('INVALID_PROFILE_VERSION');
   identity(value.trainer);
   array(value.starters, allowEmpty ? 0 : 1, 6, 'INVALID_PROFILE_STARTERS');
@@ -93,6 +94,7 @@ function validateProfileSelection(value, allowEmpty: boolean) {
     unlocks,
     costs,
     eggs,
+    ...(Object.prototype.hasOwnProperty.call(value,'catalog')?{catalog:validateRoomCatalog(value.catalog)}:{}),
   };
 }
 
@@ -141,8 +143,8 @@ function captureProfileSelection(gameData, starters, allowEmpty: boolean) {
 
 export const validateProfile = value => validateProfileSelection(value, false);
 export const validateProfileDraft = value => validateProfileSelection(value, true);
-export const captureProfile = (gameData, starters) => captureProfileSelection(gameData, starters, false);
-export const captureProfileDraft = (gameData, starters) => captureProfileSelection(gameData, starters, true);
+export const captureProfile = (gameData, starters, catalog?:any[]) => ({...captureProfileSelection(gameData, starters, false),...(catalog?{catalog:validateRoomCatalog(catalog)}:{})});
+export const captureProfileDraft = (gameData, starters, catalog?:any[]) => ({...captureProfileSelection(gameData, starters, true),...(catalog?{catalog:validateRoomCatalog(catalog)}:{})});
 
 export function restoreProfile(value) {
   const normalized = validateProfile(value);

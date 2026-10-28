@@ -24,6 +24,7 @@ import i18next from '../i18n';
 import {identifyHost,normalizeEndpoint,hostSocketUrl,hostScope,readHosts,rememberHost,hostConnectionError} from './host-connection.mjs';
 import {desktopHost,startDesktopHost} from '../desktop-host.mjs';
 import {renderTeams,renderInventory,progressText} from './room-display.mjs';
+import {captureRoomCatalog,roomSelectionData} from './room-catalog';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -476,7 +477,7 @@ export default class CoopPlayPhase extends Phase {
               this.draftResync = true;
               this.send({ type: 'requestSnapshot', roomId: this.roomId, runId: this.runId,
                 knownRevision: this.latest.revision, reason: 'DRAFT_RETRY' });
-            } else draft.error = `操作被拒绝：${message.code}`;
+            } else draft.error = message.code==='ROOM_SPECIES_OCCUPIED'?'该物种已被队友选用，请移除或改选':`操作被拒绝：${message.code}`;
           }
           this.renderDraftStatus(); this.renderLobbyControls();
           return;
@@ -570,6 +571,10 @@ export default class CoopPlayPhase extends Phase {
           names:this.playerNames,t:(key,values)=>i18next.t('coop:'+key,values)});
       }
       if (!this.profileDirty) this.lastProfile = snapshot.personal.profile ?? this.lastProfile;
+      if(snapshot.personal.roomSharing&&!snapshot.personal.profile?.catalog&&!this.lobbyDraft){
+        this.queueLobbyDraft(captureProfileDraft(this.scene.gameData,[],captureRoomCatalog(this.scene.gameData)));
+      }
+      if(this.starterOpen&&snapshot.personal.roomSharing)(this.scene.ui.getHandler(Mode.STARTER_SELECT) as any).updateInstructions();
       if (snapshot.personal.profile) this.setStatus('已导入选队，等待队友…');
       this.renderLobbyControls();
       this.renderDraftStatus();
@@ -1433,6 +1438,9 @@ export default class CoopPlayPhase extends Phase {
 
   private async openStarterSelect() {
     if (this.disposed || this.starterOpen || !this.inputReady) return;
+    if(this.latest?.personal.roomSharing&&!this.latest.shared.catalogReady?.every(Boolean)){
+      this.setStatus('等待双方共享图鉴完成后再选队。');return;
+    }
     this.overlay?.classList.add('selecting-team');
     this.scene.scale?.getParentBounds?.();
     this.scene.scale?.refresh?.();
@@ -1441,6 +1449,10 @@ export default class CoopPlayPhase extends Phase {
     this.draftFinal = false; this.confirmSelectionPending=false;
     const menuEpoch = ++this.starterMenuEpoch;
     const roomId = this.roomId, runId = this.runId;
+    const sharing=this.latest?.personal.roomSharing;
+    const catalog=sharing?captureRoomCatalog(this.scene.gameData):undefined;
+    const selectionData=sharing?roomSelectionData(this.scene.gameData,this.latest.personal.roomCatalog??catalog):this.scene.gameData;
+    const blocked=(speciesId:number)=>!!this.latest?.shared.selections?.find(p=>p.seat!==this.seat)?.starters?.some(p=>p.speciesId===speciesId);
     const current = () => this.current(lifecycle) && this.roomId === roomId && this.runId === runId
       && this.starterMenuEpoch === menuEpoch;
     try {
@@ -1449,7 +1461,7 @@ export default class CoopPlayPhase extends Phase {
       this.starterTransition = this.scene.ui.setMode(Mode.STARTER_SELECT, (starters: any[]) => {
         if (!current()) return;
         try {
-          const profile = captureProfile(this.scene.gameData, starters);
+          const profile = captureProfile(selectionData, starters,catalog);
           this.queueLobbyDraft(profile);
           this.draftFinal = false; this.confirmSelectionPending=true;
           this.closeStarterSelect();
@@ -1458,11 +1470,11 @@ export default class CoopPlayPhase extends Phase {
           this.closeStarterSelect(); // The original callback was consumed; leave before reopening it.
           this.setStatus(`选队失败：${error?.message ?? error}`, true);
         }
-      }, { gameMode: GameModes.CLASSIC, confirmOnly:true,
+      }, { gameMode: GameModes.CLASSIC, confirmOnly:true,gameData:selectionData,isSpeciesBlocked:sharing?blocked:undefined,
         starters: this.lastProfile?.starters.map(restoreStarterSelection),
         onChange: (starters: any[]) => {
           if (!current() || !this.starterOpen) return;
-          try { this.queueLobbyDraft(captureProfileDraft(this.scene.gameData, starters)); }
+          try { this.queueLobbyDraft(captureProfileDraft(selectionData, starters,catalog)); }
           catch (error: any) { this.setStatus(`选队草稿失败：${error?.message ?? error}`, true); }
         }, onCancel: () => {
           if (!current()) return;

@@ -62,6 +62,8 @@ export function createOriginalClientModel({ restorePokemonState, capturePokemonS
       if (Object.hasOwn(applied.personal, 'selection')) personal.selection = COPY(applied.personal.selection);
       if (Object.hasOwn(applied.personal, 'profile')) personal.profile = COPY(applied.personal.profile);
       if (Object.hasOwn(applied.personal, 'priced')) personal.priced = COPY(applied.personal.priced);
+      if (Object.hasOwn(applied.personal, 'roomCatalog')) personal.roomCatalog = COPY(applied.personal.roomCatalog);
+      if (Object.hasOwn(applied.personal, 'roomSharing')) personal.roomSharing = applied.personal.roomSharing;
       return { shared: COPY(applied.shared), personal };
     },
 

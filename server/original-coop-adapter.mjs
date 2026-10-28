@@ -11,7 +11,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
 // The desktop host, local development server and standalone server share one
 // production configuration. Player identity/team arrive through verified profiles.
 export function createPlayerHostAdapter({seedFactory=()=>randomUUID(),hostFactory}={}) {
-  return createOriginalCoopAdapter({hostFactory,seedFactory,fixture:{profileLobby:true,sharedPreparation:true,
+  return createOriginalCoopAdapter({hostFactory,seedFactory,fixture:{profileLobby:true,sharedPreparation:true,roomSharing:true,
     identities:[{trainerId:0,secretId:0},{trainerId:0,secretId:0}]}});
 }
 
@@ -195,13 +195,26 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
     return { profile: normalized.profile, priced: normalized.priced, ready: action.ready,
       ...(draft ? { selectionState: 'draft' } : {}) };
   }
-  function withProfilePlayers(context, seat, candidate) {
+  async function withProfilePlayers(context, seat, candidate) {
     const players = context.lobby.players.map((player, index) => index === seat ? candidate : player);
+    if(context.provisioning.roomSharing)check(candidate.profile.catalog,'ROOM_CATALOG_REQUIRED');
+    if(context.provisioning.roomSharing&&candidate.profile.starters.length)
+      check(players.every(p=>p.profile?.catalog),'ROOM_CATALOG_NOT_READY');
+    const catalogs=players.flatMap(p=>p.profile?.catalog?[p.profile.catalog]:[]);
+    if(catalogs.length){
+      const occupied=new Set();
+      for(const p of players)for(const starter of p.profile?.starters??[]){
+        check(!occupied.has(starter.speciesId),'ROOM_SPECIES_OCCUPIED');occupied.add(starter.speciesId);
+      }
+      const room=await roomFor(context.runId,context.provisioning,true);
+      await request(room,'validate-room-selection',{profile:candidate.profile,catalogs});
+    }
     check(budgetOf(players) <= SHARED_BUDGET, 'SHARED_BUDGET_EXCEEDED');
     return players;
   }
   function checkProfileIdentity(context, seat, normalized) {
     const player = context.lobby.players[seat], current = player.profile;
+    if(current?.catalog)check(canonical(current.catalog)===canonical(normalized.profile.catalog),'ROOM_CATALOG_CHANGED');
     check(!current || canonical(current.trainer) === canonical(normalized.profile.trainer), 'PROFILE_IDENTITY_MISMATCH');
     check(!player.ready || (normalized.selectionState !== 'draft' && canonical(current) === canonical(normalized.profile)),
       'PROFILE_READY_SELECTION_LOCKED');
@@ -236,6 +249,14 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
         if (player.ready) check(player.profile !== null, 'INVALID_CHECKPOINT');
       }
       check(budgetOf(lobby.players) <= SHARED_BUDGET, 'SHARED_BUDGET_EXCEEDED');
+      if(checkpoint.provisioning.roomSharing){
+        const catalogs=lobby.players.flatMap(p=>p.profile?.catalog?[p.profile.catalog]:[]),occupied=new Set();
+        for(const player of lobby.players)if(player.profile){
+          check(player.profile.catalog,'ROOM_CATALOG_REQUIRED');
+          for(const starter of player.profile.starters){check(!occupied.has(starter.speciesId),'ROOM_SPECIES_OCCUPIED');occupied.add(starter.speciesId);}
+          await request(room,'validate-room-selection',{profile:player.profile,catalogs});
+        }
+      }
       check(!lobby.players.every(player => player.ready), 'INVALID_CHECKPOINT');
       return true;
     }
@@ -261,7 +282,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       check(Array.isArray(fixtureIdentities) && fixtureIdentities.length === 2, 'INVALID_TRAINER_IDENTITY');
       const seed = fixture.profileLobby && typeof seedFactory === 'function' ? seedFactory() : fixture.seed;
       check(typeof seed === 'string' && seed.length > 0, 'INVALID_ROOM_SEED');
-      const provisioning = { seed, identities: clone(fixtureIdentities), ...(fixture.sharedPreparation ? {sharedPreparation:true} : {}) };
+      const provisioning = { seed, identities: clone(fixtureIdentities), ...(fixture.sharedPreparation ? {sharedPreparation:true} : {}),...(fixture.roomSharing?{roomSharing:true}:{}) };
       const room = await roomFor(runId, provisioning);
       if (fixture.profileLobby) {
         const context = contextFor(room, profileLobbyState(), null, []);
@@ -306,7 +327,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       if (context.profileLobby) {
         const normalized = await normalizeProfileAction(room, action);
         checkProfileIdentity(context, seat, normalized);
-        withProfilePlayers(context, seat, normalized);
+        await withProfilePlayers(context, seat, normalized);
         return;
       }
       if (context.lobby) { await validateLobbyAction(room, action); return; }
@@ -339,7 +360,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
         const seat = Number(seats[0]);
         const normalized = await normalizeProfileAction(room, inputs[seat]);
         checkProfileIdentity(context, seat, normalized);
-        const players = withProfilePlayers(context, seat, normalized);
+        const players = await withProfilePlayers(context, seat, normalized);
         const nextLobby = { ...clone(context.lobby), step: context.lobby.step + 1, players };
         if (players.every(player => player.ready && player.profile)) {
           const identities = players.map(player => clone(player.profile.trainer));
@@ -440,7 +461,8 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       check(Object.keys(checkpoint).sort().join(',') === 'formatVersion,intents,lobby,nativeCheckpoint,provisioning,runId,stage', 'INVALID_CHECKPOINT');
       check([2, 3].includes(checkpoint.formatVersion) && typeof checkpoint.runId === 'string'
         && checkpoint.runId.length > 0, 'INVALID_CHECKPOINT');
-      check(checkpoint.provisioning && ['identities,seed','identities,seed,sharedPreparation'].includes(Object.keys(checkpoint.provisioning).sort().join(','))
+      check(checkpoint.provisioning && ['identities,seed','identities,seed,sharedPreparation','identities,roomSharing,seed','identities,roomSharing,seed,sharedPreparation'].includes(Object.keys(checkpoint.provisioning).sort().join(','))
+        && (!Object.hasOwn(checkpoint.provisioning,'roomSharing') || checkpoint.provisioning.roomSharing===true)
         && (!Object.hasOwn(checkpoint.provisioning,'sharedPreparation') || checkpoint.provisioning.sharedPreparation === true)
         && typeof checkpoint.provisioning.seed === 'string' && checkpoint.provisioning.seed.length > 0
         && Array.isArray(checkpoint.provisioning.identities) && checkpoint.provisioning.identities.length === 2
@@ -512,12 +534,15 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
         })));
         return {
           shared: { format: 3, stage: 'lobby', decision: { id, kind: 'lobby', requiredSeats: [0, 1] },
+            ...(context.provisioning.roomSharing?{catalogReady:context.lobby.players.map(p=>!!p.profile?.catalog)}:{}),
             ready: context.lobby.players.map(player => player.ready),
             selections,
             budget: { shared: SHARED_BUDGET, personal: PERSONAL_BUDGET, used, remaining: SHARED_BUDGET - used } },
           personal: { format: 3, stage: 'lobby', seat,
+            ...(context.provisioning.roomSharing?{roomSharing:true}:{}),
             profile: context.lobby.players[seat].profile ? clone(context.lobby.players[seat].profile) : null,
             priced: context.lobby.players[seat].priced ? clone(context.lobby.players[seat].priced) : null,
+            ...(context.lobby.players.some(p=>p.profile?.catalog)?{roomCatalog:await request(room,'merge-room-catalogs',context.lobby.players.flatMap(p=>p.profile?.catalog?[p.profile.catalog]:[]))}:{}),
             party: [], eggs: context.lobby.players[seat].profile
               ? clone(context.lobby.players[seat].profile.eggs) : null, resources: null,
             decision: { id, kind: 'lobby', requiredSeats: [0, 1], options: null, players: null, switch: null } },

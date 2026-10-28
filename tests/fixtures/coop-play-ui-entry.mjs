@@ -8,6 +8,8 @@ export { default as BallUiHandler } from '../../src/ui/ball-ui-handler';
 export { default as PartyUiHandler, PartyOption, PartyUiMode } from '../../src/ui/party-ui-handler';
 export { default as StarterSelectUiHandler } from '../../src/ui/starter-select-ui-handler';
 export { captureProfileDraft, priceProfileDraft } from '../../src/coop/original-profile-entry';
+export {captureRoomCatalog,mergeRoomCatalogs,roomSelectionData,validateRoomSelection} from '../../src/coop/room-catalog';
+export {withOriginalRules} from '../../server/original-random-context.mjs';
 export { restoreStarterSelection } from '../../src/coop/original-starter-selection';
 export { Mode } from '../../src/ui/ui';
 export { Button } from '../../src/battle-scene';

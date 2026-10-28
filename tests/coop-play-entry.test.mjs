@@ -175,6 +175,9 @@ test('original Starter add/pop emits deduplicated drafts; solo callback remains 
   handler.notifyStarterChange(); assert.equal(changes.length, 1);
   handler.processInput(api.Button.CANCEL); assert.equal(changes.length, 2); assert.deepEqual(changes[1], []);
   handler.starterSelectOptions = {}; handler.notifyStarterChange(); assert.equal(changes.length, 2);
+  handler.starterSelectOptions={isSpeciesBlocked:()=>true};
+  handler.processInput(api.Button.ACTION);options[0].handler();
+  assert.equal(handler.starterGens.length,0,'peer ownership prevents the original add action');
 });
 
 test('original Starter restores selected attributes and moves through its details port without publishing a transient empty draft', () => {

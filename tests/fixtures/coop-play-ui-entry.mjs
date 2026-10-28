@@ -1,4 +1,5 @@
 export { default as CoopPlayPhase } from '../../src/coop/play-phase';
+export { PlayerBattleInfo } from '../../src/ui/battle-info';
 export { default as BattleScene } from '../../src/battle-scene';
 export { default as UI } from '../../src/ui/ui';
 export { default as UiHandler } from '../../src/ui/ui-handler';

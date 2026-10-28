@@ -314,6 +314,7 @@ export class CoopBattlePresentation {
     const field = [...this.field]; field[slot] = display;
     this.displayedById.set(display.id, display); this.attachField(field, batch.snapshot.shared);
     void display.setFieldPosition(coopFieldPosition(batch.snapshot.shared, slot));
+    this.layoutPlayerInfo(display, slot, batch.applied.byId.has(display.id));
     if (event.kind === 'pokemon-enter') {
       if (event.view) {
         // A switch and the incoming Pokemon's damage can share one committed
@@ -503,6 +504,18 @@ export class CoopBattlePresentation {
       randSeedInt: () => { throw new Error('CLIENT_RULE_RNG_FORBIDDEN'); } } as any;
   }
 
+  private layoutPlayerInfo(display: Pokemon, slot: number, own: boolean) {
+    if (slot < 0 || slot > 1) return;
+    const info = (display as any).battleInfo;
+    if (!info) return;
+    // Original double-battle minis deliberately hide numeric HP and EXP. Each
+    // co-op client owns one full panel; the peer keeps the public mini panel.
+    // Stack by local ownership, not seat number, so seat 2 gets the same layout.
+    info.setMini(!own);
+    info.setOffset(false);
+    info.setY(own ? -72 : -110);
+  }
+
   private paint(shared: any) {
     const key = getBiomeKey(shared.biome);
     this.scene.arena.biomeType = shared.biome; this.scene.arena.bgm = Biome[shared.biome].toLowerCase();
@@ -529,6 +542,7 @@ export class CoopBattlePresentation {
         this.modelKeys.set(id, key);
       }
       display.setVisible(display.hp > 0);
+      this.layoutPlayerInfo(display, batch.snapshot.shared.field.indexOf(id), batch.applied.byId.has(id));
       (display as any).battleInfo?.setVisible(display.hp > 0);
     }
     const keep = new Set(batch.field.filter(Boolean));
@@ -581,6 +595,7 @@ export class CoopBattlePresentation {
               throw new Error('精灵素材下载失败，请重试加载');
             const slot = shared.field.indexOf(view.id);
             void loadedDisplay.setFieldPosition(coopFieldPosition(shared, slot));
+            this.layoutPlayerInfo(loadedDisplay, slot, applied.byId.has(view.id));
             await within(Promise.resolve(loadedDisplay.updateInfo(true)), 1200, signal);
             this.looks.set(view.id, look); this.modelKeys.set(view.id, key);
           })());

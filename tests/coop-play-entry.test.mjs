@@ -1064,6 +1064,30 @@ test('experience replay closes the original bar before showing another member', 
   assert.deepEqual(calls, [['show', 1, 7], ['hide'], ['show', 2, 7], ['hide']]);
 });
 
+test('both local seats retain original numeric HP and EXP while the peer stays public and panels do not overlap',()=>{
+  const info=()=>{
+    const node=()=>({y:0,visible:true,setVisible(v){this.visible=v;}});
+    const panel=Object.create(api.PlayerBattleInfo.prototype);
+    Object.assign(panel,{player:true,mini:false,offset:false,x:310,y:-72,box:{setTexture(){}},
+      nameText:node(),genderText:node(),teraIcon:node(),splicedIcon:node(),statusIndicator:node(),levelContainer:node(),
+      shinyIcon:{setPositionRelative(){}},hpNumbersContainer:node(),expBar:node(),setY(y){this.y=y;}});
+    return panel;
+  };
+  for(const seat of [0,1]){
+    const presentation=new api.CoopBattlePresentation({}),own=info(),peer=info();
+    own.setMini(true);own.setOffset(seat===1);
+    presentation.layoutPlayerInfo({battleInfo:own},seat,true);
+    presentation.layoutPlayerInfo({battleInfo:peer},1-seat,false);
+    assert.equal(own.hpNumbersContainer.visible,true);assert.equal(own.expBar.visible,true);
+    assert.equal(peer.hpNumbersContainer.visible,false);assert.equal(peer.expBar.visible,false);
+    assert.ok(own.y-peer.y>=38);
+    const before=[own.x,own.y,peer.x,peer.y];
+    presentation.layoutPlayerInfo({battleInfo:own},seat,true);
+    presentation.layoutPlayerInfo({battleInfo:peer},1-seat,false);
+    assert.deepEqual([own.x,own.y,peer.x,peer.y],before,'reconnect does not accumulate offsets');
+  }
+});
+
 test('original animation abort stops its tween and restores sprites once; solo completion remains valid', () => {
   for (const cancel of [true, false]) {
     const configs = [], stopped = [], sprites = [];

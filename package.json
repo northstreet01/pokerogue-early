@@ -35,7 +35,7 @@
 		"json-beautify": "^1.1.1",
 		"phaser3spectorjs": "^0.0.8",
 		"typescript": "^5.0.3",
-		"vite": "6.4.5",
+		"vite": "8.3.5",
 		"vitest": "4.1.12",
 		"vitest-canvas-mock": "^0.3.3"
 	},

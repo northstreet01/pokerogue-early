@@ -1,6 +1,12 @@
 import {deviceStorage} from '../platform/preferences.mjs';
 const HOSTS_KEY='coop-local-hosts-v1';
 const localBase=()=>globalThis.location?.href??`${globalThis.location?.origin??'http://localhost'}/`;
+export function remoteHostEndpoint(value){
+ const raw=value.trim();if(!raw)throw Error('INVALID_HOST_ENDPOINT');
+ const url=new URL(raw.includes('://')?raw:`http://${raw}`);
+ if(!raw.includes('://')&&!url.port)url.port='18735';
+ return normalizeEndpoint(url.href);
+}
 export function normalizeEndpoint(value,base=localBase()){
  const url=new URL(value||new URL(base).origin,base);
  if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash||!['','/'].includes(url.pathname))throw Error('INVALID_HOST_ENDPOINT');

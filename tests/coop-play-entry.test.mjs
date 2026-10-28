@@ -43,6 +43,31 @@ function phase() {
   return { p, sent, errors };
 }
 
+test('LAN entry discovers hosts without an IP field; remote entry and manual fallback retain addresses',async()=>{
+  const {p}=phase();let finishScan,calls=0;const connections=[];
+  globalThis.pokerogueDesktop={version:1,discoverHosts:()=>{calls++;return new Promise(resolve=>{finishScan=resolve;});}};
+  p.renderLobbyControls=()=>api.CoopPlayPhase.prototype.renderLobbyControls.call(p);
+  p.connect=async endpoint=>{connections.push({endpoint,hostId:p.hostId});};
+  const button=label=>[...p.controls.querySelectorAll('button')].find(b=>b.textContent===label);
+  try{
+    p.renderLobbyControls();assert.equal(p.controls.querySelector('#coop-host-address'),null);
+    const scan=p.searchLanHosts();await p.searchLanHosts();assert.equal(calls,1);
+    finishScan({ok:true,value:[{hostId:'discovered-id',endpoint:'http://192.168.1.8:23456'}]});await scan;
+    button('连接房主 · 192.168.1.8:23456').click();await waitUntil(()=>connections.length===1);
+    assert.deepEqual(connections[0],{endpoint:'http://192.168.1.8:23456',hostId:'discovered-id'});
+    button('远程联机').click();await waitUntil(()=>p.controls.querySelector('#coop-host-address'));
+    const address=p.controls.querySelector('#coop-host-address');address.value='172.16.2.5';address.dispatchEvent(new document.defaultView.Event('input'));
+    button('连接房主').click();await waitUntil(()=>connections.length===2);
+    assert.deepEqual(connections[1],{endpoint:'http://172.16.2.5:18735',hostId:null});
+    button('局域网联机').click();await waitUntil(()=>p.connectionMode==='lan');
+    assert.equal(p.controls.querySelector('#coop-host-address'),null);
+    button('未找到？手动连接').click();await waitUntil(()=>p.controls.querySelector('#coop-host-address'));
+    assert.equal(p.controls.querySelector('#coop-host-address').value,'172.16.2.5');
+    // A scan returning after scene exit cannot recreate a destroyed overlay.
+    p.disposed=true;p.discoveryGeneration++;finishScan({ok:true,value:[]});
+  }finally{delete globalThis.pokerogueDesktop;}
+});
+
 function draftGameData() {
   return Object.assign(Object.create(api.GameData.prototype), { trainerId: 1, secretId: 2, eggs: [],
     dexData: Object.fromEntries([1, 4, 7].map(id => [id, { ivs: [10, 10, 10, 10, 10, 10],

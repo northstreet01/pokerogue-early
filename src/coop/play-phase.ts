@@ -21,7 +21,7 @@ import { allMoves } from '../data/move';
 import { preparationItemTarget } from './preparation-item';
 import { captureModifierState, restoreModifierState } from '../modifier/modifier';
 import i18next from '../i18n';
-import {identifyHost,normalizeEndpoint,hostSocketUrl,hostScope,readHosts,rememberHost,hostConnectionError} from './host-connection.mjs';
+import {identifyHost,remoteHostEndpoint,hostSocketUrl,hostScope,readHosts,rememberHost,hostConnectionError} from './host-connection.mjs';
 import {desktopHost,startDesktopHost} from '../desktop-host.mjs';
 import {renderTeams,renderInventory,progressText} from './room-display.mjs';
 import {captureRoomCatalog,roomSelectionData} from './room-catalog';
@@ -100,6 +100,13 @@ export default class CoopPlayPhase extends Phase {
   private playerNames: (string|null)[] = [null,null];
   private pauseTask: Promise<boolean> | null = null;
   private reconnectAttempts=0;
+  private connectionMode: 'lan' | 'remote' = 'lan';
+  private discoveredHosts: {hostId:string;endpoint:string}[] = [];
+  private discovering = false;
+  private discoveryGeneration = 0;
+  private remoteAddress = '';
+  private manualLanAddress = false;
+  private localHostPort = '18735';
 
   constructor(scene: BattleScene) { super(scene); }
 
@@ -125,9 +132,11 @@ export default class CoopPlayPhase extends Phase {
     if (!loaded && !await this.scene.gameData.saveSystem()) throw new Error('INITIAL_PROFILE_SAVE_FAILED');
     if (this.current(lifecycle)) {
       const query=this.scene.appUrl?.searchParams??new URLSearchParams(location.search);
-      if(desktopHost()&&!query.get('host')&&!query.get('resumeRoom')&&!readHosts().selected){
-        this.setStatus('请启动本机房主，或填写地址连接房主。个人档案和资源保存在本机。');
+      if(desktopHost()&&!query.get('host')&&!query.get('resumeRoom')){
+        this.remoteAddress=readHosts().selected??'';
+        this.setStatus('局域网：创建本机房主，或搜索并选择房主。异地连接请切换远程联机。');
         this.renderLobbyControls();
+        void this.searchLanHosts();
       }else this.connect();
     }
   }
@@ -141,6 +150,7 @@ export default class CoopPlayPhase extends Phase {
     if (this.disposed) return;
     this.lobbyMusic.abort(); this.scene.fadeOutBgm?.(150, true);
     this.hostAbort.abort();
+    this.discoveryGeneration++;
     this.disposed = true; this.lifecycle++;
     this.epoch = null; this.consumer = null;
     this.inputReady = false; this.battleInputActive = false; this.starterOpen = false;
@@ -298,24 +308,62 @@ export default class CoopPlayPhase extends Phase {
       this.controls.append(row);
       return;
     }
+    const modes=document.createElement('div');modes.className='row';
+    for(const [mode,label] of [['lan','局域网联机'],['remote','远程联机']] as const){
+      const button=this.button(label,()=>{
+        this.connectionMode=mode;this.manualLanAddress=false;this.renderLobbyControls();
+        this.setStatus(mode==='lan'?'同一局域网内选择搜索到的房主；房间码用于加入该房主上的房间。':'填写房主IP或域名；异地连通由双方自行配置，游戏不提供中继。');
+        if(mode==='lan')void this.searchLanHosts();
+      },true);
+      button.setAttribute('aria-pressed',String(this.connectionMode===mode));modes.append(button);
+    }
+    this.controls.append(modes);
     if(desktopHost()){
       const local=document.createElement('div');local.className='row';
-      const port=document.createElement('input');port.type='number';port.min='1024';port.max='65535';port.value='18735';
+      const port=document.createElement('input');port.type='number';port.min='1024';port.max='65535';port.value=this.localHostPort;
+      port.addEventListener('input',()=>{this.localHostPort=port.value;});
       port.setAttribute('aria-label','本机房主端口');port.style.width='6em';
       local.append(port,this.button('启动本机房主',async()=>{
         const lifecycle=this.lifecycle;
         const host=await startDesktopHost(Number(port.value));
         if(!this.current(lifecycle))return;
         this.hostId=host.hostId;await this.connect(host.endpoint);
-        if(!this.disposed)this.setStatus('房主已启动。端口 '+host.port+'，队友地址 '+(host.addresses.join(' 或 ')||host.endpoint)+'。详情见程序菜单。');
+        if(!this.disposed)this.setStatus(this.connectionMode==='lan'
+          ?'房主已启动，请创建房间。队友在局域网搜索中选中本机，再输入房间码。'+(host.discovery===false?'自动发现不可用，请使用手动连接。':'')
+          :'房主已启动，请创建房间。远程队友连接你提供的IP或映射地址；游戏端口 '+host.port+'。');
       },true));
       this.controls.append(local);
     }
-    const hostRow=document.createElement('div');hostRow.className='row host-address';
-    const address=document.createElement('input');address.id='coop-host-address';address.setAttribute('aria-label','房主地址');
-    address.placeholder='房主地址，例如 http://192.168.1.8:8020';address.value=this.endpoint;
-    hostRow.append(address,this.button('连接房主',async()=>{this.hostId=null;await this.connect(normalizeEndpoint(address.value));},true));
-    this.controls.append(hostRow);
+    if(this.connectionMode==='lan'){
+      const scan=document.createElement('div');scan.className='row';
+      const refresh=this.button(this.discovering?'正在搜索…':'刷新局域网房主',()=>this.searchLanHosts(),true);
+      refresh.disabled=this.discovering||!desktopHost()?.discoverHosts;scan.append(refresh);
+      const hint=document.createElement('span');
+      hint.textContent=!desktopHost()?.discoverHosts?'自动发现需要桌面程序，可使用手动连接。'
+        :this.discoveredHosts.length?'选择房主后创建或加入房间。':'未发现房主。请让房主先启动服务，再刷新；网络隔离时可手动连接。';
+      scan.append(hint);this.controls.append(scan);
+      for(const host of this.discoveredHosts){
+        this.controls.append(this.button('连接房主 · '+host.endpoint.replace('http://',''),async()=>{
+          this.hostId=host.hostId;await this.connect(host.endpoint);
+        },true));
+      }
+      this.controls.append(this.button(this.manualLanAddress?'收起手动连接':'未找到？手动连接',()=>{
+        this.manualLanAddress=!this.manualLanAddress;this.renderLobbyControls();
+      }));
+    }
+    if(this.connectionMode==='remote'||this.manualLanAddress){
+      const hostRow=document.createElement('div');hostRow.className='row host-address';
+      const address=document.createElement('input');address.id='coop-host-address';address.setAttribute('aria-label','房主IP或域名');
+      address.placeholder='例如 172.16.2.5 或 example.com:端口';address.value=this.remoteAddress;
+      address.addEventListener('input',()=>{this.remoteAddress=address.value;});
+      for(const type of ['keydown','keypress','keyup'])address.addEventListener(type,event=>event.stopPropagation());
+      hostRow.append(address,this.button('连接房主',async()=>{this.hostId=null;await this.connect(remoteHostEndpoint(address.value));},true));
+      this.controls.append(hostRow);
+    }
+    if(this.versions){
+      const connected=document.createElement('div');connected.className='status';
+      connected.textContent='当前房主：'+this.endpoint;this.controls.append(connected);
+    }
     const row = document.createElement('div'); row.className = 'row';
     const input = document.createElement('input'); input.placeholder = '6位房间码';
     input.style.width = '12em'; input.id = 'coop-room-code';
@@ -336,6 +384,22 @@ export default class CoopPlayPhase extends Phase {
     row.append(input,count,join,create);
     this.controls.append(row);
     if (focused) { input.focus(); if (caret !== null) input.setSelectionRange(caret, caret); }
+  }
+
+  private async searchLanHosts(){
+    const bridge=desktopHost();if(this.discovering||!bridge?.discoverHosts||this.disposed)return;
+    const generation=++this.discoveryGeneration;
+    this.discovering=true;this.renderLobbyControls();
+    try{
+      const reply=await bridge.discoverHosts();
+      if(this.disposed||generation!==this.discoveryGeneration)return;
+      if(!reply?.ok)throw Error(reply?.code??'LAN_DISCOVERY_FAILED');
+      this.discoveredHosts=reply.value;
+    }catch(error){
+      if(!this.disposed&&generation===this.discoveryGeneration)this.setStatus('局域网搜索失败，可刷新或手动连接房主。',true);
+    }finally{
+      if(!this.disposed&&generation===this.discoveryGeneration){this.discovering=false;this.renderLobbyControls();}
+    }
   }
 
   private async connect(endpoint?:string) {

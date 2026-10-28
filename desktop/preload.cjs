@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('pokerogueDesktop',Object.freeze({
   storageCommit:request=>ipcRenderer.invoke('desktop:storage-commit',request),
   preference:request=>ipcRenderer.sendSync('desktop:preference',request),
   hostState:()=>ipcRenderer.invoke('desktop:host-state'),
+  discoverHosts:()=>ipcRenderer.invoke('desktop:host-discover'),
   startHost:port=>ipcRenderer.invoke('desktop:host-start',{port}),
   stopHost:()=>ipcRenderer.invoke('desktop:host-stop')
 }));

@@ -7,6 +7,8 @@ import { loadHostIdentity, serveHostIdentity } from '../server/host-identity.mjs
 import { attachFormalCoopServer, FormalRoomStore } from '../server/formal-coop-service.mjs';
 import { createPlayerHostAdapter } from '../server/original-coop-adapter.mjs';
 import {isAppDocument} from '../src/app-navigation.mjs';
+import {startDiscoveryResponder} from './lan-discovery.mjs';
+export {discoverLanHosts} from './lan-discovery.mjs';
 export {isAppDocument};
 
 export const APP_PORT = 18734;
@@ -72,9 +74,12 @@ export async function startLanHost({directory,port=HOST_PORT,bind='0.0.0.0',adap
   } catch(error) {await service?.close();await adapter.closeAll();await closeHttp(server);throw error;}
   const addresses=bind==='127.0.0.1'?[]:Object.values(networkInterfaces()).flat().filter(row=>row&&!row.internal&&row.family==='IPv4')
     .map(row=>`http://${row.address}:${port}`);
+  // Discovery failure must not take down an otherwise usable TCP host.
+  let discovery=null;
+  if(bind==='0.0.0.0')try{discovery=await startDiscoveryResponder({hostId:identity.hostId,port});}catch{}
   let closing;
-  return {state:{running:true,hostId:identity.hostId,port,endpoint:`http://127.0.0.1:${port}`,addresses},
-    close:()=>closing??=(async()=>{await service.close();await adapter.closeAll();await closeHttp(server);})()};
+  return {state:{running:true,hostId:identity.hostId,port,endpoint:`http://127.0.0.1:${port}`,addresses,discovery:!!discovery},
+    close:()=>closing??=(async()=>{discovery?.close();await service.close();await adapter.closeAll();await closeHttp(server);})()};
 }
 
 export function createHostController(options) {

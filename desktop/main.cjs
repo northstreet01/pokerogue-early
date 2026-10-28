@@ -58,6 +58,11 @@ else {
       }catch(error){event.returnValue={ok:false,code:error.code??error.message};}
     });
     ipcMain.handle('desktop:host-state',event=>{trusted(event);return result(()=>hosts.state());});
+    let discoveryTask=null;
+    ipcMain.handle('desktop:host-discover',event=>{trusted(event);return result(()=>{
+      // A fixed, bounded scan; the renderer cannot request arbitrary UDP traffic.
+      return discoveryTask??=(runtime.discoverLanHosts().finally(()=>{discoveryTask=null;}));
+    });});
     ipcMain.handle('desktop:host-start',(event,options)=>{
       trusted(event);
       if(!options||Object.keys(options).join(',')!=='port')throw Error('INVALID_HOST_OPTIONS');

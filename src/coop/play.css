@@ -11,6 +11,7 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #coop-play-overlay button.primary{background:#dae9f8;border-color:#557fa8}
 #coop-play-overlay .status{overflow-wrap:anywhere}#coop-play-overlay .error{color:#ff8e8e}
 #coop-play-overlay .host-address input{min-width:230px;flex:1}
+#coop-play-overlay button[aria-pressed="true"]{background:#2d5e90;color:#fff;border-color:#173f68}
 #coop-play-overlay.room-lobby:not(.selecting-team){inset:0;display:grid;place-items:center;padding:60px 16px 100px;box-sizing:border-box;background:rgba(20,31,45,.12);font-size:18px}
 #coop-play-overlay.room-lobby:not(.selecting-team) .panel{display:block;width:min(640px,90vw);max-height:75vh;overflow:auto;padding:22px;background:#f7f7fa;color:#303044;border:6px double #78849d;box-shadow:0 5px 0 #34384b}
 #coop-play-overlay.room-lobby h1{font-size:24px;margin-bottom:12px}

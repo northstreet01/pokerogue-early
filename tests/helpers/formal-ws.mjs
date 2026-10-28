@@ -4,7 +4,9 @@ import { attachFormalCoopServer } from '../../server/formal-coop-service.mjs';
 import { copy, validateMessage } from '../../src/battle-core/coop-contract.mjs';
 
 export async function formalFixture(adapter, store = { data: new Map(), async load() { return [...this.data.values()].map(copy); }, async save(room) { this.data.set(room.roomId, copy(room)); } }) {
-  const httpServer = http.createServer(), service = await attachFormalCoopServer(httpServer, { adapter, store });
+  // This same-origin legacy fixture has no host identity endpoint. Return an
+  // explicit 404 so the real host lookup can complete its compatibility path.
+  const httpServer = http.createServer((_request,response)=>{response.writeHead(404);response.end('not found');}), service = await attachFormalCoopServer(httpServer, { adapter, store });
   await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
   const clients = [];
   return { ...service, store, async client() {

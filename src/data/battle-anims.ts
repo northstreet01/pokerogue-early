@@ -4,7 +4,7 @@ import { AttackMove, ChargeAttr, DelayedAttackAttr, MoveFlags, SelfStatusMove, a
 import Pokemon from "../field/pokemon";
 import * as Utils from "../utils";
 import { BattlerIndex } from "../battle";
-import stringify, { Element } from "json-stable-stringify";
+import stringify from "json-stable-stringify";
 import { Moves } from "./enums/moves";
 import { getTypeRgb } from "./type";
 
@@ -1160,7 +1160,7 @@ export async function populateAnims() {
     const animFrameProps = [ 'x', 'y', 'zoomX', 'zoomY', 'angle', 'mirror', 'visible', 'blendType', 'target', 'graphicFrame', 'opacity', 'color', 'tone', 'flash', 'locked', 'priority', 'focus' ];
     const propSets = [ animConfigProps, animFrameProps ];
 
-    const animComparator = (a: Element, b: Element) => {
+    const animComparator = (a: { key: string }, b: { key: string }) => {
         let props: string[];
         let p = 0;
         for (let p = 0; p < propSets.length; p++) {

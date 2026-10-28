@@ -17,7 +17,7 @@ export function presentationFixture(api, scene = {}){
   const p=new api.CoopBattlePresentation(scene);
   // Only Phaser allocation/assets are ports; production reconciliation/replay runs intact.
   p.container=(model)=>Object.assign(Object.create(Object.getPrototypeOf(model)),model,{scene,
-    init(){this.battleInfo={setVisible(){},visible:true};counts.created++;},loadAssets:async()=>{counts.loaded++;},
+    init(){this.battleInfo={setVisible(){},setMini(){},setOffset(){},setY(){},visible:true};counts.created++;},loadAssets:async()=>{counts.loaded++;},
     setFieldPosition(){},setVisible(v){this.visible=v;return this;},updateInfo:async function(instant){calls.push(['hp',this.hp,instant]);},
     x:0,y:0,getFieldPositionOffset:()=>[0,0],getSpriteScale:()=>1,
     hideInfo(){this.battleInfo.visible=false;return Promise.resolve();},showInfo(){this.battleInfo.visible=true;},

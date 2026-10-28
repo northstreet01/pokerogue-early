@@ -195,7 +195,8 @@ test('original read-only statistics and the complete title splash catalog displa
   statLabels:Array.from({length:18},()=>({setText:value=>shown.add(value)})),statValues:Array.from({length:18},()=>({setText(){}}))});
  for(let cursor=0;cursor<18;cursor++){handler.cursor=cursor;handler.updateStats();}
  const labels=JSON.parse(fs.readFileSync('locales/zh-Hans/early-stats.json','utf8'));
- assert.equal(Object.keys(labels).length,35);for(const label of Object.values(labels))assert.ok(shown.has(label),label);
+ const {title,...statLabels}=labels;assert.equal(Object.keys(statLabels).length,35);
+ for(const label of Object.values(statLabels))assert.ok(shown.has(label),label);
  assert.equal(facts(),before);
  const raw=JSON.stringify(api.splashMessages);assert.equal(api.splashMessages.length,30);
  for(const [index,text]of api.splashMessages.entries()){
@@ -213,6 +214,7 @@ test('the complete original move and ability catalogs have guarded Chinese descr
   if(item[field]&&!/[\u3400-\u9fff]/u.test(item[field]))missing.descriptions.push({namespace,id:item.id,text:item[field]});
   assert.doesNotMatch(item[field]??'',/earlyCatalog:|\{\{/u);
  }
+ fs.mkdirSync('build/vs02b21-22',{recursive:true});
  fs.writeFileSync('build/vs02b21-22/catalog-remaining-after.json',JSON.stringify(missing,null,2));
  assert.deepEqual(missing.descriptions,[]);
  assert.deepEqual(missing.names,[]);

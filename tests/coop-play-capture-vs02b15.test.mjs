@@ -144,11 +144,12 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry
     const home = new api.HomePhase(scene);
     // Original Home callbacks and original GameData read, with display ports only.
     ui.clearText = () => {};
-    await home.showHome(); modes.at(-1)[1].options[3].handler(); await home.transitions;
-    modes.at(-1)[1].options[2].handler();
+    await home.showHome(); modes.at(-1)[1].options.find(option=>option.label==='个人资料').handler(); await home.transitions;
+    modes.at(-1)[1].options.find(option=>option.label==='我的蛋券').handler();
     await until(() => ui.mode === api.Mode.EGG_GACHA, 'home personal vouchers');
     assert.equal(scene.gameData.voucherCounts[0], 4);
-    modes.at(-1)[1].onCancel(); await home.transitions;
+    modes.at(-1)[1].onCancel();
+    await until(()=>modes.at(-1)?.[1]?.options?.some(option=>option.label==='联机冒险'),'home after personal view');
     assert.equal(await api.readLocalSave('data'), bytes); assert.equal(scene.gameData, own);
     modes.at(-1)[1].options[1].handler();
     assert.deepEqual(assigned, ['/coop-play.html?fresh=1']); location.search = '?fresh=1';
@@ -218,7 +219,11 @@ for (const seat of [0, 1]) test(`VS16 original Starter callbacks seat ${seat}: d
     config.onChange(starters);
     await until(() => phase.inputReady && !phase.actionId && phase.latest.personal.profile?.starters.length === 2, 'accepted two-starter draft');
     confirm(starters);
-    await until(() => phase.inputReady && !phase.actionId && phase.latest.shared.ready[seat], 'confirmed exact draft');
+    await until(() => phase.inputReady && !phase.actionId
+      && phase.latest.shared.selections[seat].state === 'confirmed', 'confirmed exact draft');
+    assert.equal(phase.latest.shared.ready[seat],false,'confirming a team must not automatically ready the player');
+    await phase.sendProfile(true);
+    await until(() => phase.inputReady && !phase.actionId && phase.latest.shared.ready[seat], 'manual player readiness');
     await until(() => env.peerSnapshot().revision === phase.latest.revision, 'peer final lobby');
     env.submitPeer({ kind: 'profile-ready', profile: profiles[1 - seat], ready: true });
     await until(() => phase.inputReady && phase.latest.personal.decision.kind === 'wait-actions'

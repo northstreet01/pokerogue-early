@@ -27,10 +27,11 @@ test('real keyboard setup routes Enter to confirmation, Escape to cancellation, 
   const cls = source.statements.find(n => ts.isClassDeclaration(n) && n.name?.text === 'BattleScene');
   const method = cls.members.find(n => n.name?.getText(source) === 'setupControls');
   const context = { Button: api.Button, Phaser: { Input: { Keyboard: { KeyCodes: new Proxy({}, { get: (_o, key) => key }) } } },
-    Utils: { getEnumValues: value => Object.values(value).filter(v => typeof v === 'number') }, initTouchControls() {} };
+    Utils: { getEnumValues: value => Object.values(value).filter(v => typeof v === 'number') }, initTouchControls() { return () => {}; } };
   vm.runInNewContext(ts.transpileModule(`class Controls { ${method.getText(source)} }; globalThis.Controls = Controls;`,
     { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
   const scene = Object.create(api.BattleScene.prototype), sent = [];
+  scene.events = new EventEmitter();
   scene.input = { keyboard: { addKey: code => ({ code }) } };
   scene.ui = { processInput: button => { sent.push(button); return true; } };
   scene.time = { delayedCall: (_delay, callback) => { scene.unlock = callback; } };

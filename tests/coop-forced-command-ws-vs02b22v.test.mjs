@@ -1,7 +1,7 @@
 import test,{before}from'node:test';import assert from'node:assert/strict';import{createRequire}from'node:module';import fs from'node:fs/promises';import{resolve}from'node:path';
 import{buildCoopRuntime}from'../scripts/build-coop-runtime.mjs';import{forcedCommandFixture}from'./helpers/native-forced-command.mjs';
 import{openPreparationRoom,request,until}from'./helpers/native-preparation-ws.mjs';import{FormalRoomStore}from'../server/formal-coop-service.mjs';
-let api;before(async()=>{await buildCoopRuntime();api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');api.describeOriginalCatalogs();});
+let api;before(async()=>{await fs.mkdir('build/vs02b22v',{recursive:true});await buildCoopRuntime();api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');api.describeOriginalCatalogs();});
 const field=(c,seat)=>c.roster.entries.find(e=>e.owner===seat&&e.index===0).pokemon.fields;
 for(const failWrite of[false,true])test('forced target restores disk/dual ACK and executes the saved partner once; write failure '+failWrite,async()=>{
  const fixture=await forcedCommandFixture(api,{0:[{move:130,targets:[2],ignorePP:true}]},{0:130});let c;try{c=(await fixture.h.request('native-step',fixture.c)).checkpoint;}finally{await fixture.h.close();}

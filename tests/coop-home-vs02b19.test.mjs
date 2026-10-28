@@ -34,13 +34,14 @@ function home(t) {
   const runtime=api.createOriginalRuntime('home-default',{trainerId:1,secretId:2});
   const scene={gameData:{unchanged:true},executeWithSeedOffset:(fn,offset,seed)=>api.withStarterRandomContext(runtime.context,()=>runtime.scene.executeWithSeedOffset(fn,offset,seed)),events:{once(){}},fadeOutBgm(){},ui:{fadeIn(){},clearText(){},
     setMode:async (...args)=>{modes.push(args);}}};
-  const p=new api.HomePhase(scene);p.start();
+  const p=new api.HomePhase(scene),showHome=p.showHome.bind(p);
+  p.showHome=(...args)=>p.homeReady=showHome(...args);p.start();
   t.after(async()=>{p.dispose();dom.window.close();
     await new Promise((resolve,reject)=>{const q=factory.deleteDatabase('coop-play-v1');q.onsuccess=resolve;q.onerror=()=>reject(q.error);});
   });
   return {p,scene,assigned,modes};
 }
-async function settle(p) {await p.transitions;await new Promise(r=>setTimeout(r,10));await p.transitions;}
+async function settle(p) {await p.homeReady;await p.transitions;await new Promise(r=>setTimeout(r,10));await p.transitions;}
 
 test('original Title callbacks route once, obsolete callbacks cannot navigate, return stays available',async t=>{
   const {p,assigned,modes}=home(t);await settle(p);
@@ -112,7 +113,7 @@ test('cancel during real IDB load cannot attach its data or cover a newer home s
   const {p,scene,modes}=home(t);await settle(p);
   await rawWrite({data:{schema:1,value:systemBytes(scene),updatedAt:18}});
   const live=scene.gameData,browsing=p.browse(api.Mode.EGG_LIST);
-  await p.transitions;document.querySelector('#home-return').click();
+  await p.showHome();
   await browsing;await settle(p);
   assert.equal(scene.gameData,live);assert.equal(modes.at(-1)[0],api.Mode.TITLE);
   assert.equal(modes.at(-1)[1].options[0].label,'单人冒险');
@@ -207,7 +208,7 @@ test('original readonly Starter opens, shows owned IVs, blocks add/start/move ed
   Object.assign(h,{genSpecies:[[species]],starterSelectGenIconContainers:[{getAt:()=>icon}],
     startLabel:renderPort(),valueLimitLabel:renderPort(),starterSelectContainer:renderPort(),
     startCursorObj:renderPort(),pokemonSprite:renderPort(),statsContainer:{...renderPort(),updateIvs:ivs=>ivCalls.push(ivs)},
-    starterGens:[],starterCursors:[],starterAttr:[],starterNatures:[],starterMovesets:[],
+    starterGens:[],starterCursors:[],starterAttr:[],starterNatures:[],starterMovesets:[],starterIcons:[],collectionProgressText:renderPort(),
     setCursor(){},setGenMode(){},speciesStarterDexEntry:gd.dexData[1],genMode:false,statsMode:false});
   let submits=0,changes=0,cancels=0;
   assert.equal(h.show([()=>submits++,{readOnly:true,onChange:()=>changes++,onCancel:()=>cancels++}]),true);

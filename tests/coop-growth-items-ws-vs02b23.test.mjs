@@ -4,7 +4,7 @@ import{buildCoopRuntime}from'../scripts/build-coop-runtime.mjs';
 import{originalPreparationFixture,growthItemFixture,member,reward}from'./helpers/growth-items-fixture.mjs';
 import{openPreparationRoom,request,until,advance}from'./helpers/native-preparation-ws.mjs';import{FormalRoomStore}from'../server/formal-coop-service.mjs';
 let api,fixture;
-before(async()=>{await buildCoopRuntime();api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');api.describeOriginalCatalogs();fixture=await originalPreparationFixture();});
+before(async()=>{await fs.mkdir('build/vs02b23',{recursive:true});await buildCoopRuntime();api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');api.describeOriginalCatalogs();fixture=await originalPreparationFixture();});
 after(async()=>fixture?.route.h.close());
 for(const kind of ['TM_COMMON','EVOLUTION_ITEM','unpause'])for(const failWrite of [false,true])test(`${kind} original dual-model ACK/disk recovery and replay, injected write failure ${failWrite}`,async()=>{
  const f=growthItemFixture(api,fixture.base,kind==='unpause'?'EVOLUTION_ITEM':kind),c=f.c;

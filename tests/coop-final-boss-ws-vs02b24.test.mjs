@@ -10,7 +10,7 @@ import {steadyInput} from './helpers/native-steady-progression.mjs';
 import {openPreparationRoom,request,until} from './helpers/native-preparation-ws.mjs';
 import {FormalRoomStore} from '../server/formal-coop-service.mjs';
 let api,fixture,trace;
-before(async()=>{await buildCoopRuntime();api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');api.describeOriginalCatalogs();fixture=await finalBossFixture(api);trace=await finalBossTrace(api,fixture.checkpoint);});
+before(async()=>{await fs.mkdir('build/vs02b24',{recursive:true});await buildCoopRuntime();api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');api.describeOriginalCatalogs();fixture=await finalBossFixture(api);trace=await finalBossTrace(api,fixture.checkpoint);});
 const boss=c=>c.roster.entries.find(e=>e.owner===null).pokemon.fields;
 for(const stage of ['first','second','last'])for(const failWrite of [false,true])test(`single Boss ${stage}: dual WS/original ACK, accepted-input disk recovery, conflict and result write failure ${failWrite}`,async()=>{
  const battles=trace.boundaries.filter(c=>c.decision.kind==='wait-actions');

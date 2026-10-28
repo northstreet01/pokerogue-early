@@ -358,7 +358,14 @@ async function syncBoth(env, a, b, sa, sb) {
       assert.equal(snapA.shared.waveCycleOffset, snapB.shared.waveCycleOffset);
       assert.equal(snapA.shared.biome, snapB.shared.biome);
     }
-    if (requiresInput(snapA)) return { sa: snapA, sb: snapB };
+    if (requiresInput(snapA)) {
+      // Sending an ACK does not mean the coordinator has processed both ACKs.
+      // Wait for its readiness notification before submitting the next action.
+      await Promise.all([[a,snapA],[b,snapB]].map(([client,snapshot])=>client.wait(message=>message.type==='syncStatus'
+        &&message.roomId===snapshot.roomId&&message.revision===snapshot.revision&&!message.blocked
+        &&client.messages.indexOf(message)>client.messages.lastIndexOf(snapshot))));
+      return { sa: snapA, sb: snapB };
+    }
     const revision = snapA.revision;
     [snapA, snapB] = await Promise.all([a.waitRevisionAfter(revision), b.waitRevisionAfter(revision)]);
   }

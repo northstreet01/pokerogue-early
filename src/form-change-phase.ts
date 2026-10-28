@@ -26,6 +26,24 @@ export class FormChangePhase extends EvolutionPhase {
     return !!this.formChange;
   }
 
+  // Rule operations shared with the headless host. Display timing remains in
+  // doEvolution; a cooperative checkpoint never waits on renderer animations.
+  applyFormChange(): Promise<void> {
+    return this.pokemon.changeForm(this.formChange);
+  }
+
+  validateFormChangeAchievements(): boolean {
+    if (this.formChange.formKey.indexOf(SpeciesFormKey.MEGA) > -1) {
+      this.scene.validateAchv(achvs.MEGA_EVOLVE);
+      return true;
+    }
+    if (this.formChange.formKey.indexOf(SpeciesFormKey.GIGANTAMAX) > -1 || this.formChange.formKey.indexOf(SpeciesFormKey.ETERNAMAX) > -1) {
+      this.scene.validateAchv(achvs.GIGANTAMAX);
+      return true;
+    }
+    return false;
+  }
+
   setMode(): Promise<void> {
     if (!this.modal)
       return super.setMode();
@@ -86,7 +104,7 @@ export class FormChangePhase extends EvolutionPhase {
                       this.pokemonEvoSprite.setVisible(true);
                       this.doCircleInward();
                       this.scene.time.delayedCall(900, () => {
-                        this.pokemon.changeForm(this.formChange).then(() => {
+                        this.applyFormChange().then(() => {
                           if (!this.modal)
                             this.scene.unshiftPhase(new EndEvolutionPhase(this.scene));
 
@@ -115,14 +133,7 @@ export class FormChangePhase extends EvolutionPhase {
                                       this.scene.time.delayedCall(250, () => {
                                         this.pokemon.cry();
                                         this.scene.time.delayedCall(1250, () => {
-                                          let playEvolutionFanfare = false;
-                                          if (this.formChange.formKey.indexOf(SpeciesFormKey.MEGA) > -1) {
-                                            this.scene.validateAchv(achvs.MEGA_EVOLVE);
-                                            playEvolutionFanfare = true;
-                                          } else if (this.formChange.formKey.indexOf(SpeciesFormKey.GIGANTAMAX) > -1 || this.formChange.formKey.indexOf(SpeciesFormKey.ETERNAMAX) > -1) {
-                                            this.scene.validateAchv(achvs.GIGANTAMAX);
-                                            playEvolutionFanfare = true;
-                                          }
+                                          const playEvolutionFanfare = this.validateFormChangeAchievements();
 
                                           const delay = playEvolutionFanfare ? 4000 : 1750;
                                           this.scene.playSoundWithoutBgm(playEvolutionFanfare ? 'evolution_fanfare' : 'minor_fanfare');

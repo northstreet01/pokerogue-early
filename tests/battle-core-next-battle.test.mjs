@@ -12,14 +12,26 @@ test('original encounter preserves frozen rules with tracked Promises and one ex
   const frozen=JSON.parse(fs.readFileSync(new URL('./fixtures/early-next-battle-reference.json',import.meta.url),'utf8'));
   const normalize=s=>s.replace(/\r\n/g,'\n').trim();
   const current=normalize(parse('phases.ts').statements.find(n=>n.name?.text==='EncounterPhase').members.find(n=>n.name?.getText()==='start').getText());
-  // This exact, positioned IO adapter is the only additional deviation. Keep
-  // the frozen reference unchanged and compare all remaining original rules.
+  // Keep the frozen reference unchanged. Normalize only the explicit host IO
+  // port and the subsequently introduced atomic solo encounter save boundary.
   const port='          const deferred = this.scene.deferEncounterPersistence?.();\n'
     +'          if (deferred) return deferred.then(() => this.doEncounter());';
   assert.equal(current.split(port).length-1,1,'exactly one known IO port');
-  assert.ok(current.includes(`if (!this.loaded) {\n${port}\n          return this.scene.gameData.saveSystem().then`),
+  assert.ok(current.includes(`if (!this.loaded) {\n${port}\n          const persist = () => this.scene.gameData.saveEncounter(this.scene).then`),
     'candidate IO must be inside the original unloaded save branch');
-  const restored=current.replace(port+'\n','')
+  const atomic=`          const persist = () => this.scene.gameData.saveEncounter(this.scene).then(success => {
+            if (success) return this.doEncounter();
+            this.scene.ui.showText(i18next.t('localMeta:saveFailedRetry'), null, () =>
+              this.scene.ui.setMode(Mode.CONFIRM, () => { void persist(); }, () => { location.assign('/'); }, false));
+          });
+          return persist();`;
+  assert.equal(current.split(atomic).length-1,1,'exact atomic save and retry boundary');
+  const originalSave=`          this.scene.gameData.saveSystem().then(success => {
+            if (!success)
+              return this.scene.reset(true);
+            this.scene.gameData.saveSession(this.scene, true).then(() => this.doEncounter());
+          });`;
+  const restored=current.replace(port+'\n','').replace(atomic,originalSave)
     .replace('observeRulePromise(this.scene, Promise.all(loadEnemyAssets).then','Promise.all(loadEnemyAssets).then')
     .replace('return this.scene.ui.setMode(Mode.MESSAGE).then','this.scene.ui.setMode(Mode.MESSAGE).then')
     .replace('return this.scene.gameData.saveSystem().then','this.scene.gameData.saveSystem().then')
@@ -40,16 +52,17 @@ test('original encounter preserves frozen rules with tracked Promises and one ex
   }
 });
 
-for(const mode of ['missing','null'])test(`encounter ${mode} candidate IO keeps original system/session save order`,async()=>{
+for(const mode of ['missing','null'])test(`encounter ${mode} candidate IO uses the atomic solo save port`,async()=>{
   const c=await nextBattleContext(),expected=await createNextBattle(codec.restore(saved(c))),calls=[];
   const actual=await createNextBattle(c,{onBind:(_c,p,b)=>{
     if(p.constructor!==originalPhases.NextEncounterPhase)return;
     if(mode==='null')b.scene.deferEncounterPersistence=()=>{calls.push('port');return null;};
-    const system=b.scene.gameData.saveSystem,session=b.scene.gameData.saveSession;
-    b.scene.gameData.saveSystem=()=>{calls.push('system');return system();};
-    b.scene.gameData.saveSession=()=>{calls.push('session');return session();};
+    const encounter=b.scene.gameData.saveEncounter;
+    b.scene.gameData.saveEncounter=()=>{calls.push('encounter-save');return encounter();};
+    b.scene.gameData.saveSystem=()=>{assert.fail('atomic path must not split system save');};
+    b.scene.gameData.saveSession=()=>{assert.fail('atomic path must not split session save');};
   }});
-  assert.deepEqual(calls,mode==='null'?['port','system','session']:['system','session']);
+  assert.deepEqual(calls,mode==='null'?['port','encounter-save']:['encounter-save']);
   assert.deepEqual(saved(actual.context),saved(expected.context));assert.deepEqual(actual.events,expected.events);
 });
 
@@ -62,6 +75,7 @@ test('encounter awaits candidate persistence before original entry without calli
     b.scene.deferEncounterPersistence=()=>{calls.push('port');enter();return gate;};
     b.scene.gameData.saveSystem=()=>{calls.push('system');return Promise.resolve(true);};
     b.scene.gameData.saveSession=()=>{calls.push('session');return Promise.resolve();};
+    b.scene.gameData.saveEncounter=()=>{calls.push('encounter-save');return Promise.resolve(true);};
     const show=b.scene.ui.showText;
     b.scene.ui.showText=(...args)=>{calls.push('encounter');return show(...args);};
   }});
@@ -133,7 +147,7 @@ test('encounter Promise chain reports asset/save failures to the candidate obser
     const c=await nextBattleContext(),before=saved(c);
     await assert.rejects(createNextBattle(c,{onBind:(_c,p,b,t)=>{
       if(p.constructor!==originalPhases.NextEncounterPhase)return;
-      if(failure==='save')b.scene.gameData.saveSystem=()=>Promise.reject(Error('save-fault'));
+      if(failure==='save')b.scene.gameData.saveEncounter=()=>Promise.reject(Error('save-fault'));
       else{const add=b.scene.addEnemyPokemon;b.scene.addEnemyPokemon=(...args)=>{const pk=add(...args);pk.loadAssets=()=>t.add(Promise.reject(Error('asset-fault')));return pk;};}
     }}),new RegExp(`${failure}-fault`));assert.deepEqual(saved(c),before);
   }

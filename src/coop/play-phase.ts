@@ -930,11 +930,13 @@ export default class CoopPlayPhase extends Phase {
       await this.sendAction(action, '道具选择已提交，等待服务器裁定…');
       return;
     }
-    if (targetKind === 'party' || targetKind === 'move') {
+    if (targetKind === 'party' || targetKind === 'move' || targetKind==='remember') {
       const personal = this.model.applied?.personal;
       if (!personal?.party?.length) throw new Error('PERSONAL_PARTY_MISSING');
       const tm = type instanceof TmModifierType;
-      await this.showTeamParty(personal.party, targetKind === 'move' ? PartyUiMode.MOVE_MODIFIER : tm ? PartyUiMode.TM_MODIFIER : PartyUiMode.MODIFIER, async (slotIndex, option) => {
+      const remember=targetKind==='remember';
+      const recallOptions=remember?Array.from({length:Math.min(1000,Math.max(...personal.party.map(e=>e.pokemon.getLearnableLevelMoves().length)))},(_,i)=>i):[];
+      await this.showTeamParty(personal.party, remember?PartyUiMode.REMEMBER_MOVE_MODIFIER:targetKind === 'move' ? PartyUiMode.MOVE_MODIFIER : tm ? PartyUiMode.TM_MODIFIER : PartyUiMode.MODIFIER, async (slotIndex, option) => {
         const entry = personal.party[slotIndex];
         this.preparationSignature = '';
         const menuEpoch = this.teamMenuEpoch;
@@ -942,12 +944,13 @@ export default class CoopPlayPhase extends Phase {
         if (!this.isPersonalInputCurrent(snapshot, epoch) || menuEpoch !== this.teamMenuEpoch) return;
         const move = Number(option) - PartyOption.MOVE_1;
         const selected = targetKind === 'move' ? move >= 0 && move < 4 && entry?.pokemon.getMoveset()[move]
-          && type.moveSelectFilter(entry.pokemon.getMoveset()[move]) === null : option === (tm ? PartyOption.TEACH : PartyOption.APPLY);
+          && type.moveSelectFilter(entry.pokemon.getMoveset()[move]) === null : remember?Number.isInteger(option)&&Number(option)>=0&&entry?.pokemon.getLearnableLevelMoves()[Number(option)]!==undefined:option === (tm ? PartyOption.TEACH : PartyOption.APPLY);
         if (!entry || !selected) { await this.openPreparationMenu(); return; }
         action.pokemonId = entry.id;
         if (targetKind === 'move') action.moveIndex = move;
+        if(remember)action.moveIndex=Number(option);
         await this.sendAction(action, '本人道具目标已提交…');
-      }, type.selectFilter, targetKind === 'move' ? [PartyOption.MOVE_1, PartyOption.MOVE_2, PartyOption.MOVE_3, PartyOption.MOVE_4, PartyOption.SUMMARY]
+      }, type.selectFilter, remember?recallOptions:targetKind === 'move' ? [PartyOption.MOVE_1, PartyOption.MOVE_2, PartyOption.MOVE_3, PartyOption.MOVE_4, PartyOption.SUMMARY]
         : [tm ? PartyOption.TEACH : PartyOption.APPLY, PartyOption.SUMMARY], targetKind === 'move' ? type.moveSelectFilter : undefined,
         tm ? type.moveId : undefined);
       if (this.releaseTeamParty && this.isPersonalInputCurrent(snapshot, epoch))
@@ -955,6 +958,20 @@ export default class CoopPlayPhase extends Phase {
           this.clearTeamParty(); this.preparationSignature = '';
           await this.scene.ui.setMode(Mode.MESSAGE); await this.openPreparationMenu();
         }));
+      return;
+    }
+    if(targetKind==='fusion'){
+      const personal=this.model.applied?.personal;
+      if(!personal?.party?.length)throw Error('PERSONAL_PARTY_MISSING');
+      await this.showTeamParty(personal.party,PartyUiMode.SPLICE,async(baseIndex,donorIndex)=>{
+        const base=personal.party[baseIndex],donor=personal.party[Number(donorIndex)];
+        if(!base||!donor||base===donor){this.preparationSignature='';await this.openPreparationMenu();return;}
+        action.pokemonId=base.id;action.fusionId=donor.id;
+        if(this.isPersonalInputCurrent(snapshot,epoch))await this.sendAction(action,'本人融合目标已提交…');
+      },type.selectFilter,[PartyOption.APPLY,PartyOption.SPLICE,PartyOption.SUMMARY]);
+      if(this.releaseTeamParty&&this.isPersonalInputCurrent(snapshot,epoch))this.controls.replaceChildren(this.button('取消融合／返回商店',async()=>{
+        this.clearTeamParty();this.preparationSignature='';await this.scene.ui.setMode(Mode.MESSAGE);await this.openPreparationMenu();
+      }));
       return;
     }
     this.setStatus('该道具机制尚未接入，可返回改选；免费奖励也可跳过', true);
@@ -1047,10 +1064,15 @@ export default class CoopPlayPhase extends Phase {
       if (this.scene.ui.getMode?.() === Mode.PARTY) await this.scene.ui.setMode(Mode.MESSAGE);
       if (!active || !this.isPersonalInputCurrent(snapshot, epoch)) { release(); return false; }
       await this.scene.ui.setMode(Mode.PARTY, mode, 0, (slot: number, option: PartyOption) => {
-        if (!active) return;
-        const current = this.isPersonalInputCurrent(snapshot, epoch);
-        this.clearTeamParty();
-        if (current) return Promise.resolve(select(slot, option)).catch(error => {
+        // Original splice/recall handlers finish clearing their own transfer
+        // cursor/options after this callback. Dispose copies on the next
+        // microtask so that cleanup never touches already destroyed slots.
+        return Promise.resolve().then(()=>{
+          if (!active) return;
+          const current = this.isPersonalInputCurrent(snapshot, epoch);
+          this.clearTeamParty();
+          if (current) return select(slot, option);
+        }).catch(error => {
           if (this.isPersonalInputCurrent(snapshot, epoch)) this.setStatus(`队伍选择失败：${error?.message ?? error}`, true);
         });
       }, filter, moveFilter, tmMoveId, { allowedOptions, readOnlySummary: true,

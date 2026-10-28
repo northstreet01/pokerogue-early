@@ -10,7 +10,7 @@ import { SelectTargetPhase, EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEf
   MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase, BerryPhase, PokemonHealPhase } from '../phases';
 import { FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, BattleEndPhase, EggLapsePhase, AttemptCapturePhase, TrainerVictoryPhase, MoneyRewardPhase, ModifierRewardPhase } from '../phases';
 import { SelectModifierPhase, SelectBiomePhase, SwitchBiomePhase, NewBiomeEncounterPhase, PartyHealPhase, LevelCapPhase, WeatherEffectPhase } from '../phases';
-import { preparationItemTarget, isPreparationModifier, isPreparationPersistent } from '../coop/preparation-item';
+import { preparationItemTarget, isPreparationModifier, isPreparationPersistent, preparationRewardExclusions } from '../coop/preparation-item';
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase } from '../phases';
 import { Mode } from '../ui/ui';
 import { GameData } from '../system/game-data';
@@ -34,7 +34,7 @@ import { resolveFightIntent } from '../battle-core/fight-command.mjs';
 import { advanceCollectedFightCommands } from '../battle-core/fight-command.mjs';
 import { bindCoopModifierScope } from '../battle-core/modifier-scope.mjs';
 import { bindCoopFaint } from '../battle-core/faint-queue.mjs';
-import { openPreparation, advancePreparation, validatePreparationAction, completeSharedPreparation, coopRewardExclusions } from '../battle-core/preparation-runner.mjs';
+import { openPreparation, advancePreparation, validatePreparationAction, completeSharedPreparation } from '../battle-core/preparation-runner.mjs';
 import { advancePreparationEffect, validatePreparationEffect } from '../battle-core/preparation-effects-runner.mjs';
 import { advanceNextBattle } from '../battle-core/next-battle-runner.mjs';
 import { originalSafeDecisionCodec } from '../original-phase-checkpoints';
@@ -51,7 +51,7 @@ import { pokemonEvolutions } from '../data/pokemon-evolutions';
 import { createCaptureChoice, validateCaptureChoice } from '../battle-core/capture-choice.mjs';
 import { hasLegacyCaptures, legacyCaptureOptions, validateLegacyCapture } from '../battle-core/legacy-capture.mjs';
 import { nextSafeDecisionId } from '../battle-core/safe-decisions.mjs';
-import { PokemonHeldItemModifier, captureModifierState } from '../modifier/modifier';
+import { PokemonHeldItemModifier, MoneyInterestModifier, captureModifierState } from '../modifier/modifier';
 import { EncoreTag, TrappedTag } from '../data/battler-tags';
 import { CheckTrappedAbAttr, applyCheckTrappedAbAttrs } from '../data/ability';
 import * as Utils from '../utils';
@@ -66,11 +66,12 @@ import { evolutionReferenceCodec } from '../original-phase-checkpoints';
 import { advancePreparationGrowth } from '../battle-core/preparation-growth-runner.mjs';
 import { presentationText, resetPresentationText } from '../system/presentation-text.mjs';
 import i18next from '../i18n';
-import { QuietFormChangePhase } from '../form-change-phase';
+import { FormChangePhase, QuietFormChangePhase } from '../form-change-phase';
 import { GameOverPhase, UnlockPhase } from '../phases';
 import { BattleSpec } from '../enums/battle-spec';
 import { bindCoopGameOver } from '../battle-core/coop-game-over.mjs';
 import { achvs } from '../system/achv';
+import {getSpeciesFormChangeMessage} from '../data/pokemon-forms';
 import { vouchers } from '../system/voucher';
 
 // Progression choices append a safe sequence suffix. Keep the legacy native
@@ -228,6 +229,14 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     return view;
   });
   root.modifiers = c.players.flatMap(p => p.modifiers);
+  const applyRootModifiers=root.applyModifiers;
+  root.applyModifiers=function(type,player,...args){
+    if(type===MoneyInterestModifier&&player){
+      for(const view of views)view.applyModifiers(type,true,view);
+      return;
+    }
+    return applyRootModifiers.call(this,type,player,...args);
+  };
   // Original trainers may deliberately reuse one member seed. That can produce
   // the same generated id (also used by the original IV/shiny rules) twice.
   // Allocate only the co-op roster identity after construction, before items or
@@ -1414,7 +1423,7 @@ async function openNativePersonalMenu(candidate, runtime, seat, rerolledPhase = 
   const phase = rerolledPhase ?? new SelectModifierPhase(scene);
   phase.scene = scene;
   let menu;
-  (phase as any).getExcludedModifierIds = () => coopRewardExclusions;
+  (phase as any).getExcludedModifierIds = () => preparationRewardExclusions();
   scene.ui = { setMode: (mode, _player, options, callback, cost) => {
     check(mode === Mode.MODIFIER_SELECT, 'NATIVE_UI_DECISION_REQUIRED'); menu = { options, callback, cost };
   } };
@@ -1472,7 +1481,7 @@ function preparationEffectDriver(runtime, intents = []) {
       const targetKind = preparationItemTarget(type);
       check(targetKind !== null, 'PREPARATION_EFFECT_UNAVAILABLE');
       if (targetKind !== 'none') {
-        check(action.pokemonId !== null && action.fusionId === null,
+        check(action.pokemonId !== null && (targetKind==='fusion'?action.fusionId!==null:action.fusionId === null),
           'INVALID_PREPARATION_TARGET');
         const entry = c.roster.entries.find(e => e.owner === seat && e.group === 'party'
           && e.pokemon.id === action.pokemonId);
@@ -1483,8 +1492,13 @@ function preparationEffectDriver(runtime, intents = []) {
         try {
           const target = candidate.roster.entries.find(e => e.owner === seat && e.pokemon.id === action.pokemonId).pokemon;
           check(type.selectFilter(target) === null, 'INVALID_PREPARATION_TARGET');
+          if(targetKind==='fusion'){
+            const donor=candidate.roster.entries.find(e=>e.owner===seat&&e.group==='party'&&e.pokemon.id===action.fusionId)?.pokemon;
+            check(donor&&donor!==target&&type.selectFilter(donor)===null,'INVALID_PREPARATION_TARGET');
+          }
           if (targetKind === 'move') check(action.moveIndex !== null && target.getMoveset()[action.moveIndex]
             && type.moveSelectFilter(target.getMoveset()[action.moveIndex]) === null, 'INVALID_PREPARATION_MOVE');
+          else if(targetKind==='remember')check(action.moveIndex!==null&&target.getLearnableLevelMoves()[action.moveIndex]!==undefined,'INVALID_PREPARATION_MOVE');
           else check(action.moveIndex === null, 'INVALID_PREPARATION_MOVE');
         } finally { binding.dispose(); }
         return;
@@ -1495,8 +1509,7 @@ function preparationEffectDriver(runtime, intents = []) {
       check(phases.isPhase(phase), 'INVALID_PREPARATION_PHASE');
       const binding = bindNativeScene(c, runtime.scene.gameData), view = binding.views[seat];
       phase.scene = view;
-      const party = c.roster.entries.filter(e => e.owner === seat && e.group === 'party')
-        .sort((a, b) => a.index - b.index).map(e => e.pokemon);
+      const party = view.getParty();
       view.party = party;
       view.getParty = () => party;
       view.pokeballCounts = c.players[seat].pokeballCounts;
@@ -1505,13 +1518,24 @@ function preparationEffectDriver(runtime, intents = []) {
         set: value => { c.players[seat].money = value; } });
       let ended = false, next = null;
       const growth=[];
+      const transformations: (FormChangePhase | QuietFormChangePhase)[]=[];
       const beforeMoney = c.players[seat].money;
       const displayTasks = party.map(pokemon => {
         const descriptor = Object.getOwnPropertyDescriptor(pokemon, 'updateInfo'), update = pokemon.updateInfo;
         pokemon.updateInfo = (...args) => observeRulePromise(view, update.apply(pokemon, args));
         return () => { if (descriptor) Object.defineProperty(pokemon, 'updateInfo', descriptor); else delete (pokemon as any).updateInfo; };
       });
+      // The original consumable starts these promises without returning them.
+      // Track completion so removal, transfers and queued learning are durable.
+      for(const pokemon of party)for(const key of ['fuse','unfuse']){
+        const descriptor=Object.getOwnPropertyDescriptor(pokemon,key),method=pokemon[key];
+        pokemon[key]=(...args)=>observeRulePromise(view,method.apply(pokemon,args));
+        displayTasks.push(()=>{if(descriptor)Object.defineProperty(pokemon,key,descriptor);else delete pokemon[key];});
+      }
       view.unshiftPhase = phase => {
+        if ([FormChangePhase,QuietFormChangePhase].some(ctor=>Object.getPrototypeOf(phase)===ctor.prototype)) {
+          transformations.unshift(phase);return;
+        }
         if ([LevelUpPhase,LearnMovePhase,EvolutionPhase].some(ctor=>Object.getPrototypeOf(phase)===ctor.prototype)) {
           phases.capture(phase,c,seat);growth.unshift(phase);return;
         }
@@ -1526,11 +1550,17 @@ function preparationEffectDriver(runtime, intents = []) {
         clearText() {}, playError() { throw new Error('ORIGINAL_MENU_REJECTED'); },
         getHandler: () => ({ updateCostText() {} }),
         setMode: () => Promise.resolve(),
-        setModeWithoutClear(mode, _partyMode, _unused, callback, filter, moveFilter) {
+        setModeWithoutClear(mode, partyMode, _unused, callback, filter, moveFilter) {
           check(mode === Mode.PARTY, 'UNSUPPORTED_MENU_MODE');
           const index = party.findIndex(pokemon => pokemon.id === action.pokemonId);
           const target = party[index];
           check(target && filter(target) === null, 'INVALID_PREPARATION_TARGET');
+          if(partyMode===PartyUiMode.SPLICE){
+            const donorIndex=party.findIndex(p=>p.id===action.fusionId);
+            check(donorIndex>=0&&donorIndex!==index&&filter(party[donorIndex])===null,'INVALID_PREPARATION_TARGET');
+            return callback(index,donorIndex);
+          }
+          if(partyMode===PartyUiMode.REMEMBER_MOVE_MODIFIER)return callback(index,action.moveIndex);
           if (moveFilter) check(moveFilter(target.getMoveset()[action.moveIndex]) === null, 'INVALID_PREPARATION_MOVE');
           return callback(index, action.moveIndex === null ? undefined : PartyOption.MOVE_1 + action.moveIndex);
         },
@@ -1558,6 +1588,27 @@ function preparationEffectDriver(runtime, intents = []) {
           // Keep the scope bound until that original task and its effects settle.
           await Promise.resolve();
           await binding.drainTasks();
+          if(action.fusionId!==null&&action.fusionId!==undefined){
+            check(!party.some(p=>p.id===action.fusionId),'INCOMPLETE_PREPARATION_FUSION');
+            const donor=c.roster.entries.find(e=>e.pokemon.id===action.fusionId)?.pokemon;
+            check(donor,'INVALID_PREPARATION_TARGET');
+            if(c.roster.field[seat]===donor.id){binding.root.field.remove(donor);c.roster.field[seat]=null;c.battle.turnCommands[seat]=null;}
+            c.roster.retiredIds.push(donor.id);
+          }
+          // Original item triggers choose the form; execute its original rule
+          // method before committing. Only the committed view is animated.
+          for(let count=0;transformations.length;count++){
+            check(count<20,'PREPARATION_FORM_CHANGE_LIMIT');
+            const transformation:any=transformations.shift(),pokemon=transformation.pokemon,preName=pokemon.name;
+            check(party.includes(pokemon),'INVALID_PREPARATION_OWNER');
+            if(transformation instanceof FormChangePhase){
+              await transformation.applyFormChange();transformation.validateFormChangeAchievements();
+            }else await pokemon.changeForm(transformation.formChange);
+            await binding.drainTasks();
+            binding.events.push({kind:'form-change',scope:'shared',pokemonId:pokemon.id,view:binding.root.nativePublicPokemon(pokemon)});
+            const text=getSpeciesFormChangeMessage(pokemon,transformation.formChange,preName);
+            binding.events.push({kind:'message',scope:seat,text,presentation:presentationText(text)});
+          }
         });
         check(ended === (action.operation !== 'buy'), 'INCOMPLETE_PREPARATION_EFFECT');
         binding.recordStatistics(`preparation-${c.decision.id}-${seat}`);
@@ -1575,7 +1626,9 @@ function preparationEffectDriver(runtime, intents = []) {
           return { completed: true, pendingTasks: 0, ended, events: [...events, ...menu.events], grants: [], menu, phase: menu.phase };
         }
         check(next === null, 'UNEXPECTED_PREPARATION_PHASE');
-        return { completed: true, pendingTasks: 0, ended, events, grants: [], ...(growth.length?{growth}: {}) };
+        binding.sync();
+        return { completed: true, pendingTasks: 0, ended, events, grants: [], ...(growth.length?{growth}: {}),
+          ...(action.fusionId!==null&&action.fusionId!==undefined?{consumedPokemonId:action.fusionId}:{}) };
       } finally { displayTasks.forEach(restore => restore()); binding.dispose(); }
     },
   };
@@ -1642,6 +1695,13 @@ export async function nextNativeBattle(runtime, checkpoint) {
         &&after.battle.battleSpec===BattleSpec.FINAL_BOSS&&after.battle.gameMode.isWaveFinal(after.battle.waveIndex)
         &&after.battle.waveIndex===before.battle.waveIndex+1,
       isBiomeTransition: candidate => candidate.battle.gameMode.isClassic && candidate.battle.waveIndex % 10 === 0,
+      biomeMoneyAfter(before){
+        return before.players.map(player=>{
+          const view={money:player.money,updateMoneyText(){},validateAchvs(){},queueMessage(){}};
+          for(const modifier of player.modifiers)if(modifier instanceof MoneyInterestModifier&&modifier.shouldApply([view]))modifier.apply([view]);
+          return view.money;
+        });
+      },
       async validateBiomeTransition(before, after) {
         if(selectedBiome===undefined||after.arena.biomeType!==selectedBiome)return false;
         const expected=codec.restore(codec.capture(before));expected.battle.waveIndex=after.battle.waveIndex;
@@ -1850,6 +1910,8 @@ function publicPokemonView(entry: any) {
     shiny: !!pokemon.shiny,
     status: pokemon.status?.effect ?? 0,
     teraType: pokemon.getTeraType(),
+    ...(pokemon.fusionSpecies?{fusion:{speciesId:pokemon.fusionSpecies.speciesId,formIndex:pokemon.fusionFormIndex??0,
+      gender:pokemon.fusionGender??0,shiny:!!pokemon.fusionShiny}}:{}),
     ...(pokemon.isBoss() ? {bossSegments:pokemon.bossSegments,bossSegmentIndex:pokemon.bossSegmentIndex} : {}),
   };
 }

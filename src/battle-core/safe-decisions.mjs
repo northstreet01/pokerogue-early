@@ -65,7 +65,9 @@ export function createSafeDecisionCodec({evolution,modifierType,hasBiome,hasMove
           &&[...p.rewards,...p.shop].some(o=>o.id===p.selection.optionId),'INVALID_PREPARATION');
           const seat=d.players.indexOf(p);
           for(const key of ['pokemonId','fusionId'])check(p.selection[key]===null||owned(c,seat,p.selection[key]),'INVALID_PREPARATION_OWNER');
-          check(p.selection.moveIndex===null||Number.isInteger(p.selection.moveIndex)&&p.selection.moveIndex>=0&&p.selection.moveIndex<4,'INVALID_PREPARATION');
+          const selected=[...p.rewards,...p.shop].find(o=>o.id===p.selection.optionId);
+          check(p.selection.moveIndex===null||Number.isInteger(p.selection.moveIndex)&&p.selection.moveIndex>=0
+            &&p.selection.moveIndex<(selected.type.catalogId==='MEMORY_MUSHROOM'?1000:4),'INVALID_PREPARATION');
         }
       }
       validateSharedPreparation(d);
@@ -101,7 +103,8 @@ export function createSafeDecisionCodec({evolution,modifierType,hasBiome,hasMove
         const option=(a.operation==='reward'?p.rewards:p.shop).find(o=>o.id===a.optionId);
         check(option&&(a.operation!=='reward'||!p.rewardResolved)&&c.players[seat].money>=option.cost,'INVALID_PREPARATION_OPTION');
         for(const key of ['pokemonId','fusionId'])check(a[key]===null||owned(c,seat,a[key]),'INVALID_PREPARATION_OWNER');
-        check(a.moveIndex===null||Number.isInteger(a.moveIndex)&&a.moveIndex>=0&&a.moveIndex<4,'INVALID_ACTION');
+        check(a.moveIndex===null||Number.isInteger(a.moveIndex)&&a.moveIndex>=0
+          &&a.moveIndex<(option.type.catalogId==='MEMORY_MUSHROOM'?1000:4),'INVALID_ACTION');
         check(a.fusionId===null||a.pokemonId!==a.fusionId,'INVALID_ACTION');
       } else if(a.operation==='reserve-swap') {
         exact(a,['kind','operation','partyId','reserveId']);check(owned(c,seat,a.partyId)

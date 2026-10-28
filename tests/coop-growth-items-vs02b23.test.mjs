@@ -117,11 +117,18 @@ test('legacy personal preparation admits TM without changing its manual ready po
  assert.equal(next.decision.kind,'preparation');
 });
 
-test('naturally drawn TM after two affordable original rerolls learns through the real reward callback',async()=>{
- let c=copy(base);
- for(let n=0;n<2;n++)c=(await act(c,0,{kind:'preparation',operation:'reroll'})).checkpoint;
- assert.equal(c.players[0].money,250,'original 250 + 500 reroll charges from the real starting 1000');
- const option=c.decision.players[0].rewards.find(o=>o.type.recipe==='tm');assert.ok(option,'unchanged original seed draws a TM');
+test('original TM draw from the connected reward pool learns through the real callback with original reroll charges',async()=>{
+ let c=copy(base),option;
+ // Explicit synthetic funds cover a bounded search after capability filtering
+ // changed eligible weights. No fixture option, tier or RNG state is injected.
+ c.players[0].money=100000;
+ for(let n=0;n<8;n++){
+  const balance=c.players[0].money,cost=c.decision.players[0].rerollCost;
+  c=(await act(c,0,{kind:'preparation',operation:'reroll'})).checkpoint;
+  assert.equal(c.players[0].money,balance-cost);
+  option=c.decision.players[0].rewards.find(o=>o.type.recipe==='tm');if(option)break;
+ }
+ assert.ok(option,'bounded original reward draws include a TM');
  let target;
  for(const entry of c.roster.entries.filter(e=>e.owner!==null&&e.group==='party')){
   try{await route.h.request('native-validate-preparation',{checkpoint:c,seat:entry.owner,action:reward(option,entry.pokemon.fields.id)});target=entry;break;}

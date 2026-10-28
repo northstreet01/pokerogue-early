@@ -35,18 +35,38 @@ export async function advancePreparationEffect(context,seat,action,codec,safe,dr
   // Protect the other player's resources and Pokemon, plus battle/egg state.
   const after=codec.capture(c);
   const protectedAfter=protectedState(c);
+  let expected=before,protectedExpected=protectedBefore;
+  if(result.consumedPokemonId!==undefined){
+    const donorId=result.consumedPokemonId;
+    check(donorId===action.fusionId&&donorId!==action.pokemonId&&['reward','buy'].includes(action.operation),'INVALID_PREPARATION_FUSION');
+    const baseline=codec.restore(before),donor=baseline.roster.entries.find(e=>e.owner===seat&&e.group==='party'&&e.pokemon.id===donorId);
+    check(donor&&c.roster.entries.some(e=>e.owner===seat&&e.pokemon.id===action.pokemonId)
+      &&!c.roster.entries.some(e=>e.pokemon.id===donorId),'INVALID_PREPARATION_FUSION');
+    const fused=c.roster.entries.find(e=>e.pokemon.id===action.pokemonId).pokemon;
+    check(fused.fusionSpecies?.speciesId===donor.pokemon.species.speciesId&&fused.fusionFormIndex===donor.pokemon.formIndex
+      &&fused.fusionAbilityIndex===donor.pokemon.abilityIndex&&fused.fusionGender===donor.pokemon.gender
+      &&fused.fusionShiny===donor.pokemon.shiny,'INVALID_PREPARATION_FUSION');
+    // Only the original selected donor may disappear. Preserve exact peer,
+    // shared state and all remaining roster positions after closing that gap.
+    baseline.roster.entries=baseline.roster.entries.filter(e=>e!==donor);
+    for(const e of baseline.roster.entries)if(e.owner===seat&&e.group==='party'&&e.index>donor.index)e.index--;
+    baseline.players[seat].modifiers=baseline.players[seat].modifiers.filter(m=>m.pokemonId!==donorId);
+    baseline.roster.retiredIds.push(donorId);
+    if(baseline.roster.field[seat]===donorId){baseline.roster.field[seat]=null;baseline.battle.turnCommands[seat]=null;}
+    expected=codec.capture(baseline);protectedExpected=protectedState(baseline);
+  }
   check(canonical(after.decision)===canonical(before.decision),'INVALID_PREPARATION_RESULT');
   check(canonical(after.pendingEffects)===canonical(before.pendingEffects),'INVALID_PREPARATION_RESULT');
-  for(const key of ['battle','arena','scene','eggState','enemyModifiers'])check(canonical(protectedAfter[key]??null)===canonical(protectedBefore[key]??null),'PREPARATION_CHANGED_BATTLE_STATE');
+  for(const key of ['battle','arena','scene','eggState','enemyModifiers'])check(canonical(protectedAfter[key]??null)===canonical(protectedExpected[key]??null),'PREPARATION_CHANGED_BATTLE_STATE');
   check(canonical(d.players[1-seat])===canonical(before.decision.players[1-seat]),'PREPARATION_CHANGED_PEER');
-  check(canonical(protectedAfter.components)===canonical(protectedBefore.components)
-    &&canonical(protectedAfter.players[1-seat])===canonical(protectedBefore.players[1-seat]),'PREPARATION_CHANGED_PEER');
-  check(canonical(after.roster.entries.filter(e=>e.owner!==seat))===canonical(before.roster.entries.filter(e=>e.owner!==seat))
-    &&canonical(after.roster.field)===canonical(before.roster.field)&&canonical(after.roster.retiredIds)===canonical(before.roster.retiredIds),
+  check(canonical(protectedAfter.components)===canonical(protectedExpected.components)
+    &&canonical(protectedAfter.players[1-seat])===canonical(protectedExpected.players[1-seat]),'PREPARATION_CHANGED_PEER');
+  check(canonical(after.roster.entries.filter(e=>e.owner!==seat))===canonical(expected.roster.entries.filter(e=>e.owner!==seat))
+    &&canonical(after.roster.field)===canonical(expected.roster.field)&&canonical(after.roster.retiredIds)===canonical(expected.roster.retiredIds),
   'PREPARATION_CHANGED_PEER');
-  check(canonical(after.roster.entries.map(({pokemon,...entry})=>entry))===canonical(before.roster.entries.map(({pokemon,...entry})=>entry))
+  check(canonical(after.roster.entries.map(({pokemon,...entry})=>entry))===canonical(expected.roster.entries.map(({pokemon,...entry})=>entry))
     &&canonical(after.roster.entries.filter(e=>e.owner===seat&&e.group==='reserve'))===canonical(before.roster.entries.filter(e=>e.owner===seat&&e.group==='reserve'))
-    &&canonical(after.roster.ruleGroups)===canonical(before.roster.ruleGroups)&&canonical(after.roster.tagGroups)===canonical(before.roster.tagGroups),
+    &&canonical(after.roster.ruleGroups)===canonical(expected.roster.ruleGroups)&&canonical(after.roster.tagGroups)===canonical(expected.roster.tagGroups),
   'PREPARATION_CHANGED_ROSTER');
   const peer=c.players[1-seat];check(peer.money===context.players[1-seat].money
     &&canonical(peer.pokeballCounts)===canonical(context.players[1-seat].pokeballCounts),'PREPARATION_CHANGED_PEER');

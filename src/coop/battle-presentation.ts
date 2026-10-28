@@ -479,6 +479,8 @@ export class CoopBattlePresentation {
     const model = Object.create(view.owner === null ? EnemyPokemon.prototype : PlayerPokemon.prototype);
     Object.assign(model, { species: getPokemonSpecies(view.speciesId), formIndex: view.formIndex,
       id: view.id, level: view.level, hp: view.hp, gender: view.gender, shiny: view.shiny, pokeball: view.pokeball,
+      fusionSpecies:view.fusion?getPokemonSpecies(view.fusion.speciesId):undefined,
+      fusionFormIndex:view.fusion?.formIndex,fusionGender:view.fusion?.gender,fusionShiny:view.fusion?.shiny,
       ...(view.bossSegments ? {bossSegments:view.bossSegments,bossSegmentIndex:view.bossSegmentIndex} : {}),
       status: view.status ? { effect: view.status } : undefined,
       moveset: [], exp: 0, levelExp: 0,
@@ -488,7 +490,7 @@ export class CoopBattlePresentation {
       getDexAttr: () => 0n,
       randSeedInt: () => { throw new Error('CLIENT_RULE_RNG_FORBIDDEN'); },
     });
-    model.name = model.species.getName(model.formIndex);
+    model.generateName();
     return model;
   }
 
@@ -578,7 +580,7 @@ export class CoopBattlePresentation {
       const assetTasks: Promise<void>[] = [];
       for (const view of shared.pokemon) {
         if (!shared.field.includes(view.id)) continue;
-        const look = JSON.stringify([view.speciesId, view.formIndex, view.gender, view.shiny]);
+        const look = JSON.stringify([view.speciesId, view.formIndex, view.gender, view.shiny,view.fusion]);
         const model = this.model(view, applied);
         const key = applied.byId.has(view.id) ? JSON.stringify(capturePokemonState(model)) : JSON.stringify(view);
         let display = this.displayedById.get(view.id);

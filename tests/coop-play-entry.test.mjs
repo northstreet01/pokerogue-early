@@ -68,6 +68,38 @@ test('LAN entry discovers hosts without an IP field; remote entry and manual fal
   }finally{delete globalThis.pokerogueDesktop;}
 });
 
+test('fusion uses the original two-target party menu and submits only IDs from the personal party',async()=>{
+ const {p,sent}=phase(),own=[{id:100},{id:101}];let selection;
+ p.latest={personal:{decision:{kind:'preparation'}}};p.epoch='fusion-ui';p.isPersonalInputCurrent=()=>true;
+ p.model={applied:{personal:{party:own}}};
+ p.showTeamParty=async(entries,mode,callback,filter,allowed)=>{
+   assert.equal(entries,own);assert.equal(mode,api.PartyUiMode.SPLICE);assert.ok(allowed.includes(api.PartyOption.SPLICE));selection=callback;return true;
+ };
+ p.sendAction=async action=>sent.push(action);
+ const type=api.modifierTypes.DNA_SPLICERS().withIdFromFunc(api.modifierTypes.DNA_SPLICERS),option={id:'splice',type:api.captureModifierTypeState(type),cost:0};
+ await p.choosePreparationReward(option,p.latest,p.epoch);await selection(1,0);
+ assert.deepEqual(sent,[{kind:'preparation',operation:'reward',optionId:'splice',pokemonId:101,moveIndex:null,fusionId:100}]);
+});
+
+test('reward availability uses connected mechanisms without drawing variants',()=>{
+ const runtime=api.createOriginalRuntime('availability-no-draw',{trainerId:1,secretId:2}),before=runtime.context.sceneRandom.capture();
+ const excluded=api.withStarterRandomContext(runtime.context,()=>api.preparationRewardExclusions());
+ assert.deepEqual(runtime.context.sceneRandom.capture(),before);
+ for(const id of ['LURE','SUPER_LURE','MAX_LURE','VOUCHER','MAP','MINI_BLACK_HOLE'])assert.ok(excluded.includes(id),id);
+ for(const id of ['LEFTOVERS','DNA_SPLICERS','REVERSE_DNA_SPLICERS','FORM_CHANGE_ITEM','MEGA_BRACELET','TERA_SHARD','TM_COMMON'])assert.equal(excluded.includes(id),false,id);
+});
+
+test('public fusion presentation uses original fused appearance without exposing private donor stats',()=>{
+ const presentation=new api.CoopBattlePresentation({});
+ const view={id:100,owner:1,index:0,speciesId:909,formIndex:0,level:5,hp:20,maxHp:25,gender:0,shiny:false,
+   fusion:{speciesId:7,formIndex:0,gender:1,shiny:true}};
+ const model=presentation.publicModel(view);
+ assert.equal(model.fusionSpecies.speciesId,7);assert.equal(model.fusionShiny,true);
+ assert.equal(model.abilityIndex,undefined);assert.equal(model.ivs,undefined);assert.deepEqual(model.moveset,[]);
+ assert.notEqual(model.name,model.species.getName(0));
+ assert.equal(presentation.publicModel({...view,fusion:undefined}).fusionSpecies,undefined);
+});
+
 function draftGameData() {
   return Object.assign(Object.create(api.GameData.prototype), { trainerId: 1, secretId: 2, eggs: [],
     dexData: Object.fromEntries([1, 4, 7].map(id => [id, { ivs: [10, 10, 10, 10, 10, 10],
@@ -1475,6 +1507,7 @@ test('active Party selection cannot submit after its awaited mode transition cro
     const originalMode = p.scene.ui.setMode;
     p.scene.ui.setMode = () => new Promise(resolve => { finish = resolve; });
     modes.at(-1)[3](1, api.PartyOption.SEND_OUT);
+    await waitUntil(()=>typeof finish==='function');
     if (stale === 'revision') p.latest = { ...p.latest, revision: 5, decisionId: 'fight-5' };
     else p.epoch = 'epoch-2';
     p.scene.ui.setMode = originalMode;

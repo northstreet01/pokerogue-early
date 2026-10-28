@@ -37,9 +37,9 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
     let preCount=0;
     const seen=[];
     while(kind!=='NewBattlePhase'&&d?.kind==='original-phase'
-      &&['ReturnPhase','ShowTrainerPhase',...(biomeTransition?['SelectBiomePhase','PartyHealPhase','SwitchBiomePhase']:[])].includes(driver.phaseKind(d.phase))){
+      &&['ReturnPhase','ShowTrainerPhase',...(biomeTransition?['SelectBiomePhase','PartyHealPhase','SwitchBiomePhase','MessagePhase']:[])].includes(driver.phaseKind(d.phase))){
       const name=driver.phaseKind(d.phase);seen.push(name);
-      check(resetsEncounter()&&++preCount<=(biomeTransition?6:3)&&d.remaining==='start','UNSUPPORTED_NEXT_BATTLE_PHASE');
+      check(resetsEncounter()&&++preCount<=(biomeTransition?8:3)&&d.remaining==='start','UNSUPPORTED_NEXT_BATTLE_PHASE');
       if(biomeTransition&&['SelectBiomePhase','PartyHealPhase','SwitchBiomePhase'].includes(name)){
         check(seen.filter(n=>n===name).length===1,'DUPLICATE_BIOME_PHASE');
         check(name==='SelectBiomePhase'||seen.includes('SelectBiomePhase'),'INVALID_BIOME_PHASE_ORDER');
@@ -72,7 +72,13 @@ export async function advanceNextBattle(context,codec,driver,{decisionId}={}){
   } else check(c.battle.waveIndex===context.battle.waveIndex+1&&c.battle.double===true
     &&c.battle.battleType===0&&(c.battle.battleSpec===0||finalEncounter())&&c.battle.turn===1
     &&c.battle.enemyParty.length===(finalEncounter()?1:2)&&c.battle.enemyParty.every(p=>!p.isFainted(true)), 'INVALID_NEXT_BATTLE_RESULT');
-  check(canonical(personalBefore)===canonical(personalResources(c))&&canonical(before.eggState??null)===canonical(after.eggState??null),
+  const expectedPersonal=copy(personalBefore);
+  if(biomeTransition&&driver.biomeMoneyAfter){
+    const balances=driver.biomeMoneyAfter(context);
+    check(Array.isArray(balances)&&balances.length===2&&balances.every(n=>Number.isSafeInteger(n)&&n>=0),'INVALID_BIOME_MONEY');
+    expectedPersonal.players.forEach((player,index)=>{player.money=balances[index];});
+  }
+  check(canonical(expectedPersonal)===canonical(personalResources(c))&&canonical(before.eggState??null)===canonical(after.eggState??null),
     'NEXT_BATTLE_RESOURCE_CHANGED');
   if(biomeTransition){
     check(typeof driver.validateBiomeTransition==='function'&&await driver.validateBiomeTransition(context,c)===true,'INVALID_BIOME_TRANSITION');

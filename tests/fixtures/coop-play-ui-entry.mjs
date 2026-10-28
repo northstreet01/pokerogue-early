@@ -59,4 +59,7 @@ export { presentOriginalCapture } from '../../src/coop/capture-presentation';
 export { presentOriginalFormChange } from '../../src/coop/form-change-presentation';
 export { default as BattleMessageUiHandler } from '../../src/ui/battle-message-ui-handler';
 export { default as BattleInfo } from '../../src/ui/battle-info';
+export {originalSaveCodec} from '../../src/local-meta/original-save-codec';
+export {achvs} from '../../src/system/achv';
+export {vouchers} from '../../src/system/voucher';
 export { default as i18next } from '../../src/i18n';

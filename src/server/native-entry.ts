@@ -197,11 +197,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.field = { list: [], add(p) { this.list.push(p); return this; },
     getIndex(p) { return this.list.indexOf(p); }, getAll() { return [...this.list]; },
     remove(p) { const i = this.getIndex(p); if (i >= 0) this.list.splice(i, 1); }, moveBelow() {} };
-  const deferredData = () => ({ ...identity, unlocks: {}, gameStats: new GameStats(), getFormAttr: GameData.prototype.getFormAttr,
+  const deferredData = (owner: number | null = null) => ({ ...identity, unlocks: {}, gameStats: new GameStats(), getFormAttr: GameData.prototype.getFormAttr,
     setPokemonSeen: (p, incrementCount = true) => intents.push({ kind: 'seen', pokemonId: p.id,
+      factVersion:1, owner, pokemon:capturePokemonState(p),
       speciesId: p.species.speciesId, dexAttr: p.getDexAttr().toString(), incrementCount }),
-    updateSpeciesDexIvs: (speciesId, ivs) => intents.push({ kind: 'dex-ivs', speciesId, ivs: [...ivs] }),
-    setPokemonCaught: (p, incrementCount = true) => { intents.push({ kind: incrementCount ? 'capture-pending' : 'evolution-pending', pokemonId: p.id,
+    updateSpeciesDexIvs: (speciesId, ivs) => intents.push({ kind: 'dex-ivs', factVersion:1, owner, speciesId, ivs: [...ivs] }),
+    setPokemonCaught: (p, incrementCount = true) => { intents.push({ kind: incrementCount ? 'capture-pending' : 'evolution-pending', factVersion:1, owner, pokemonId: p.id,
       speciesId: p.species.speciesId, dexAttr: p.getDexAttr().toString(), level: p.level,
       ivs: [...p.ivs], nature: p.nature, pokemon: capturePokemonState(p) }); return Promise.resolve(); },
     saveSystem: () => { throw new Error('PERMANENT_SAVE_UNAVAILABLE'); },
@@ -210,12 +211,16 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   const views = parties.map((party, seat) => {
     const view = Object.create(root);
     Object.assign(view, { nativeOwner: seat, modifiers: c.players[seat].modifiers, money: c.players[seat].money,
-      pokeballCounts: c.players[seat].pokeballCounts, gameData: deferredData(), getParty: () => party,
+      pokeballCounts: c.players[seat].pokeballCounts, gameData: deferredData(seat), getParty: () => party,
       getPlayerField: () => root.getPlayerField(), getEnemyField: () => root.getEnemyField(),
       getField: active => root.getField(active), getPokemonById: id => root.getPokemonById(id),
       getPlayerPokemon: () => root.getPlayerPokemon() });
     Object.defineProperty(view,'money',{configurable:true,get:()=>c.players[seat].money,set:value=>{c.players[seat].money=value;}});
-    view.validateAchv = achv => { intents.push({kind:'achievement-check',id:achv.id,owner:seat});return false; };
+    view.validateAchv = (achv,args) => {
+      intents.push({kind:'achievement-check',id:achv.id,owner:seat});
+      if(achv.validate(view,args))intents.push({kind:'achievement-approved',factVersion:1,approved:true,id:achv.id,owner:seat});
+      return false;
+    };
     for (const name of ['applyModifiers', 'applyModifier', 'findModifiers', 'findModifier', 'getModifiers', 'removeModifier'])
       view[name] = BattleScene.prototype[name];
     for (const key of ['phaseQueue', 'phaseQueuePrepend', 'nextCommandPhaseQueue', 'phaseQueuePrependSpliceIndex', 'currentPhase', 'standbyPhase', 'waveSeed'])
@@ -313,12 +318,18 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.cache = { audio: { exists: () => false } };
   root.anims = { generateFrameNames() { return []; }, create() {} };
   root.addFieldSprite = (x, y) => new DisplayTarget().setPosition(x, y);
-  root.validateAchv = (achv) => { intents.push({ kind: 'achievement-check', id: achv.id }); return false; };
+  root.validateAchv = (achv,args) => {
+    const actor=root.currentPhase?.getPokemon?.();
+    const owner=c.roster.entries.find(e=>e.pokemon===actor)?.owner;
+    for(const seat of [0,1])if(owner===null||owner===undefined||seat===owner)views[seat].validateAchv(achv,args);
+    return false;
+  };
   root.validateVoucher = voucher => {
-    for(const owner of [0,1])intents.push({kind:'voucher-pending',owner,id:voucher.id,
+    for(const owner of [0,1])intents.push({kind:'voucher-pending',factVersion:1,owner,id:voucher.id,
+      repeat:!!root.currentBattle.trainer?.config.isBoss,
       voucherType:voucher.voucherType,count:1,fallbackCatalogId:'VOUCHER',resolve:'original-unlock-or-repeat'});
-    // Collection/gacha is explicitly deferred. Save each owned entitlement,
-    // never write a balance or trigger the original repeat-voucher fallback now.
+    // The host records each entitlement; the personal transaction decides its
+    // original first/repeat award. Never mint personal balances in the Worker.
     return true;
   };
   root.time = { delayedCall: (delay, fn, args = [], scope = null) => {
@@ -583,13 +594,30 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
     });
     c.continuation.phaseQueuePrependSpliceIndex = root.phaseQueuePrependSpliceIndex;
   }
-  return { root, views, events, intents, bindPhase, sync,
+  const statsSnapshot=()=>[root,...views].map(scene=>({...scene.gameData.gameStats}));
+  const initialStats=statsSnapshot();
+  const recordStatistics=(id,before=initialStats,actorOwner:number|null=null)=>{
+    for(const owner of [0,1]){
+      const values:any={};
+      for(const key of ['battles','trainersDefeated','pokemonDefeated','pokemonFused','highestLevel','highestMoney','highestDamage','highestHeal','highestEndlessWave']){
+        const shared=actorOwner===null||actorOwner===owner?root.gameData.gameStats[key]-before[0][key]:0;
+        const personal=views[owner].gameData.gameStats[key]-before[owner+1][key];
+        if(key.startsWith('highest')){
+          const value=Math.max(shared>0?root.gameData.gameStats[key]:0,personal>0?views[owner].gameData.gameStats[key]:0);
+          if(value>0)values[key]=value;
+        }else if(shared+personal>0)values[key]=shared+personal;
+      }
+      if(Object.keys(values).length)intents.push({kind:'statistics',factVersion:1,owner,id,values});
+    }
+  };
+  return { root, views, events, intents, bindPhase, sync, recordStatistics,
     async drainTasks() {
       const results = await Promise.allSettled(trackers.map(tracker => tracker.drain()));
       const failure = results.find(result => result.status === 'rejected');
       if (failure?.status === 'rejected') throw failure.reason;
     },
     async execute(p, resume?) {
+      const statsBefore=statsSnapshot();
       // Provenance is phase-local; warming a Worker or evicting an older name
       // must not change event metadata after a checkpoint restart. Queued
       // MessagePhase metadata travels with its existing display-only fields.
@@ -695,10 +723,10 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
           const declaration=Object.create(views[owner]);
           declaration.unshiftPhase=phase=>{check(phase instanceof UnlockPhase,'INVALID_CLEAR_UNLOCK');unlocks.push((phase as any).unlockable);};
           GameOverPhase.prototype.handleUnlocks.call({scene:declaration,victory:true} as any);
-          intents.push({kind:'completion-pending',owner,waveIndex:c.battle.waveIndex,mode:c.battle.gameMode.modeId,
+          intents.push({kind:'completion-pending',factVersion:1,owner,waveIndex:c.battle.waveIndex,mode:c.battle.gameMode.modeId,
             achievementId:achvs.CLASSIC_VICTORY.id,unlockCandidates:unlocks,sessionsWon:1,resolve:'original-personal-clear'});
           const voucher=vouchers[achvs.CLASSIC_VICTORY.id];check(voucher,'ORIGINAL_CLEAR_VOUCHER_UNAVAILABLE');
-          intents.push({kind:'voucher-pending',owner,id:voucher.id,voucherType:voucher.voucherType,count:1,
+          intents.push({kind:'voucher-pending',factVersion:1,owner,id:voucher.id,voucherType:voucher.voucherType,count:1,
             fallbackCatalogId:'VOUCHER_PREMIUM',resolve:'original-unlock-or-repeat'});
         }
         for(const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue'])root[key]=[];
@@ -856,6 +884,12 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         root.phaseQueuePrependSpliceIndex=-1;
         events.push({kind:'run-ended',scope:'shared',victory:false,reason:'defeat'});
       }
+      if(!ids.has(p))ids.set(p,nextId++);
+      // Shared battle totals belong to both seats; an actor's damage/level
+      // totals follow its original personal scene, even when target.scene=root.
+      const actor=p.getPokemon?.();
+      const actorOwner=c.roster.entries.find(e=>e.pokemon===actor)?.owner??null;
+      recordStatistics(`${c.decision.id}:phase-${ids.get(p)}`,statsBefore,actorOwner);
       root.currentPhase = null; sync();
       if (waiting) return { completed: false, suspended: true, pendingTasks: 0, events: [...events], grants: [] };
       return { completed: true, pendingTasks: 0, events: [...events], grants: [] };
@@ -1526,6 +1560,7 @@ function preparationEffectDriver(runtime, intents = []) {
           await binding.drainTasks();
         });
         check(ended === (action.operation !== 'buy'), 'INCOMPLETE_PREPARATION_EFFECT');
+        binding.recordStatistics(`preparation-${c.decision.id}-${seat}`);
         intents.push(...binding.intents);
         const events = [...binding.events, { kind: 'preparation-effect', seat, operation: action.operation }];
         if (c.players[seat].money !== beforeMoney) {

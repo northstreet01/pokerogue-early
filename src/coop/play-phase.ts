@@ -45,6 +45,8 @@ export default class CoopPlayPhase extends Phase {
   private teamMenuEpoch = 0;
   private socket: WebSocket | null = null;
   private consumer: any = null;
+  private grantSaveFailed = false;
+  private grantRetryRunId: string | null = null;
   private model: any = null;
   private epoch: string | null = null;
   private roomId: string | null = null;
@@ -251,8 +253,16 @@ export default class CoopPlayPhase extends Phase {
     const caret = focused ? previous?.selectionStart : null;
     if (previous) this.roomCodeDraft = previous.value;
     this.controls.replaceChildren();
-    const inLobby=!this.latest||this.latest.personal.decision.kind==='lobby';
+    const inLobby=!this.grantSaveFailed&&(!this.latest||this.latest.personal.decision.kind==='lobby');
     this.overlay?.classList.toggle('room-lobby',inLobby);
+    if(this.grantSaveFailed){
+      this.controls.append(this.button('重试保存成果',()=>{
+        if(!this.roomId||this.seat===null)return;
+        this.grantSaveFailed=false;
+        this.send({type:'requestSnapshot',roomId:this.roomId,runId:this.grantRetryRunId,
+          knownRevision:this.latest?.revision??0,reason:'USER_RETRY'});
+      },true));return;
+    }
     if(this.presenceLine){
       this.presenceLine.hidden=!inLobby||!this.roomId;
       this.presenceLine.replaceChildren(...[0,1].map(seat=>{
@@ -530,10 +540,30 @@ export default class CoopPlayPhase extends Phase {
                 if (snapshot.personal.decision.kind !== 'lobby') await this.enterBattle(snapshot);
               },
               captureAppliedState: () => this.model.captureAppliedState(),
-              applyGrantsTransaction: grants => this.model.applyGrantsTransaction(grants),
+              applyGrantsTransaction: async (grants,identity) => {
+                if(!grants.length)return;
+                this.grantRetryRunId=identity.runId;
+                try {
+                const hostId=this.hostId,profileId=this.scene.gameData.localProfileId,token=this.token;
+                const roomId=this.roomId,seat=this.seat,epoch=this.epoch;
+                if(!hostId||!profileId||!token||seat!==identity.seat)throw new Error('请先在大厅创建或选择个人档案，再恢复联机成果');
+                const isCurrent=()=>current()&&epoch===this.epoch&&roomId===this.roomId&&seat===this.seat
+                  &&token===this.token&&hostId===this.hostId&&profileId===this.scene.gameData.localProfileId;
+                // The verified run must be durable before its collection receipt
+                // and before either ACK. Welcome alone has no run binding yet.
+                await this.persistSeat(identity.runId);
+                if(!isCurrent())throw new Error('COOP_BINDING_EXPIRED');
+                await this.scene.gameData.applyCoopResults(grants,{hostId,profileId,token,roomId,seat,runId:identity.runId,isCurrent});
+                this.grantSaveFailed=false;
+                } catch(error){this.grantSaveFailed=true;throw error;}
+              },
             },
             isCurrent: epoch => current() && epoch === this.epoch,
-            send: message => this.send(message),
+            send: message => {
+              // An unacknowledged grant already blocks the host. A disk failure
+              // must wait for explicit retry, rather than requestSnapshot-loop.
+              if(!(this.grantSaveFailed&&message.type==='requestSnapshot'&&message.reason==='CLIENT_APPLY_FAILED'))this.send(message);
+            },
           });
         }
         const previous = this.latest;
@@ -553,7 +583,10 @@ export default class CoopPlayPhase extends Phase {
         await this.replayOutbox();
       }
     } catch (error: any) {
-      if (current()) this.setStatus(`同步失败：${error?.message ?? error}`, true);
+      if (current()) {
+        this.setStatus(`同步失败：${error?.message ?? error}`, true);
+        if(this.grantSaveFailed){if(this.overlay)this.overlay.hidden=false;this.renderLobbyControls();}
+      }
     }
   }
 
@@ -1430,6 +1463,9 @@ export default class CoopPlayPhase extends Phase {
   private async activateSession() {
     const lifecycle = this.lifecycle;
     if (!this.current(lifecycle) || this.roomId || this.joining) return false;
+    if(this.hostId&&!this.scene.gameData.localProfileId){
+      this.setStatus('请先返回大厅，在档案管理中创建或选择个人档案，再开始联机。成果将保存到该档案。',true);return false;
+    }
     this.recoveryVersion++;
     this.expectedRunId=null;this.runId=null;
     this.joining = true;
@@ -1440,12 +1476,13 @@ export default class CoopPlayPhase extends Phase {
     return true;
   }
 
-  private async persistSeat() {
+  private async persistSeat(runId=this.runId) {
     if (this.disposed || !this.roomId || this.seat === null || !this.token) return;
-    await this.storage.saveSeat(this.origin,
-      { roomId: this.roomId, seat: this.seat, token: this.token, runId: this.runId,
+    const saved=await this.storage.saveSeat(this.origin,
+      { roomId: this.roomId, seat: this.seat, token: this.token, runId,
         ...(this.hostId?{hostId:this.hostId,endpoint:this.endpoint}:{}),
         ...(this.scene.gameData?.localProfileId ? {profileId:this.scene.gameData.localProfileId} : {}) }, this.session());
+    if(saved===false)throw new Error('COOP_SEAT_BINDING_NOT_SAVED');
   }
 
   private async openStarterSelect() {

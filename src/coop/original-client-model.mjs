@@ -67,8 +67,9 @@ export function createOriginalClientModel({ restorePokemonState, capturePokemonS
       return { shared: COPY(applied.shared), personal };
     },
 
-    // VS-01 has no permanent grant transaction. The consumer still requires the
-    // interface; this adapter never writes collections or storage.
+    // This observation model has no writer identity. The production play phase
+    // supplies GameData.applyCoopResults after durable seat binding instead.
+    // Generic/headless callers must still fail closed on a nonempty grant.
     async applyGrantsTransaction(grants) {
       if (!applied) throw new Error('MODEL_NOT_APPLIED');
       if (!Array.isArray(grants) || grants.length !== 0)

@@ -10,6 +10,7 @@ import {IDBFactory} from 'fake-indexeddb';
 import {openDesktopStorage,STORAGE_SCOPES,bundleDigest} from '../desktop/storage.mjs';
 import {createNativeStore,ensureNativeStorage,captureDesktopLegacy} from '../src/platform/native-storage.mjs';
 import {createNativePlayStorage} from '../src/coop/native-play-storage.mjs';
+import {openGameProfileIO} from '../src/local-meta/game-io.mjs';
 import {createProfileRepository} from '../src/local-meta/repository.mjs';
 import {createMetaCodec} from '../src/local-meta/codec.mjs';
 import {deviceStorage} from '../src/platform/preferences.mjs';
@@ -133,6 +134,29 @@ before(async()=>{
   globalThis.indexedDB=new IDBFactory();
   await build({configFile:false,publicDir:false,logLevel:'error',resolve:{alias:[{find:/^phaser$/,replacement:resolve('server/headless-presentation.mjs')},{find:/^phaser3-rex-plugins\/.*$/,replacement:resolve('server/headless-rex.mjs')}]},ssr:{noExternal:true},build:{ssr:resolve('tests/fixtures/desktop-storage-entry.mjs'),outDir:resolve('build/desktop-storage/original'),emptyOutDir:true,minify:false,rollupOptions:{external:isBuiltin,output:{format:'cjs',entryFileNames:'entry.cjs'}}}});
   api=createRequire(import.meta.url)('../build/desktop-storage/original/entry.cjs');await new Promise(setImmediate);original=await api.originalFixture();codec=createMetaCodec(api.originalSaveCodec);
+});
+
+test('cooperative transaction persists a receipt and collection together across SQLite reopen',async()=>{
+  const e=setup();let io;
+  try{
+    const repo=createProfileRepository({store:createNativeStore('meta',e.bridge),codec});
+    const profile=await repo.create(original.system);const profileId=profile.profileId;
+    io=await openGameProfileIO(repo,profileId,{mode:'coop',owner:'coop-test'});
+    const binding={hostId:'host-1',runId:'run-1',roomId:'ABCDEF',seat:1,profileId,token:'private',isCurrent:()=>true};
+    const grant={id:'voucher-1',seat:1,payload:{kind:'voucher'}};
+    const apply=async system=>{system.voucherCounts['0']++;return {system,kinds:['voucher']};};
+    await io.applyCoopGrants([grant],binding,apply);await io.close();io=null;e.db.close();
+    const reopened=openDesktopStorage(e.dir);
+    try{
+      const again=createProfileRepository({store:createNativeStore('meta',bridgeFor(reopened)),codec});
+      const stored=await again.read(profileId);assert.equal(stored.grantLedger.length,1);
+      assert.equal(stored.originalSystem.voucherCounts['0'],original.system.voucherCounts['0']+1);
+      const next=await openGameProfileIO(again,profileId,{mode:'coop',owner:'coop-reopen'});
+      try{await next.applyCoopGrants([grant],binding,()=>{throw Error('MUST_NOT_APPLY_TWICE');});}
+      finally{await next.close();}
+      assert.deepEqual(await again.read(profileId),stored);
+    }finally{reopened.close();}
+  }catch(error){if(io)await io.close().catch(()=>{});try{e.db.close();}catch{}throw error;}
 });
 
 test('actual original profile codec/repository keeps leases, CAS, history and archive on SQLite',async()=>{

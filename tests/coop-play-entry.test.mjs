@@ -667,7 +667,7 @@ test('stale/corrupt snapshots cannot replace the verified page state or pin an o
 });
 
 test('outbox survives a missing receipt and replays the exact message once per resumed epoch', async () => {
-  const first = phase(); await first.p.onMessage(welcome);
+  const first = phase(); await first.p.storage.beginSession(origin,first.p.session());await first.p.onMessage(welcome);
   await first.p.onMessage(await snapshot());
   first.p.inputReady = true;
   const retained = api.captureProfileDraft(draftGameData(), draftStarters([1]));
@@ -677,6 +677,7 @@ test('outbox survives a missing receipt and replays the exact message once per r
   assert.ok(message);
   assert.equal(first.sent.filter(message => message.type === 'submitAction').length, 1);
   const second = phase(); second.p.storage = first.p.storage;
+  await second.p.storage.beginSession(origin,second.p.session(),true);
   await second.p.onMessage({ ...welcome, connectionEpoch: 'epoch-2' });
   await second.p.onMessage(await snapshot(0, 'epoch-2'));
   assert.deepEqual(second.sent.find(m => m.type === 'submitAction'), message);
@@ -958,11 +959,41 @@ test('preparation reroll submits once and a mode failure is reported without los
 
 test('a verified duplicate snapshot preserves the active personal menu callbacks and controls', async () => {
   const { p } = phase(); let views = 0;
+  await p.storage.beginSession(origin,p.session());
   p.updateLobbyView = () => { views++; };
   await p.onMessage(welcome);
   const message = await snapshot(); await p.onMessage(message); const active = p.latest;
   await p.onMessage(structuredClone(message));
   assert.equal(p.latest, active); assert.equal(views, 1);
+});
+
+test('production grant callback durably binds the verified run before collection and suppresses ACK on a rejected seat write',async()=>{
+  for(const reject of [false,true]){
+    const {p,sent,errors}=phase();await p.storage.beginSession(origin,p.session());
+    p.hostId='host-1';let applied=0;
+    p.scene.gameData={localProfileId:'profile-1',async applyCoopResults(grants,binding){
+      const seat=await p.storage.loadSeat(origin);assert.equal(seat.runId,binding.runId);
+      assert.equal(seat.profileId,binding.profileId);assert.equal(seat.token,binding.token);
+      assert.equal(binding.isCurrent(),true);assert.equal(grants.length,1);applied++;
+    }};
+    await p.onMessage(welcome);sent.length=0;
+    const storage=p.storage;
+    if(reject)p.storage={...p.storage,saveSeat:async()=>false};
+    const s=await snapshot();s.grants=[{id:'results-1',seat:0,payload:{version:1,facts:[{kind:'session-start'}]}}];
+    await p.onMessage(s);
+    assert.equal(applied,reject?0:1);
+    assert.equal(sent.some(m=>m.type==='grantAck'),!reject);
+    assert.equal(sent.some(m=>m.type==='stateAck'),!reject);
+    if(reject){
+      assert.ok(errors.some(e=>e.includes('COOP_SEAT_BINDING_NOT_SAVED')));
+      assert.equal(sent.some(m=>m.type==='requestSnapshot'),false,'disk failure must not create an automatic snapshot loop');
+      api.CoopPlayPhase.prototype.renderLobbyControls.call(p);
+      const button=p.controls.querySelector('button');assert.equal(button.textContent,'重试保存成果');
+      p.storage=storage;button.click();await waitUntil(()=>sent.some(m=>m.type==='requestSnapshot'));
+      assert.equal(sent.find(m=>m.type==='requestSnapshot').runId,'run-1');
+      await p.onMessage(s);assert.equal(applied,1);assert.equal(sent.some(m=>m.type==='grantAck'),true);
+    }
+  }
 });
 
 test('a rejected personal receipt restores the same preparation decision controls', async () => {

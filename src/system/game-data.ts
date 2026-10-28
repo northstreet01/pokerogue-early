@@ -1,7 +1,7 @@
 import {deviceStorage} from '../platform/preferences.mjs';
 import BattleScene, { PokeballCounts, bypassLogin } from "../battle-scene";
 import i18next from '../i18n';
-import Pokemon, { EnemyPokemon, PlayerPokemon } from "../field/pokemon";
+import Pokemon, { EnemyPokemon, PlayerPokemon, restorePokemonState } from "../field/pokemon";
 import { pokemonPrevolutions } from "../data/pokemon-evolutions";
 import PokemonSpecies, { allSpecies, getPokemonSpecies, speciesStarters } from "../data/pokemon-species";
 import { Species } from "../data/enums/species";
@@ -179,6 +179,7 @@ export class GameData {
   private localSystemSaveQueue: Promise<void> = Promise.resolve();
   private profileIO: any = null;
   private profileClosing = false;
+  private resultsGeneration = 0;
   private pendingSaves = new Set<Promise<boolean>>();
 
   public trainerId: integer;
@@ -254,6 +255,99 @@ export class GameData {
   public readLocalData(key: string): Promise<string | null> { return this.profileIO ? this.profileIO.read(key) : readLocalSave(key); }
   public refreshUserInfo(): Promise<boolean> { return updateUserInfo(key => this.readLocalData(key), this.profileIO?.displayName ?? 'Local'); }
 
+  /** Only authenticated, durably bound personal seats may call this port.
+   * Original methods run on a detached System copy; no animation, RNG, eggs or
+   * shared selection view may write the live collection before the commit. */
+  public applyCoopResults(grants: any[], binding: any): Promise<void> {
+    if(!grants.length)return Promise.resolve();
+    if(this.profileClosing||!this.profileIO||this.profileIO.mode!=='coop')return Promise.reject(new Error('LOCAL_COOP_PROFILE_REQUIRED'));
+    const current=binding.isCurrent;
+    const work=this.localSystemSaveQueue.catch(()=>{}).then(async()=>{
+      const system=await this.profileIO.applyCoopGrants(grants,{...binding,isCurrent:()=>!this.profileClosing&&current()},
+        (system,pending)=>this.reduceCoopResults(system,pending));
+      this.resultsGeneration++;
+      this.localSystemSnapshot=JSON.stringify(system);
+      if(!await this.loadSystem({readOnly:true}))throw new Error('LOCAL_COOP_REFRESH_FAILED');
+    });
+    this.localSystemSaveQueue=work;
+    return work;
+  }
+
+  private async reduceCoopResults(system: any, grants: any[]): Promise<any> {
+    const scene:any=Object.create(this.scene);
+    const data:GameData=Object.create(GameData.prototype);
+    Object.assign(data,this.parseSystemData(JSON.stringify(system)));
+    data.scene=scene;data.eggs=data.eggs.map((egg:any)=>egg.toEgg());
+    scene.gameData=data;
+    scene.ui={showText:(_text,_delay,callback)=>callback?.(),achvBar:{showAchv(){}}};
+    scene.playSoundWithoutBgm=()=>{};
+    scene.unlockAchv=BattleScene.prototype.unlockAchv;
+    scene.validateVoucher=BattleScene.prototype.validateVoucher;
+    scene.validateAchv=BattleScene.prototype.validateAchv;
+    const {modifierTypes}=await import('../modifier/modifier-type');
+    for(const grant of grants){
+      const payload=grant.payload;
+      if(payload?.version!==1||!Array.isArray(payload.facts)||!payload.facts.length||payload.facts.length>1000)
+        throw new Error('UNSUPPORTED_COOP_RESULTS');
+      const completions=payload.facts.filter(f=>f.kind==='completion-pending');
+      for(const fact of payload.facts){
+        if(fact.owner!==undefined&&fact.owner!==null&&fact.owner!==grant.seat)throw new Error('COOP_RESULT_OWNER_MISMATCH');
+        switch(fact.kind){
+          case 'seen': case 'capture-pending': case 'evolution-pending': {
+            const pokemon=restorePokemonState(fact.pokemon);pokemon.scene=scene;
+            if(pokemon.species.speciesId!==fact.speciesId||pokemon.getDexAttr().toString()!==fact.dexAttr)throw new Error('COOP_POKEMON_FACT_MISMATCH');
+            if(fact.kind==='seen')data.setPokemonSeen(pokemon,fact.incrementCount);
+            else await data.setPokemonCaught(pokemon,fact.kind==='capture-pending');
+            break;
+          }
+          case 'dex-ivs':
+            if(!data.dexData[fact.speciesId]||!Array.isArray(fact.ivs)||fact.ivs.length!==6||!fact.ivs.every(v=>Number.isInteger(v)&&v>=0&&v<=31))throw new Error('INVALID_COOP_IVS');
+            data.updateSpeciesDexIvs(fact.speciesId,fact.ivs);break;
+          case 'achievement-approved':
+            if(fact.approved!==true||!Object.prototype.hasOwnProperty.call(achvs,fact.id)||fact.id==='CLASSIC_VICTORY')throw new Error('INVALID_COOP_ACHIEVEMENT');
+            scene.unlockAchv(achvs[fact.id]);break;
+          case 'voucher-pending': {
+            if(fact.id==='CLASSIC_VICTORY'){
+              if(!completions.length)throw new Error('COOP_COMPLETION_REQUIRED');
+              break; // The completion owns first-clear/repeat handling together.
+            }
+            if(!Object.prototype.hasOwnProperty.call(vouchers,fact.id)||vouchers[fact.id].voucherType!==fact.voucherType)throw new Error('INVALID_COOP_VOUCHER');
+            if(!scene.validateVoucher(vouchers[fact.id])&&fact.repeat===true)modifierTypes.VOUCHER().newModifier().apply([scene]);
+            break;
+          }
+          case 'completion-pending':
+            if(fact.achievementId!=='CLASSIC_VICTORY'||fact.sessionsWon!==1||!Array.isArray(fact.unlockCandidates)
+              ||!fact.unlockCandidates.every(v=>Object.prototype.hasOwnProperty.call(data.unlocks,v)))throw new Error('INVALID_COOP_COMPLETION');
+            if(!scene.unlockAchv(achvs.CLASSIC_VICTORY))modifierTypes.VOUCHER_PREMIUM().newModifier().apply([scene]);
+            data.gameStats.sessionsWon++;
+            for(const unlock of fact.unlockCandidates)data.unlocks[unlock]=true;
+            break;
+          case 'session-start':
+            data.gameStats.classicSessionsPlayed++;
+            // Remember only preferences independently legal in this profile.
+            // A room-borrowed form or egg move never becomes a permanent unlock.
+            for(const starter of fact.starters??[]){
+              const entry=data.dexData[starter.speciesId],attr=BigInt(starter.dexAttr);
+              if(!entry?.caughtAttr||(entry.caughtAttr&attr)!==attr||starter.moveset===null)continue;
+              const species=getPokemonSpecies(starter.speciesId),index=data.getFormIndex(attr);
+              const form=species.forms.length?species.forms[index]:species;
+              if(form?.validateStarterMoveset(starter.moveset,data.starterEggMoveData[starter.speciesId]??0))
+                data.starterMoveData[starter.speciesId]=[...starter.moveset];
+            }break;
+          case 'statistics':
+            for(const [key,value] of Object.entries(fact.values)){
+              if(!['battles','trainersDefeated','pokemonDefeated','pokemonFused','highestLevel','highestMoney','highestDamage','highestHeal','highestEndlessWave'].includes(key)
+                ||!Number.isSafeInteger(value)||Number(value)<0)throw new Error('INVALID_COOP_STATISTICS');
+              data.gameStats[key]=key.startsWith('highest')?Math.max(data.gameStats[key],Number(value)):data.gameStats[key]+Number(value);
+            }break;
+          default:throw new Error('UNSUPPORTED_COOP_RESULT');
+        }
+      }
+    }
+    // Preserve original serialization and untouched inventory/identity fields.
+    return {system:JSON.parse(data.captureSystemData()),kinds:grants.map(()=> 'completion')};
+  }
+
   /** Original system serialization, also used to create a genuinely new profile. */
   public captureSystemData(): string {
     const data: SystemSaveData = {
@@ -288,7 +382,9 @@ export class GameData {
     if (this.readonlyView || this.profileClosing) return Promise.resolve(false);
     if (this.profileIO) {
       const data = this.captureSystemData();
+      const generation=this.resultsGeneration;
       const write = this.localSystemSaveQueue.catch(() => {}).then(async () => {
+        if(generation!==this.resultsGeneration)throw new Error('LOCAL_STALE_SYSTEM_SAVE');
         this.localSystemSnapshot = await this.profileIO.writeSystem(data, this.localSystemSnapshot);
       });
       this.localSystemSaveQueue = write;

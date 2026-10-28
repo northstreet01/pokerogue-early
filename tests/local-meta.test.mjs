@@ -8,6 +8,7 @@ import {IDBFactory} from 'fake-indexeddb';
 import {createMetaStore} from '../src/local-meta/idb-store.mjs';
 import {createMetaCodec,digest,json} from '../src/local-meta/codec.mjs';
 import {createProfileRepository,legacyBackupSource} from '../src/local-meta/repository.mjs';
+import {openGameProfileIO} from '../src/local-meta/game-io.mjs';
 
 let api,original,codec;
 before(async () => {
@@ -54,6 +55,42 @@ async function migrated(env=setup()) {
   const plan = await env.repo.previewLegacy(source(),{sourceId:'old-browser',displayName:'小智'});
   await env.repo.install(plan);return {...env,plan,pid:plan.profile.profileId};
 }
+
+test('cooperative receipts and collection commit together, survive retry and reject changed payload or owner',async()=>{
+  const e=setup(),created=await e.repo.create(original.system),profileId=created.profileId;
+  const io=await openGameProfileIO(e.repo,profileId,{mode:'coop',owner:'coop-writer'});
+  let valid=true,calls=0;
+  const binding={hostId:'host-1',runId:'run-1',roomId:'ABCDEF',seat:0,profileId,token:'private-token',isCurrent:()=>valid};
+  const grant={id:'battle:1:reward',seat:0,payload:{kind:'voucher',amount:1}};
+  const apply=async(system,grants)=>{calls++;system.voucherCounts['0']+=grants[0].payload.amount;return {system,kinds:['voucher']};};
+  try{
+    const before=await e.repo.read(profileId);
+    e.fault(keys=>keys.includes('index'));
+    await assert.rejects(io.applyCoopGrants([grant],binding,apply),/INJECTED_WRITE_FAILURE/);
+    assert.deepEqual(await e.repo.read(profileId),before);
+    e.fault(null);
+    await io.applyCoopGrants([grant],binding,apply);
+    const stored=await e.reopen().read(profileId);
+    assert.equal(stored.originalSystem.voucherCounts['0'],before.originalSystem.voucherCounts['0']+1);
+    assert.equal(stored.grantLedger.length,1);assert.equal(stored.grantLedger[0].revision,stored.revision);
+    assert.equal(JSON.stringify(stored.grantLedger).includes(binding.token),false);
+    await io.applyCoopGrants([grant],binding,apply);assert.equal(calls,2);
+    assert.deepEqual(await e.repo.read(profileId),stored);
+    await assert.rejects(io.applyCoopGrants([{...grant,payload:{kind:'voucher',amount:2}}],binding,apply),/COOP_GRANT_CONFLICT/);
+    await assert.rejects(io.applyCoopGrants([grant],{...binding,token:'different'},apply),/COOP_GRANT_CONFLICT/);
+    await assert.rejects(io.applyCoopGrants([{...grant,seat:1}],binding,apply),/INVALID_COOP_GRANT/);
+    await assert.rejects(io.applyCoopGrants([{...grant,id:'egg-overwrite'}],binding,async system=>{
+      system.eggs.push({id:1});return {system,kinds:['voucher']};
+    }),/COOP_EGG_INVENTORY_CHANGED/);
+    await assert.rejects(io.applyCoopGrants([{...grant,id:'during-switch'}],binding,async system=>{
+      system.voucherCounts['0']++;valid=false;return {system,kinds:['voucher']};
+    }),/COOP_BINDING_EXPIRED/);
+    assert.deepEqual(await e.repo.read(profileId),stored,'scene replacement before commit leaves no half receipt');
+    valid=false;
+    await assert.rejects(io.applyCoopGrants([{...grant,id:'new'}],binding,apply),/COOP_BINDING_EXPIRED/);
+    assert.deepEqual(await e.repo.read(profileId),stored);
+  }finally{await io.close();}
+});
 
 test('real original serializer and three sessions migrate without changing any original field or old store',async()=>{
   const before=await api.captureLegacySource({getItem:()=>null});

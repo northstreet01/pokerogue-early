@@ -2012,7 +2012,13 @@ export default class BattleScene extends Phaser.Scene {
 	}
 
 	validateAchv(achv: Achv, args?: any[]): boolean {
-		if (!this.gameData.achvUnlocks.hasOwnProperty(achv.id) && achv.validate(this, args)) {
+		return !this.gameData.achvUnlocks.hasOwnProperty(achv.id) && achv.validate(this, args) && this.unlockAchv(achv);
+	}
+
+	// The host validates a cooperative achievement against the original live
+	// rules. Its personal transaction reuses this award step on an isolated copy.
+	unlockAchv(achv: Achv): boolean {
+		if (!this.gameData.achvUnlocks.hasOwnProperty(achv.id)) {
 			this.gameData.achvUnlocks[achv.id] = new Date().getTime();
 			this.ui.achvBar.showAchv(achv);
 			if (vouchers.hasOwnProperty(achv.id))

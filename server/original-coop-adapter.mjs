@@ -1,5 +1,5 @@
 import { createOriginalRuleHost } from './original-rule-host.mjs';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import { ContractError, canonical, requireContract as check } from '../src/battle-core/coop-contract.mjs';
 
 // Original-rule adapter. Production always enters the profile lobby; seam tests
@@ -11,7 +11,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
 // The desktop host, local development server and standalone server share one
 // production configuration. Player identity/team arrive through verified profiles.
 export function createPlayerHostAdapter({seedFactory=()=>randomUUID(),hostFactory}={}) {
-  return createOriginalCoopAdapter({hostFactory,seedFactory,fixture:{profileLobby:true,sharedPreparation:true,roomSharing:true,
+  return createOriginalCoopAdapter({hostFactory,seedFactory,fixture:{profileLobby:true,sharedPreparation:true,roomSharing:true,permanentResults:true,
     identities:[{trainerId:0,secretId:0},{trainerId:0,secretId:0}]}});
 }
 
@@ -122,7 +122,10 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       const entry = pokemonId === null ? null
         : checkpoint.roster.entries.find(item => (item.pokemon?.fields?.id ?? item.pokemon?.id) === pokemonId);
       const intent = {
-        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${['achievement-check','voucher-pending','completion-pending'].includes(raw.kind)&&[0,1].includes(raw.owner)?raw.owner+':':''}${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`,
+        // Preserve old capture source IDs while giving new per-seat facts an
+        // explicit owner key. A capture's converted roster ID is not a reward ID.
+        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${['achievement-check','achievement-approved','voucher-pending','completion-pending','statistics'].includes(raw.kind)&&[0,1].includes(raw.owner)?raw.owner+':':''}${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`
+          +(raw.factVersion===1&&['seen','evolution-pending','dex-ivs'].includes(raw.kind)?`:${raw.speciesId}:${raw.dexAttr??canonical(raw.ivs)}`:''),
         owner: [0, 1].includes(raw.owner) ? raw.owner : entry ? entry.owner : null,
         source: 'scene',
         recipient: null,
@@ -139,6 +142,24 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       }
     }
     return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+  }
+  function withPermanentResults(previous,result){
+    if(!previous.provisioning.permanentResults)return result;
+    const old=new Set(previous.intents.map(f=>f.id));
+    const fresh=result.context.intents.filter(f=>!old.has(f.id)&&f.payload.factVersion===1);
+    const allowed=new Set(['seen','dex-ivs','capture-pending','evolution-pending','achievement-approved','voucher-pending','completion-pending','statistics']);
+    result.grants=[0,1].flatMap(seat=>{
+      const facts=fresh.filter(f=>allowed.has(f.type)&&(f.owner===seat||f.owner===null&&f.type==='seen'));
+      if(!previous.checkpoint&&result.context.checkpoint)facts.push({id:'session-start',type:'session-start',
+        payload:{starters:clone(previous.lobby.players[seat].profile.starters)}});
+      if(!facts.length)return [];
+      // Catalog IDs (e.g. a repeated boss voucher) may recur in another wave;
+      // retain the normalized source as well as the original catalog ID.
+      const payload={version:1,facts:facts.map(f=>({...clone(f.payload),sourceId:f.id,kind:f.type}))};
+      const id='results:'+createHash('sha256').update(canonical({runId:previous.runId,seat,payload})).digest('hex');
+      return [{id,seat,payload}];
+    });
+    return result;
   }
   function scopeEvent(event, checkpoint) {
     if (event.scope === 'shared' && ['damage-display','pokemon-hp','faint-cry','pokemon-enter','pokemon-exit','showInfo','form-change'].includes(event.kind)) return {...event};
@@ -282,7 +303,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       check(Array.isArray(fixtureIdentities) && fixtureIdentities.length === 2, 'INVALID_TRAINER_IDENTITY');
       const seed = fixture.profileLobby && typeof seedFactory === 'function' ? seedFactory() : fixture.seed;
       check(typeof seed === 'string' && seed.length > 0, 'INVALID_ROOM_SEED');
-      const provisioning = { seed, identities: clone(fixtureIdentities), ...(fixture.sharedPreparation ? {sharedPreparation:true} : {}),...(fixture.roomSharing?{roomSharing:true}:{}) };
+      const provisioning = { seed, identities: clone(fixtureIdentities), ...(fixture.sharedPreparation ? {sharedPreparation:true} : {}),...(fixture.roomSharing?{roomSharing:true}:{}),...(fixture.permanentResults?{permanentResults:true}:{}) };
       const room = await roomFor(runId, provisioning);
       if (fixture.profileLobby) {
         const context = contextFor(room, profileLobbyState(), null, []);
@@ -375,7 +396,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
           battle.profileLobby = false;
           battle.intents = normalizeIntents(opened.checkpoint, context.intents, opened.intents);
           const events = (opened.events ?? []).map(event => scopeEvent(event, opened.checkpoint));
-          return { context: battle, events, intents: battle.intents, grants: [] };
+          return withPermanentResults(context,{ context: battle, events, intents: battle.intents, grants: [] });
         }
         const next = contextFor(room, nextLobby, null, context.intents);
         next.formatVersion = PROFILE_FORMAT;
@@ -440,7 +461,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       const result = await runToStable(room, intermediate);
       result.events = [...events, ...result.events];
       result.intents = result.context.intents;
-      return result;
+      return withPermanentResults(context,result);
     },
 
     async captureCheckpoint(context) {
@@ -461,7 +482,8 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       check(Object.keys(checkpoint).sort().join(',') === 'formatVersion,intents,lobby,nativeCheckpoint,provisioning,runId,stage', 'INVALID_CHECKPOINT');
       check([2, 3].includes(checkpoint.formatVersion) && typeof checkpoint.runId === 'string'
         && checkpoint.runId.length > 0, 'INVALID_CHECKPOINT');
-      check(checkpoint.provisioning && ['identities,seed','identities,seed,sharedPreparation','identities,roomSharing,seed','identities,roomSharing,seed,sharedPreparation'].includes(Object.keys(checkpoint.provisioning).sort().join(','))
+      check(checkpoint.provisioning && ['identities,seed','identities,seed,sharedPreparation','identities,roomSharing,seed','identities,roomSharing,seed,sharedPreparation','identities,permanentResults,roomSharing,seed,sharedPreparation'].includes(Object.keys(checkpoint.provisioning).sort().join(','))
+        && (!Object.hasOwn(checkpoint.provisioning,'permanentResults') || checkpoint.provisioning.permanentResults===true)
         && (!Object.hasOwn(checkpoint.provisioning,'roomSharing') || checkpoint.provisioning.roomSharing===true)
         && (!Object.hasOwn(checkpoint.provisioning,'sharedPreparation') || checkpoint.provisioning.sharedPreparation === true)
         && typeof checkpoint.provisioning.seed === 'string' && checkpoint.provisioning.seed.length > 0

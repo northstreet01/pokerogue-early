@@ -27,5 +27,5 @@ const pkg=JSON.parse(await readFile('package.json','utf8'));
 await writeFile(join(root,'package.json'),JSON.stringify({name:'pokerogue-lan',productName:'PokeRogue LAN',
   version:pkg.version,type:'module',main:'desktop/main.cjs',private:true},null,2));
 await cp('LICENSE',join(root,'LICENSE'));
-await cp('docs/desktop-lan-usage.md',join(root,'使用说明.md'));
+await cp('README.md',join(root,'使用说明.md'));
 console.log('Desktop application prepared:',root);

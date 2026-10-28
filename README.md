@@ -1,112 +1,171 @@
-# PokéRogue LAN — 本地程序与双人局域网合作
+# PokéRogue LAN
 
-基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue) 的历史版本，保留原版单人玩法，开发玩家自己托管房间的 LAN Host-Client 双人合作。资源与个人存档保存在各自设备，房主电脑运行原规则 Worker 并保存合作冒险，不依赖开发者服务器计算对局。
+基于 PokéRogue 的 Windows 本地游戏与双人局域网合作版本。保留原版单人冒险，在原版战斗规则上加入双人共同推进、各自管理队伍的合作模式。玩家可以自己开房，无需开发者托管的战斗服务器。
 
-源码仓库：[northstreet01/pokerogue-lan](https://github.com/northstreet01/pokerogue-lan)。原仓库 `pokerogue-early` 已更名，本地目录可继续使用原名；已有克隆执行 `git remote set-url origin https://github.com/northstreet01/pokerogue-lan.git` 更新远端。
+> 项目正在开发与测试中。单人和合作主要流程已接通，部分原版机制仍待补齐，尚未完成所有特殊道具、形态、双设备和长局验证。
 
-## 安全与维护
+## 特性
 
-安全说明及漏洞私下报告方式见 [SECURITY.md](SECURITY.md)。存档、SQLite 数据库、房主目录、恢复凭据、环境配置和诊断副本均属于私人数据，不要上传到仓库或公开 Issue；截图和日志也须先脱敏。六位房间码用于加入房间，不能替代私有席位恢复凭据。
+- Windows 桌面程序，图片、音乐与翻译随程序本地加载。
+- 原版单人冒险，以及玩家托管的双人合作冒险。
+- 局域网发现房主，支持手动填写远程 IP、域名或虚拟局域网地址。
+- 原版选队、战斗、捕获、换人、升级学招、进化及战后整备界面。
+- 各自保存个人图鉴、成就、统计和存档，房主保存合作冒险。
+- 原房间、原席位恢复，以及个人资料导入、导出和数据库备份。
 
-依赖更新由 Dependabot 定期检查；安全工作流检查依赖漏洞、扫描 Git 历史中的密钥并运行 CodeQL。自动扫描不能保证不存在泄露。提交前检查暂存差异，安装依赖使用 `npm ci --ignore-scripts`，定期执行 `npm audit`。公网连接优先使用可信虚拟局域网或 TLS 入口，普通 HTTP/WS 不加密房间通信。
+## 与原版的玩法差别
 
-默认分支 `main` 展示已提交且检查通过的发布内容。功能分支和本机未提交的修复不代表已经发布；Git 推送也不会上传被忽略的 Windows 发行包。
+这里的“原版”指本项目采用的 [PokéRogue 历史源码基线](https://github.com/pagefaultgames/pokerogue/tree/ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9)，不代表与上游最新版本逐项一致。历史基线用于确认规则和内容来源，不是限制精灵种类或世代的玩法规则。
 
-更新日期：2026-10-29。当前已交付 Windows x64 测试程序、本地 SQLite 存档和原版联机可玩流程，仍处于开发与手测阶段；不是全部原版功能或所有设备环境均已验收。
+单人模式继续沿用原版玩法；下面的改动主要用于合作模式。
 
-最新完成：局域网自动发现／远程IP入口、原版常规道具、Mega／超极巨化／太晶化及本人队伍DNA融合。形态机制复用原表和素材，已验证部分代表形态；全形态、特殊触发与主动开关尚未逐项补齐。经典模式目前按原路线与种子自动换区，地图道具手动选路仍未接入。
+| 内容 | 原版单人 | 本项目双人合作 |
+| --- | --- | --- |
+| 操作与队伍 | 一名玩家控制自己的队伍 | 每人选择 3 只，各控制自己的精灵；双方通常各上场 1 只，共同双打 |
+| 开局预算 | 按原版单人选队约束 | 双方共享 14 点选队预算，分别确认队伍、手动准备后开局 |
+| 初始精灵权限 | 使用本人永久图鉴解锁 | 新房可临时共享双方可选图鉴；同一物种跨席互斥，形态与闪光也计为同种 |
+| 图鉴所有权 | 捕获、成长等写入本人资料 | 临时共享不解锁永久图鉴；个人成果分别记入本人档案 |
+| 回合行动 | 本人提交己方行动 | 两人各交本人行动，房主按同一套原版规则统一结算 |
+| 战后整备 | 一人领取奖励与购物 | 每人管理本人队伍、资金和持有物；共享限量奖励与商店库存，双方结束整备后共同推进 |
+| 捕获归属 | 捕获精灵归本人 | 精灵归成功捕获者，加入其本局备用选择；永久图鉴成果也归该玩家 |
+| 换人与融合 | 在本人队伍内操作 | 只能操作本人队伍；DNA 融合不跨玩家选择精灵 |
+| 存档与继续 | 本人保存单人冒险 | 房主保存共同冒险，两人分别保留自己的私有恢复席位 |
+| 断线与离开 | 本地继续或退出 | 连接与状态确认影响双方推进；恢复依赖原房主、房间与席位，暂不支持自动房主迁移 |
 
-本轮已修复六位房间码输入、单人选队后开局中断和存档槽鼠标操作；删除旧存档维护页、实验联机引擎及废弃组件，统一正式入口和房主配置。切换场景在保存未确认时停留原界面；发行更新先准备完整候选包，替换失败时恢复旧包。代码审查已纳入构建与 CI。
+### 保留的原版规则
 
-最新修复联机入口反复返回大厅时的空背景停留：退出检查失败保留可操作界面并允许重试，已暂停的旧席位不再误报冲突。移除顶部重复退出导航栏，通关与失败提示归入大厅。
+合作模式复用原版 Phase、精灵与招式数据、伤害和异常状态计算、随机数、捕获、经验、升级、进化及道具效果。合作层负责分配玩家归属和协调行动，不另写一套简化战斗公式。
 
-新版新建联机房间支持临时共享双方图鉴选队范围，同一物种跨席互斥（形态/闪光算同种），取消后释放；永久图鉴仍各自独立。双方需使用同版程序，旧房继续原选队方式。本人战斗HP数字和经验条也已恢复显示。
+攻击通常选择战场位置，换人后由占据该位置的精灵承受；若没有有效目标，则按原规则取消，不额外消费未使用的 PP。捕获绑定具体敌人，目标已离场时取消，不消费未使用的精灵球。
 
-开局进入战斗时提前收起等待房间并显示加载提示；合作行动因没有有效目标而取消时，会显示对应精灵的“攻击打空了”提示。
+个人队伍全灭时可由队友继续，胜利后按合作恢复流程处理倒下方；双方全灭则冒险失败。有可用替补时需要完成换人才能继续。
 
-## 已实现与后续范围
+### 个人成长与合作成果
 
-| 部分 | 当前实现 |
-| --- | --- |
-| Windows 程序 | Electron EXE，游戏图片、音乐及其他资源随程序本地加载，无需玩家安装 Node 或开启外部浏览器 |
-| 玩家托管 LAN 房主 | 局域网自动发现，远程填写IP/域名；连接后用房间码加入；房主运行原 Worker，客户端接收快照与事件 |
-| 大厅与准备 | 同一程序内切换单人／合作；双方各一排队伍预览；完成选队只保存队伍，全员手动准备并同步完成后开始 |
-| 局内流程 | 已接战斗、捕获、换人、战后奖励／共享限量商店、升级学招与进化等主要原版链路；特殊分支和道具仍有缺口 |
-| 原版道具与形态 | 回忆蘑菇、剩饭等常规道具，Mega／极巨化／太晶化，以及本人队伍内DNA融合与解除；未接机制从新抽取奖励中排除 |
-| 局内信息 | 本人道具图标、数量、原效果说明、携带者及剩余次数；连接、加载、行动和整备状态提示 |
-| 个人本地资料 | 桌面 SQLite 保存档案、单人进度、设置、席位及待发行动，保留原校验、档案版本、单写者与历史备份 |
-| 迁移与恢复 | 旧桌面 IndexedDB 确认迁移且保留原库；个人数据库备份／恢复；合作局按已保存检查点与原席位恢复 |
+单人和合作选择同一个人档案时，共用该档案的永久图鉴。新版新房间支持将遇见、捕获、IV、进化、原成就和券等成果分别写回本人档案，并通过成果回执避免重连后重复发放。旧房间保留原恢复方式，不补发历史成果。
 
-新房间的联机永久成果现已接通：捕获、遇见、IV、进化、原成就和券等分别写回本人档案，重连不重复发放；房间共享选队不会解锁永久图鉴。开始前先在大厅创建或选择个人档案，双方使用新版并新建房间；旧房保留原恢复方式，不补发旧奖励。保存失败可点击“重试保存成果”。
+这不是永久精灵实例养成仓库。新冒险继续按原版语义重置本局等级、HP/PP、金钱、持有物和战斗进度；永久保留的是原版收藏与解锁资料。对方临时共享的选队权限不会变成本人的永久收藏。
 
-单人与联机使用同一个人档案时共用图鉴。大厅“宝可梦图鉴”使用原版精灵网格、形态/特性/性格详情与IV图；“个人资料”提供原版成就和统计等界面；档案管理的三槽一览复用原存档卡片。图鉴不需要等通关才更新，具体保存时机与入口见[使用说明](docs/desktop-lan-usage.md)。
+### 已接入内容与限制
 
-后续仍包括：蛋进度与终局孵化／扭蛋闭环、更多特殊道具与道具转移、Android 和队友鼠标提示。当前没有改为各客户端独立运行整套战斗规则。
+主要合作链路包含战斗、捕获、备用队伍、换人、经验、学招、进化、战后奖励和共享商店。常规道具、回忆蘑菇、Mega、极巨化、太晶化及本人队伍内 DNA 融合已接入，但不表示所有形态、特殊条件或开关均已验证。
 
-DNA融合按原版先选主体、再选本人队伍内第二只：第二只离队，技能进入原学招流程，持有物按原规则转移；解除融合不会返还第二只。形态、融合及本人图鉴成果继续沿原检查点和成果事务保存，不另建一套规则或收藏。
+DNA 融合沿用原版先选主体、再选第二只的流程；第二只离队，原持有物转移及学招流程继续生效，解除融合不会返还第二只。未接入机制的道具从新抽取奖励中排除；旧存档已有未支持奖励不会被静默替换。
 
-## 运行 Windows 测试程序
+尚未完成的主要范围：
 
-当前保留完整目录发行，资源合并封装与传输压缩暂缓。开发源码与`build/desktop`发行产物分开，后续在源码中继续补齐功能，再重新构建和更新发行目录；源码仓库不因发行方式改变而被替代。
+- 合作模式的蛋进度、终局孵化和扭蛋完整闭环。
+- 更多特殊道具、道具转移与形态细节。
+- 地图道具手动选路；当前经典路线按原规则和种子自动推进。
+- Android、自动房主迁移与队友鼠标提示。
 
-本机最新产物：
+## 开始游戏
+
+### Windows 桌面版
+
+运行完整发行目录中的 `PokeRogue-LAN.exe`。必须保留整个文件夹，不能只复制 EXE；玩家无需安装 Node.js，也无需打开外部浏览器。
+
+源码仓库不包含构建产物。若没有现成发行包，请按下方源码构建步骤生成：
 
 ```text
 build/desktop/release/PokeRogue-LAN-win32-x64/PokeRogue-LAN.exe
 ```
 
-双击 EXE，必须保留整个发行文件夹，不能只复制 EXE。`build/` 不纳入 Git；拉取源码后需按下方步骤构建，不会随源码推送取得二进制程序。
+先在大厅创建或选择个人档案，再进入单人或合作模式。个人收藏与单人存档可以从大厅查看和管理。
 
-后续统一使用上述固定目录。更新前退出旧程序，新包验收后清理旧发行包和临时副本；个人存档目录独立保留，不随安装包清理。
+### 两人合作
 
-1. 同网玩家进入“联机冒险 → 局域网联机”，房主点击“启动本机房主”（默认 TCP 18735），再创建房间。
-2. 队友从局域网搜索结果选择房主，再输入房间码，无需手填IP。异地玩家切到“远程联机”，输入房主IP/域名；如 `172.16.2.5` 默认18735，也可填写 `example.com:映射端口` 或完整HTTP/HTTPS地址。
-3. 双方选择本人精灵并确认“完成选队”，返回房间查看两排队伍，再各自点击“提交准备”。已准备后需先取消准备才能重新编辑队伍。
-4. 房主退出会使队友断线；保留原房主数据目录，重新启动后恢复原局与席位。首版不提供自动房主迁移。
+1. 双方使用相同版本。房主进入“联机冒险 → 局域网联机”，点击“启动本机房主”，然后创建房间。
+2. 队友从局域网搜索结果选择房主，输入六位房间码加入。搜索不到时使用手动连接，填写房主地址。
+3. 双方分别选队，点击“完成选队”。确认两排队伍后，各自点击“提交准备”，等待双方同步后开始。
+4. 战斗中各自控制自己的精灵；战后分别完成整备，共同进入下一场。
+5. 继续已有合作冒险时，先启动原房主，再从“恢复已有联机”使用原席位进入。
 
-程序的资源入口固定为 `127.0.0.1:18734`，只监听本机；LAN 房主端口默认为 `18735`，可在界面选择。自动发现使用UDP18736；隔离网络或浏览器可展开手动连接。远程联机由玩家自行使用端口映射或 n2n 等组网工具：端口映射时连接映射后的房主地址；虚拟局域网时连接房主的虚拟网卡 IP。游戏不负责配置隧道或运营中继，不能直接把 n2n 协调服务器 IP 当作游戏房主地址。
+桌面版通过 UDP 广播发现同一局域网的房主。访客 Wi-Fi、AP 隔离、不同子网或不转发广播的虚拟网络可能无法自动发现；浏览器端也需要手动连接。
 
-一个人可先用 EXE 开房，再用独立浏览器访问 `http://127.0.0.1:18734` 作为另一玩家，两端都连接房主 `http://127.0.0.1:18735`。这只能辅助测试双端操作，不代替真实两设备和穿透验收。
+### 远程联机与端口
 
-## 存档与数据目录
-
-Windows 正常数据目录为 `%APPDATA%\PokeRogue-LAN`，程序菜单可以打开：
-
-| 路径 | 用途 |
+| 端口 | 用途 |
 | --- | --- |
-| `storage/personal.sqlite` | 本人的档案、单人存档、偏好、私有席位与待发行动 |
-| `storage/backups/` | 菜单生成的个人数据库一致备份 |
-| `hosts/formal-rooms/` | 房主保存的合作局、检查点及主机身份 |
+| TCP 18734 | 本机游戏资源，仅监听 `127.0.0.1` |
+| TCP 18735 | 默认合作房主服务，可在界面选择端口 |
+| UDP 18736 | 局域网发现 |
 
-个人数据库与房主房间备份不能互相替代。使用菜单备份个人库；备份完整房主目录或整个数据目录前先退出程序。运行中不要只复制 SQLite 主文件而遗漏 WAL。备份含私有恢复凭据，不要当房间邀请码分享。升级替换程序目录，保留数据目录。
+异地玩家选择“远程联机”，填写房主 IP、域名、`域名:端口` 或完整 HTTP/HTTPS 地址。使用端口映射时填写映射后的游戏地址；使用虚拟局域网时填写房主虚拟网卡 IP。
 
-桌面首次检测到同一应用来源的旧资料时请求确认迁移；取消不创建空档替代。外部浏览器资料不会被直接读取：应在原浏览器的当前大厅中迁移旧资料、导出个人档案，再在桌面大厅导入。已有早期备份 JSON 仍可预览导入，无需恢复旧维护页。普通浏览器继续使用 IndexedDB／localStorage，资料按浏览器和访问来源隔离；旧合作实验资料保持隔离。
+游戏不提供穿透、中继或隧道配置。六位房间码只标识所连接房主上的房间，不能代替网络地址；n2n 协调服务器地址也不是游戏房主地址。普通 HTTP/WS 不加密通信，远程连接优先使用可信虚拟局域网或正确配置的 HTTPS/WSS 入口。
 
-## 从源码构建桌面版
+## 存档与备份
 
-建议使用已验证的 Node.js 24.15.0 与 npm；玩家使用 EXE 无需这些依赖。先准备依赖和固定版本的 Electron 运行时：
+Windows 数据目录为 `%APPDATA%/PokeRogue-LAN`，可从程序菜单打开。更新程序时退出旧程序并替换发行文件夹，保留数据目录。
 
-```powershell
-npm ci --ignore-scripts
-node node_modules/electron/install.js
-npm run review:code
-npm run typecheck
-$env:POKEROGUE_DESKTOP_OUTPUT='build/desktop'
-npm run build:desktop
-npm run package:desktop
+| 路径 | 保存内容 |
+| --- | --- |
+| `storage/personal.sqlite` | 本人档案、单人进度、偏好、私有席位和待发行动 |
+| `storage/backups/` | 菜单生成的个人数据库备份 |
+| `hosts/formal-rooms/` | 房主身份、合作房间和可靠检查点 |
+
+个人数据库与房主房间不能互相替代。个人数据库使用程序菜单备份；复制完整房主目录或数据目录前先退出游戏。运行中不要只复制 SQLite 主文件而遗漏 WAL。备份包含私有恢复凭据，不要当邀请码分享。
+
+桌面版可确认迁移旧桌面资料，并保留原库。外部浏览器资料需先在原浏览器导出个人档案，再从桌面大厅导入；不同浏览器和访问来源的资料彼此隔离。恢复合作冒险需要原房主数据及本人席位，不要向队友复制自己的恢复凭据。
+
+## 架构
+
+### 相比原版发生了什么变化
+
+原版主要由浏览器中的 Phaser 场景运行单人规则并保存资料。本项目保留这条单人链路，为合作增加玩家托管房主、每房间独立的规则 Worker，以及客户端的投影与展示层；桌面端再通过 Electron 接入本地资源和 SQLite。
+
+```mermaid
+flowchart LR
+    A[房主客户端\nPhaser 界面与个人资料] <-->|行动 / 快照 / 确认| H[房主服务\n房间与提交协调]
+    B[队友客户端\nPhaser 界面与个人资料] <-->|WebSocket| H
+    H <--> W[每房间独立 Worker\n原版战斗规则]
+    H --> R[合作检查点\n房主本地磁盘]
+    A --> PA[房主个人 SQLite]
+    B --> PB[队友个人 SQLite]
 ```
 
-输出包含独立原 Worker、前端与完整素材，不覆盖原 `dist` 或 `build/coop-runtime`。开发运行该产物可执行 `.\node_modules\electron\dist\electron.exe build/desktop/app`。省略输出环境变量时，构建／封装默认使用 `build/desktop`；`npm run start:desktop` 也固定运行该默认目录。
+浏览器客户端使用 IndexedDB/localStorage，桌面客户端使用自己的 SQLite。图中的两份个人资料分别属于两名玩家，不由房主合并保存。
 
-## 浏览器开发入口
+| 层次 | 职责 |
+| --- | --- |
+| Phaser 界面 | 大厅、原版单人、合作选队与战斗展示；提交玩家意图，播放结果 |
+| 房主服务 | 身份、房间、串行处理行动、去重回执、双方状态确认与恢复 |
+| 原规则 Worker | 每房间独立运行原版规则，生成检查点、各席位投影与展示事件 |
+| 个人资料层 | 图鉴、成就、单人存档与合作永久成果；保持玩家归属和版本校验 |
+| Electron 主进程 | 本地资源、受限 IPC、SQLite、房主启停与局域网发现 |
+
+### 行动、同步与保存
+
+合作是房主权威结算：两名客户端发送行动，由房主的原规则 Worker 计算共同结果，再向双方发送各自可见的快照和展示事件。客户端不各自运行一整套权威战斗规则，也不依赖逐帧画面同步来决定伤害或随机结果。
+
+房间按顺序处理提交，使用决策版本、行动编号和回执识别过期或重复操作。候选结果先可靠保存，再发布快照和回执；客户端应用状态、计算摘要并确认后继续。动画进度不会改写权威结果，断线或状态不一致需要恢复同步。
+
+共同冒险和个人永久成果分别保存：房主保留合作检查点，本人资料以事务写入成果与回执，再向房主确认。退出和切换场景需要经过保存检查，未确认保存时保留当前界面，避免把“退出成功”误当作“已安全存档”。
+
+### 桌面与网络边界
+
+Electron 渲染器不直接拥有 Node.js 或任意文件系统权限，通过受限预加载接口访问资料；主进程核对窗口、主 frame 与来源。本机资源监听器和可供队友连接的房主监听器分开，房间服务不提供个人数据目录下载。
+
+图片、音频和翻译本地加载。合作房主由玩家主动运行，没有开发者中央战斗服务器，也没有自动房主迁移。
+
+## 从源码运行
+
+需要 **Node.js 24 或更高版本**及 npm。推荐使用与 CI 一致的 Node.js 24。
+
+```powershell
+git clone https://github.com/northstreet01/pokerogue-lan.git
+cd pokerogue-lan
+npm ci --ignore-scripts
+```
+
+### 浏览器开发
 
 ```powershell
 npm run start
 ```
 
-默认开发地址 `http://localhost:8020/`，监听本机。根路径为统一大厅；`/coop-play.html` 为正式原版联机界面；旧实验页和独立存档维护页已删除，档案统一从大厅管理。普通 `start`／`start:server` 未启用 profile adapter 时，正式 WS 返回 `ADAPTER_UNAVAILABLE`。
-
-需要运行正式浏览器合作入口时：
+默认地址为 `http://localhost:8020/`，监听本机。该入口用于前端开发；正式浏览器合作入口需要构建 Worker 和前端，并启动本地服务：
 
 ```powershell
 npm run build:coop-runtime
@@ -114,80 +173,39 @@ npm run build
 npm run start:local
 ```
 
-`start:local` 显式启用正式 profile 大厅，默认监听本机 8020；需要 LAN 监听时执行 `npm run start:local -- --host`。与 Vite 开发服务择一运行，不能只上传静态 `dist` 代替 Node 服务。桌面、开发和独立服务使用同一正式房主配置。
+需要对局域网开放浏览器服务时使用 `npm run start:local -- --host`。不要只上传静态 `dist` 代替合作房主服务。Vite 开发服务与独立服务择一运行，避免端口冲突。
 
-## 验证与代码审查
+### 构建 Windows 桌面版
 
-每次交付先审查真实调用链、模块归属、失败保存边界和资源生命周期，再运行结构检查、类型、相关回归及实际EXE验证。替换旧实现时同时删除废弃入口、依赖和测试；仅供测试的驱动放tests/helpers。新包验证后清理旧发行包，不再逐批堆目录与报告。
+```powershell
+node node_modules/electron/install.js
+npm run review:code
+npm run typecheck
+npm run build:desktop
+npm run package:desktop
+```
+
+固定输出目录为 `build/desktop`。开发运行使用 `npm run start:desktop`；发行运行使用 `release` 子目录中的 EXE。构建或替换发行包前先退出正在使用的程序。
+
+## 开发与贡献
 
 ```powershell
 npm run review:code
 npm run typecheck
+npm test
+npm run test:desktop
 ```
 
-结构检查覆盖全部第一方模块的语法、相对依赖和生产可达性，并限制发行页面；它不替代人工代码审查或玩法验证。相关测试按修改范围选择，不自动跑全套或200波。当前详细结果见[验收与审查](docs/desktop-lan-review.md)。
+其他测试入口包括 `test:local-save`、`test:localization`、`test:coop` 和 `test:battle-core`，按修改范围选择。涉及规则时核对原版行为，涉及存储时检查失败保存、重复提交和恢复边界。结构检查、自动测试与构建不能替代真实双设备、声音和长局手测。
 
-上一轮457个模块结构检查、类型检查、相关定向回归、原Worker／前端构建及实际封装EXE隔离验证通过；包括单人开局、原存档读取、旧页面拒绝、保存失败保护、六位输入与原Worker双客户端连接。最新大厅返回修复通过456模块审查、类型检查、151项定向回归，以及实际EXE三次进出与失败重试验证。正常前台、声音、真人两设备及长局仍待手测，不把隔离测试当作全面验收。
+提交 Issue 时附上版本、复现步骤和脱敏后的错误信息。不要附带真实存档、数据库、恢复凭据或私人诊断目录；漏洞请按 [安全说明](SECURITY.md) 私下报告。依赖与安全扫描通过 GitHub Actions 和 Dependabot 持续维护。
 
-- [使用与手测](docs/desktop-lan-usage.md)
-- [当前架构](docs/desktop-lan-transition.md)与[存档约束](docs/local-meta-architecture.md)
-- [维护与交付要求](docs/DEVELOPMENT-HANDOFF.md)
-- [后续计划](docs/coop-development-plan.md)
+## 许可证与致谢
 
-## 原版来源与许可证
+源码遵循 [GNU AGPL-3.0](LICENSE)，基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue)。Pokémon 及相关素材的权利归各自权利人所有，本项目与其无隶属关系。
 
-源码与资源基线为固定历史提交 `ec9365a8bffd8fa0dc050e71ef3eb177e63bc1e9`。该提交标识来源与规则对照，不据此限制精灵种类、世代或数量。
+部分目录译文参考 PokeAPI，来源与逐项摘要保留在 [翻译来源清单](locales/catalog-sources.json)，许可随 [PokeAPI 许可文件](public/licenses/pokeapi.txt) 分发。感谢上游开发者、素材作者和翻译贡献者；原素材署名保留如下。
 
-保留原版 AGPL-3.0 许可证、资源与贡献者说明。以下为该历史快照的原版 README，其功能、环境与部署描述属于历史记录；本项目当前运行方式以上文为准。
-
----
-
-<picture><img src="./public/images/logo.png" width="300" alt="PokéRogue"></picture>
-
-PokéRogue is a browser based Pokémon fangame heavily inspired by the roguelite genre. Battle endlessly while gathering stacking items, exploring many different biomes, fighting trainers, bosses, and more! 
-
-# Contributing
-## Development
-If you have the motivation and experience with Typescript/Javascript (or are willing to learn) please feel free to fork the repository and make pull requests with contributions. If you don't know what to work on but want to help, reference the below **To-Do** section or the **#vote** channel in the discord. 
-
-### Environment Setup
-node: 18.3.0
-
-1. Clone the repo and in the root directory run `npm install`
-    - *if you run into any errors, reach out in the **#dev-corner** channel in discord*
-2. Run `npm run start` to locally run the project in `localhost:8000`
-
-### FAQ
-
-**How do I test a new ability/move?**
-- In the `pokemon.ts` file there are overrides you can set to apply the new move/ability to your active pokemon
-
-**How do I test a specific seed/wave?**
-- In the `battle-scene.ts` file there are overrides for seed, starting level, starting wave, starting biome, and starting money
-
-
-## To Do
-
-- Add carry-over starter mechanic
-- Moves
-  - Complete move logic
-- Abilities
-  - Complete ability logic
-- Pokemon summary screen
-  - Add IV screen
-- Capture logic
-  - Critical capture
-- Modifiers
-  - Various mainline game items for various enhancements
-- Trainers
-  - Finish party pools
-  - Add dialogue
-  - Add reward for gym leader victories
-- Battle animations
-  - Fix broken battle animations (mostly ones with backgrounds)
-- Modes
-  - Add random mode
-  - Add Nuzlocke mode
 
 # Credits
 > If this project contains assets you have produced and you do not see your name here, **please** reach out.

@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Preserve the upstream license bytes used by the translation source checksum.
+public/licenses/pokeapi.txt text eol=lf

@@ -71,3 +71,7 @@ backups/
 SPEC*.md
 **/AGENT*.md
 **/*PROMPT*.md
+
+# Internal development history stays local; public guidance lives in README.
+/docs/
+/BASELINE.json

@@ -19,7 +19,7 @@ test('queued display JSON retains each original message page after the phase pro
 
 test('early catalog translations retain source hashes, exact English guards and the bundled source license',()=>{
  const read=path=>JSON.parse(fs.readFileSync(new URL('../'+path,import.meta.url),'utf8'));
- const manifest=read('docs/early-catalog-translation-sources.json'),en=read('locales/en/early-catalog.json'),zh=read('locales/zh-Hans/early-catalog.json');
+ const manifest=read('locales/catalog-sources.json'),en=read('locales/en/early-catalog.json'),zh=read('locales/zh-Hans/early-catalog.json');
  const digest=s=>createHash('sha256').update(s).digest('hex'),normalize=s=>s.replace(/[‘’]/g,"'").replace(/\s+/g,' ').trim();
  assert.equal(manifest.commit,'2bf639e5572812a67d2b94903fdcb9d095f5aeb2');
  assert.equal(manifest.entries.length,961);assert.equal(manifest.entries.filter(e=>e.versionGroup).length,848);

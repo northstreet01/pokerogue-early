@@ -1,5 +1,20 @@
-import {open,mkdtemp,mkdir,rename,rm,stat} from 'node:fs/promises';
+import {open,mkdtemp,mkdir,rename,rm,stat,realpath} from 'node:fs/promises';
 import {join,resolve,relative,isAbsolute} from 'node:path';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+
+const runFile=promisify(execFile);
+
+// Electron's sandbox must read the installed program. A build made inside an
+// AppContainer can inherit a package-specific ACE without the general read ACE.
+// Add read/execute only, on the bounded candidate; never touch userData or use
+// /reset, ownership changes, write grants, or an unbounded recursive ACL edit.
+async function prepareWindowsPackageAccess(candidate){
+  if(process.platform!=='win32')return;
+  if(relative(candidate,await realpath(candidate)))throw Error('UNSAFE_PACKAGE_PATH');
+  await stat(join(candidate,'PokeRogue-LAN.exe'));
+  await runFile('icacls.exe',[candidate,'/grant','*S-1-15-2-1:(OI)(CI)(RX)','/Q'],{windowsHide:true});
+}
 
 export function ownedPackagePath(root,path) {
   const value=resolve(path),part=relative(resolve(root),value);
@@ -27,7 +42,7 @@ export async function publishDesktopPackage({output,staged}) {
       previous=ownedPackagePath(root,join(previousRoot,'PokeRogue-LAN-win32-x64'));
       await rename(release,previous);
     }
-    try { await rename(candidate,release); }
+    try { await prepareWindowsPackageAccess(candidate);await rename(candidate,release); }
     catch(error) { if(previous&&await exists(previous))await rename(previous,release);throw error; }
     await handle?.close();handle=null;
     if(previousRoot)await rm(ownedPackagePath(root,previousRoot),{recursive:true,force:true,maxRetries:3,retryDelay:100});

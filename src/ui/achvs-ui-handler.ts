@@ -1,6 +1,6 @@
 import i18next from '../i18n';
 import BattleScene, { Button } from "../battle-scene";
-import { Achv, achvs } from "../system/achv";
+import { Achv, achvs, MoneyAchv, DamageAchv, HealAchv, LevelAchv } from "../system/achv";
 import MessageUiHandler from "./message-ui-handler";
 import { TextStyle, addTextObject } from "./text";
 import { Mode } from "./ui";
@@ -17,6 +17,7 @@ export default class AchvsUiHandler extends MessageUiHandler {
   private unlockText: Phaser.GameObjects.Text;
 
   private cursorObj: Phaser.GameObjects.NineSlice;
+  private onCancel?:()=>void;
 
   constructor(scene: BattleScene, mode?: Mode) {
     super(scene, mode);
@@ -107,6 +108,7 @@ export default class AchvsUiHandler extends MessageUiHandler {
   }
 
   show(args: any[]): boolean {
+    this.onCancel=args[0]?.onCancel;
     super.show(args);
 
     const achvUnlocks = this.scene.gameData.achvUnlocks;
@@ -139,10 +141,21 @@ export default class AchvsUiHandler extends MessageUiHandler {
     const unlocked = achvUnlocks.hasOwnProperty(achv.id);
     const hidden = !unlocked && achv.secret && (!achv.parentId || !achvUnlocks.hasOwnProperty(achv.parentId));
 
-    this.titleText.setText(unlocked ? achv.name : '???');
-    this.showText(!hidden ? achv.description : '');
+    // Early IDs are stable save keys; translate their display without renaming
+    // achievements or changing their original validation/award conditions.
+    const parts=achv.id.replace(/^_/,'').split('_');
+    const key=achv.id==='TRANSFER_MAX_BATTLE_STAT'?'transferMaxStatStage':
+      (/^\d/.test(parts[0])?parts[0]:parts[0].toLowerCase())+parts.slice(1).map(p=>p[0]+p.slice(1).toLowerCase()).join('');
+    const group=achv instanceof MoneyAchv?'moneyAchv':achv instanceof DamageAchv?'damageAchv':
+      achv instanceof HealAchv?'healAchv':achv instanceof LevelAchv?'levelAchv':key;
+    const values:any=achv;
+    const description=i18next.t(`achv:${group}.description`,{defaultValue:achv.description,
+      moneyAmount:values.moneyAmount?.toLocaleString('en-US'),damageAmount:values.damageAmount?.toLocaleString('en-US'),
+      healAmount:values.healAmount?.toLocaleString('en-US'),HP:'HP',level:values.level});
+    this.titleText.setText(unlocked ? i18next.t(`achv:${key}.name`,{defaultValue:achv.name}) : '???');
+    this.showText(!hidden ? description : '');
     this.scoreText.setText(`${achv.score}pt`);
-    this.unlockText.setText(unlocked ? new Date(achvUnlocks[achv.id]).toLocaleDateString() : 'Locked');
+    this.unlockText.setText(unlocked ? new Date(achvUnlocks[achv.id]).toLocaleDateString() : i18next.t('achv:locked.name'));
   }
 
   processInput(button: Button): boolean {
@@ -152,7 +165,8 @@ export default class AchvsUiHandler extends MessageUiHandler {
 
     if (button === Button.CANCEL) {
       success = true;
-      this.scene.ui.revertMode();
+      const cancel=this.onCancel;this.onCancel=undefined;
+      if(cancel)cancel();else this.scene.ui.revertMode();
     } else {
       switch (button) {
         case Button.UP:
@@ -201,6 +215,7 @@ export default class AchvsUiHandler extends MessageUiHandler {
   }
 
   clear() {
+    this.onCancel=undefined;
     super.clear();
     this.achvsContainer.setVisible(false);
     this.eraseCursor();

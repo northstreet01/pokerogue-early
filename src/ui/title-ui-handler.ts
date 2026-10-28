@@ -10,7 +10,6 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
   private titleContainer: Phaser.GameObjects.Container;
   private playerCountLabel: Phaser.GameObjects.Text;
   private titleLogo: Phaser.GameObjects.Image;
-  private homeHeading: Phaser.GameObjects.Text;
   private splashMessage: Phaser.GameObjects.Text;
 
 
@@ -31,8 +30,6 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
     logo.setOrigin(0.5, 0);
     this.titleLogo = logo;
     this.titleContainer.add(logo);
-    this.homeHeading = addTextObject(this.scene, 160, 16, '宝可梦肉鸽 · 初始界面', TextStyle.MESSAGE);
-    this.homeHeading.setOrigin(0.5, 0); this.homeHeading.setVisible(false); this.titleContainer.add(this.homeHeading);
 
     this.splashMessage = addTextObject(this.scene, logo.x + 64, logo.y + logo.displayHeight - 8, '', TextStyle.MONEY, { fontSize: '54px' });
     this.splashMessage.setOrigin(0.5, 0.5);
@@ -58,7 +55,7 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
 
   updatePlayerCount(): void {
     this.playerCountLabel.setText(this.config?.contextLabel ?? i18next.t('earlyBattle:localSolo'));
-    this.playerCountLabel.setPosition(this.config?.contextLabel?16:(this.scene.game.canvas.width/6)-2,this.config?.contextLabel?42:90);
+    this.playerCountLabel.setPosition(this.config?.contextLabel?16:(this.scene.game.canvas.width/6)-2,this.config?.contextLabel?76:90);
     this.playerCountLabel.setOrigin(this.config?.contextLabel?0:1,0);
   }
 
@@ -72,10 +69,8 @@ export default class TitleUiHandler extends OptionSelectUiHandler {
       const ui = this.getUi();
 
 
-      this.titleLogo?.setVisible(!this.config?.contextLabel);
+      this.titleLogo?.setVisible(true);
       this.splashMessage.setVisible(!this.config?.contextLabel);
-      this.homeHeading?.setVisible(!!this.config?.contextLabel);
-      this.homeHeading?.setText(this.config?.contextLabel ? '宝可梦肉鸽 · 冒险大厅' : '');
       this.updatePlayerCount();
 
 

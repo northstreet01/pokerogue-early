@@ -14,6 +14,7 @@ import {legacyBackupSource} from './local-meta/repository.mjs';
 import {digest} from './local-meta/codec.mjs';
 import i18next from './i18n';
 import {readHosts,hostScope} from './coop/host-connection.mjs';
+import {SaveSlotUiMode} from './ui/save-slot-select-ui-handler';
 
 /** Root has no login/save/room side effects. Direct game entries retain login. */
 export function entryPhases(scene: BattleScene, coop: boolean, solo: boolean): Phase[] {
@@ -60,7 +61,11 @@ export class HomePhase extends Phase {
   }
 
   private releaseView(): void {
-    if (this.originalData) { this.scene.gameData = this.originalData; this.originalData = undefined; }
+    if (this.originalData) {
+      const view=this.scene.gameData;
+      this.scene.gameData = this.originalData; this.originalData = undefined;
+      void view.closeProfile().catch(()=>{});
+    }
   }
 
   private navigate(url: string): void {
@@ -113,13 +118,14 @@ export class HomePhase extends Phase {
       this.profileName=index.profiles.find(p=>p.profileId===this.activeProfile)?.displayName??'';
     }catch(error){if(this.current(epoch))await this.menu(epoch,[[this.t('retry'),()=>this.showHome()]],localProfileError(error));return;}
     const outcome = this.scene.appUrl?.searchParams.get('coopExit');
-    const outcomeText = outcome === 'victory' ? '经典模式通关！永久收藏与扭蛋结算待接入。'
+    const outcomeText = outcome === 'victory' ? '经典模式通关！已确认的成果可在本人图鉴查看。'
       : outcome === 'defeat' ? '双方队伍已倒下，本次冒险结束。' : undefined;
     return this.menu(epoch, [
       ['单人冒险', () => this.navigate('/?solo=1')],
       ['联机冒险', () => this.navigate('/coop-play.html?fresh=1')],
       ['恢复已有联机', () => { void this.showRecovery(); }],
-      ['个人收藏 / 蛋 / 券', () => { void this.showPersonal(); }],
+      ['宝可梦图鉴', () => { void this.browse(Mode.STARTER_SELECT); }],
+      ['个人资料', () => { void this.showPersonal(); }],
       [this.t('profiles'),()=>this.showProfiles()],
     ], outcomeText);
   }
@@ -127,9 +133,10 @@ export class HomePhase extends Phase {
   private showPersonal(): Promise<void> {
     const epoch = ++this.epoch;
     return this.menu(epoch, [
-      ['我的收藏', () => { void this.browse(Mode.STARTER_SELECT); }],
       ['我的未孵化蛋', () => { void this.browse(Mode.EGG_LIST); }],
       ['我的蛋券', () => { void this.browse(Mode.EGG_GACHA); }],
+      ['成就', () => { void this.browse(Mode.ACHIEVEMENTS); }],
+      ['游戏统计', () => { void this.browse(Mode.GAME_STATS); }],
       ['返回初始界面', () => { void this.showHome(); }],
     ]);
   }
@@ -143,8 +150,9 @@ export class HomePhase extends Phase {
       const view = new GameData(this.scene, { readOnly: true });
       if(this.activeProfile)view.bindProfileIO(await openGameProfileIO(this.repository(epoch),this.activeProfile,{readOnly:true}));
       const exists = await view.loadSystem({ readOnly: true });
-      if (!this.current(epoch)) return;
+      if (!this.current(epoch)) { await view.closeProfile();return; }
       if (!exists) {
+        await view.closeProfile();
         await this.menu(epoch, [['尚无个人资料，返回', () => { void this.showHome(); }]]);
         return;
       }
@@ -157,6 +165,19 @@ export class HomePhase extends Phase {
         ['返回初始界面', () => { void this.showHome(); }],
       ]);
     }
+  }
+
+  /** Original three-slot cards, bound to the chosen profile and view-only.
+   * Loading an adventure remains the original solo title's responsibility. */
+  private async browseSaveSlots(profileId:string):Promise<void>{
+    const epoch=++this.epoch;
+    const view=new GameData(this.scene,{readOnly:true});
+    try{
+      view.bindProfileIO(await openGameProfileIO(this.repository(epoch),profileId,{readOnly:true}));
+      if(!await view.loadSystem({readOnly:true}))throw new Error('LOCAL_PROFILE_UNAVAILABLE');
+      if(!this.current(epoch)){await view.closeProfile();return;}
+      await this.display(epoch,Mode.SAVE_SLOT,[SaveSlotUiMode.VIEW,()=>{if(this.current(epoch))void this.showProfile(profileId);}],view);
+    }catch(error){await view.closeProfile();if(this.current(epoch))await this.showError(error);}
   }
 
   private async showRecovery(): Promise<void> {
@@ -236,7 +257,7 @@ export class HomePhase extends Phase {
         await this.withWriter(profileId,e,async(r,lease)=>{const old=await r.read(profileId);await r.save(profileId,old.revision,lease,v=>({...v,displayName:name}));});
         if(this.current(e))await this.showProfile(profileId);
       },p.displayName)],
-      ...p.soloRuns.map(run=>[this.t('slot',{slot:run.legacySlot+1,wave:run.originalSession.waveIndex}),()=>this.confirmSlots(profileId)] as [string,()=>unknown]),
+      ['冒险存档（3个槽位）',()=>this.browseSaveSlots(profileId)],
       ...(p.soloRuns.some(r=>r.ownership==='unconfirmed')?[[this.t('confirmSlots'),()=>this.confirmSlots(profileId)] as [string,()=>unknown]]:[]),
       [this.t('export'),()=>this.confirm(epoch,this.t('privateBackup'),async()=>{
         const archive=await repo.exportArchive(profileId);if(!this.current(epoch))return;

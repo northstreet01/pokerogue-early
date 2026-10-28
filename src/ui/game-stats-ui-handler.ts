@@ -105,6 +105,7 @@ const displayStats: DisplayStats = {
 export default class GameStatsUiHandler extends UiHandler {
   private gameStatsContainer: Phaser.GameObjects.Container;
   private statsContainer: Phaser.GameObjects.Container;
+  private onCancel?:()=>void;
 
   private statLabels: Phaser.GameObjects.Text[];
   private statValues: Phaser.GameObjects.Text[];
@@ -126,7 +127,7 @@ export default class GameStatsUiHandler extends UiHandler {
     const headerBg = addWindow(this.scene, 0, 0, (this.scene.game.canvas.width / 6) - 2, 24);
     headerBg.setOrigin(0, 0);
 
-    const headerText = addTextObject(this.scene, 0, 0, i18next.t("battle:stats"), TextStyle.SETTINGS_LABEL);
+    const headerText = addTextObject(this.scene, 0, 0, i18next.t('earlyStats:title'), TextStyle.SETTINGS_LABEL);
     headerText.setOrigin(0, 0);
     headerText.setPositionRelative(headerBg, 8, 4);
 
@@ -168,6 +169,7 @@ export default class GameStatsUiHandler extends UiHandler {
   }
 
   show(args: any[]): boolean {
+    this.onCancel=args[0]?.onCancel;
     super.show(args);
 
     this.setCursor(0);
@@ -206,7 +208,8 @@ export default class GameStatsUiHandler extends UiHandler {
 
     if (button === Button.CANCEL) {
       success = true;
-      this.scene.ui.revertMode();
+      const cancel=this.onCancel;this.onCancel=undefined;
+      if(cancel)cancel();else this.scene.ui.revertMode();
     } else {
       switch (button) {
         case Button.UP:
@@ -236,6 +239,7 @@ export default class GameStatsUiHandler extends UiHandler {
   }
 
   clear() {
+    this.onCancel=undefined;
     super.clear();
     this.gameStatsContainer.setVisible(false);
   }

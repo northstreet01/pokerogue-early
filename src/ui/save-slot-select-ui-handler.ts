@@ -15,7 +15,8 @@ const sessionSlotCount = 3;
 
 export enum SaveSlotUiMode {
   LOAD,
-  SAVE
+  SAVE,
+  VIEW
 }
 
 export type SaveSlotSelectCallback = (cursor: integer) => void;
@@ -32,6 +33,7 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
   private saveSlotSelectCallback: SaveSlotSelectCallback;
 
   private cursorObj: Phaser.GameObjects.NineSlice;
+  private viewLabel:Phaser.GameObjects.Text;
 
   constructor(scene: BattleScene) {
     super(scene, Mode.SAVE_SLOT);
@@ -64,6 +66,8 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
     this.saveSlotSelectMessageBoxContainer.add(this.message);
 
     this.sessionSlots = [];
+    this.viewLabel=addTextObject(this.scene,8,-this.scene.game.canvas.height/6+1,'存档一览 · 仅查看 · Esc返回',TextStyle.WINDOW,{fontSize:'36px'});
+    this.viewLabel.setVisible(false);this.saveSlotSelectContainer.add(this.viewLabel);
   }
 
   show(args: any[]): boolean {
@@ -78,6 +82,7 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
     this.saveSlotSelectContainer.setVisible(true);
     this.populateSessionSlots();
     this.setCursor(0);
+    this.viewLabel.setVisible(this.uiMode===SaveSlotUiMode.VIEW);
 
     return true;
   }
@@ -93,6 +98,7 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
       if (button === Button.ACTION && !this.sessionSlots[this.cursor]?.loaded) return false;
       const originalCallback = this.saveSlotSelectCallback;
       if (button === Button.ACTION) {
+        if(this.uiMode===SaveSlotUiMode.VIEW)return false;
         if (this.uiMode === SaveSlotUiMode.LOAD && !this.sessionSlots[this.cursor].hasData)
           error = true;
         else {
@@ -234,7 +240,7 @@ class SessionSlot extends Phaser.GameObjects.Container {
   async setupWithData(data: SessionSaveData) {
     this.remove(this.loadingLabel, true);
 
-    const gameModeLabel = addTextObject(this.scene, 8, 5, `${gameModes[data.gameMode].getName()} - Wave ${data.waveIndex}`, TextStyle.WINDOW);
+    const gameModeLabel = addTextObject(this.scene, 8, 5, `${gameModes[data.gameMode].getName()} - ${i18next.t('saveSlotSelectUiHandler:wave')} ${data.waveIndex}`, TextStyle.WINDOW);
     this.add(gameModeLabel);
 
     const timestampLabel = addTextObject(this.scene, 8, 19, new Date(data.timestamp).toLocaleString(), TextStyle.WINDOW);
@@ -268,6 +274,7 @@ class SessionSlot extends Phaser.GameObjects.Container {
     this.add(pokemonIconsContainer);
 
     const modifiersModule = await import('../modifier/modifier');
+    if(!this.active)return;
 
     const modifierIconsContainer = this.scene.add.container(148, 30);
     modifierIconsContainer.setScale(0.5);
@@ -286,21 +293,27 @@ class SessionSlot extends Phaser.GameObjects.Container {
     this.add(modifierIconsContainer);
   }
 
-  load(): Promise<boolean> {
-    return new Promise<boolean>(resolve => {
-      this.scene.gameData.getSession(this.slotId).then(async sessionData => {
-        if (!sessionData) {
-          this.loadingLabel.setText(i18next.t("saveSlotSelectUiHandler:empty"));
-          this.loaded = true;
-          resolve(false);
-          return;
-        }
-        this.hasData = true;
-        await this.setupWithData(sessionData);
+  async load(): Promise<boolean> {
+    try{
+      const sessionData=await this.scene.gameData.getSession(this.slotId);
+      if(!this.active)return false;
+      if (!sessionData) {
+        this.loadingLabel.setText(i18next.t("saveSlotSelectUiHandler:empty"));
         this.loaded = true;
-        resolve(true);
-      });
-    });
+        return false;
+      }
+      this.hasData = true;
+      await this.setupWithData(sessionData);
+      if(!this.active)return false;
+      this.loaded = true;
+      return true;
+    }catch{
+      if(this.active){
+        if(this.loadingLabel?.scene)this.loadingLabel.setText(i18next.t('localMeta:failed'));
+        else this.add(addTextObject(this.scene,8,19,i18next.t('localMeta:failed'),TextStyle.WINDOW));
+      }
+      return false;
+    }
   }
 }
 

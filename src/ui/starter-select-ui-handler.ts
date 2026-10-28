@@ -69,6 +69,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
   private starterSelectMessageBox: Phaser.GameObjects.NineSlice;
   private starterSelectMessageBoxContainer: Phaser.GameObjects.Container;
   private statsContainer: StatsContainer;
+  private collectionProgressText: Phaser.GameObjects.Text;
 
   private genMode: boolean;
   private statsMode: boolean;
@@ -319,6 +320,9 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       this.iconAnimHandler.addOrUpdate(icon, PokemonIconAnimMode.PASSIVE);
       return icon;
     });
+    this.collectionProgressText=addTextObject(this.scene,110,65,'',TextStyle.WINDOW,{fontSize:'42px',lineSpacing:6});
+    this.collectionProgressText.setVisible(false);
+    this.starterSelectContainer.add(this.collectionProgressText);
 
     this.starterValueLabels = new Array(81).fill(null).map((_, i) => {
       const x = (i % 9) * 18;
@@ -488,6 +492,10 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       this.startLabel.setVisible(!this.starterSelectOptions.readOnly);
       this.startLabel.setText(i18next.t(this.starterSelectOptions.confirmOnly ? 'coop:finishTeam' : 'common:start'));
       this.valueLimitLabel.setVisible(!this.starterSelectOptions.readOnly);
+      this.starterIcons.forEach(icon=>icon.setVisible(!this.starterSelectOptions.readOnly));
+      const entries=this.genSpecies.flat().map(species=>this.selectionData.dexData[species.speciesId]);
+      this.collectionProgressText.setText(`图鉴\n已解锁\n${entries.filter(e=>!!e.caughtAttr).length}/${entries.length}\n\n已遇见\n${entries.filter(e=>!!(e.seenAttr||e.caughtAttr)).length}`);
+      this.collectionProgressText.setVisible(!!this.starterSelectOptions.readOnly);
 
       this.starterSelectContainer.setVisible(true);
 
@@ -855,7 +863,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
     for (let cil of cycleInstructionLines)
       instructionLines.push(cil);
 
-    if (this.starterSelectOptions.readOnly) instructionLines.unshift('个人收藏 · 确认查看IV · 取消返回');
+    if (this.starterSelectOptions.readOnly) instructionLines.unshift('本人图鉴 · 确认查看IV · 取消返回');
     this.instructionsText.setText(instructionLines.join('\n'));
   }
 
@@ -889,7 +897,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       for (let s = 0; s < this.starterCursorObjs.length; s++)
         this.starterCursorObjs[s].setVisible(this.starterGens[s] === genCursorWithScroll);
       for (let s = 0; s < this.pokerusCursorObjs.length; s++)
-        this.pokerusCursorObjs[s].setVisible(this.pokerusGens[s] === genCursorWithScroll);
+        this.pokerusCursorObjs[s].setVisible(!this.starterSelectOptions.readOnly&&this.pokerusGens[s] === genCursorWithScroll);
 
       const genLimit = this.genSpecies[genCursorWithScroll].length;
       for (let s = 0; s < 81; s++) {
@@ -918,7 +926,7 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
           this.starterValueLabels[s].setColor(getTextColor(textStyle));
           this.starterValueLabels[s].setShadowColor(getTextColor(textStyle, true));
         }
-        this.starterValueLabels[s].setVisible(slotVisible);
+        this.starterValueLabels[s].setVisible(!!slotVisible&&!this.starterSelectOptions.readOnly);
         this.shinyIcons[s].setVisible(slotVisible && !!(this.selectionData.dexData[speciesId].caughtAttr & DexAttr.SHINY));
       }
     } else {
@@ -1237,7 +1245,8 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       this.pokemonEggMoveLabels[em].setText(eggMove && eggMoveUnlocked ? eggMove.name : '???');
     }
 
-    this.pokemonEggMovesContainer.setVisible(hasEggMoves);
+    this.pokemonMovesContainer.setVisible(!this.statsMode);
+    this.pokemonEggMovesContainer.setVisible(hasEggMoves&&!this.statsMode);
 
     this.pokemonAdditionalMoveCountLabel.setText(`(+${Math.max(this.speciesStarterMoves.length - 4, 0)})`);
     this.pokemonAdditionalMoveCountLabel.setVisible(this.speciesStarterMoves.length > 4);
@@ -1392,6 +1401,10 @@ export default class StarterSelectUiHandler extends MessageUiHandler {
       this.pokemonSprite.setVisible(!!this.speciesStarterDexEntry?.caughtAttr);
       this.statsContainer.updateIvs(null);
     }
+    // The IV chart occupies the same original panel as the sprite and moves.
+    // Hide both move layers so their labels cannot cover the chart values.
+    this.pokemonMovesContainer?.setVisible(!this.statsMode);
+    this.pokemonEggMovesContainer?.setVisible(!this.statsMode&&!!this.lastSpecies&&Object.prototype.hasOwnProperty.call(speciesEggMoves,this.lastSpecies.speciesId));
   }
   
   showStats(): void {

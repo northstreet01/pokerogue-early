@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,readdir,rm} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {publishDesktopPackage} from '../scripts/desktop-package.mjs';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 
 test('package promotion swaps a complete directory and removes the superseded package',async()=>{
  await mkdir('build/code-review',{recursive:true});const output=await mkdtemp(resolve('build/code-review/package-test-'));
@@ -13,6 +15,11 @@ test('package promotion swaps a complete directory and removes the superseded pa
   assert.equal(await publishDesktopPackage({output,staged}),release);
   assert.equal(await readFile(join(release,'PokeRogue-LAN.exe'),'utf8'),'new');
   assert.equal(await readFile(join(release,'assets-ready'),'utf8'),'complete');assert.deepEqual(await readdir(output),['release']);
+  if(process.platform==='win32'){
+   const acl=join(output,'program-acl');await promisify(execFile)('icacls.exe',[release,'/save',acl,'/Q'],{windowsHide:true});
+   // Inspect the OS-written DACL: inheritable read/execute, without write.
+   assert.match(await readFile(acl,'utf16le'),/\(A;OICI;0x1200a9;;;(?:AC|S-1-15-2-1)\)/);
+  }
  }finally{await rm(output,{recursive:true,force:true});}
 });
 

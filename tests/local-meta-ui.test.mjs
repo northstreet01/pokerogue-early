@@ -205,6 +205,73 @@ test('read-only collection view reads active profile without acquiring its write
   assert.equal(h.scene.gameData.trainerId,base.system.trainerId);assert.equal(await h.scene.gameData.saveSystem(),false);
   assert.deepEqual(await r.read(p.profileId),before);await io.close();
 });
+
+test('coop capture, solo capture and home dex reopen the same personal System in both directions',async t=>{
+  const {r,p}=await created();await r.setActive(p.profileId);
+  const coop=game(await writer(t,p.profileId,{mode:'coop'}));await coop.data.loadSystem();
+  coop.scene.ui={showText:(_text,_delay,callback)=>callback?.(),achvBar:{showAchv(){}}};coop.scene.playSoundWithoutBgm=()=>{};
+  const pikachu=api.constructOriginalPokemon(coop.runtime,25,5);
+  await coop.data.applyCoopResults([{id:'shared-dex-proof',seat:0,payload:{version:1,facts:[{kind:'capture-pending',owner:0,
+    speciesId:25,dexAttr:pikachu.getDexAttr().toString(),pokemon:api.capturePokemonState(pikachu)}]}}],
+    {hostId:'test-host',runId:'test-run',roomId:'ABCDEF',seat:0,profileId:p.profileId,token:'synthetic',isCurrent:()=>true});
+  await coop.data.closeProfile();
+  const solo=game(await writer(t,p.profileId));await solo.data.loadSystem();
+  assert.ok(solo.data.dexData[25].caughtAttr);assert.ok(solo.data.dexData[25].caughtCount>0);
+  solo.scene.ui={showText:(_text,_delay,callback)=>callback?.(),achvBar:{showAchv(){}}};solo.scene.playSoundWithoutBgm=()=>{};
+  const eevee=api.constructOriginalPokemon(solo.runtime,133,5);
+  await solo.data.setPokemonCaught(eevee);solo.data.updateSpeciesDexIvs(133,eevee.ivs);
+  assert.equal(await solo.data.saveEncounter(solo.scene),true);await solo.data.closeProfile();
+  const next=game(await writer(t,p.profileId,{mode:'coop'}));await next.data.loadSystem();
+  assert.ok(next.data.dexData[25].caughtAttr);assert.ok(next.data.dexData[133].caughtAttr);
+  const catalog=api.captureRoomCatalog(next.data);assert.ok(catalog.some(row=>row.speciesId===133));
+  const selection={species:api.getPokemonSpecies(133),dexAttr:next.data.getSpeciesDefaultDexAttr(api.getPokemonSpecies(133)),
+    nature:next.data.getSpeciesDefaultNature(api.getPokemonSpecies(133)),pokerus:false};
+  assert.equal(api.captureProfileDraft(next.data,[selection],catalog).starters[0].speciesId,133);
+  await next.data.closeProfile();
+  const before=await r.read(p.profileId),h=home(t);await h.p.showHome();await h.p.browse(api.Mode.STARTER_SELECT);
+  assert.ok(h.scene.gameData.dexData[25].caughtAttr);assert.ok(h.scene.gameData.dexData[133].caughtAttr);
+  assert.equal(before.grantLedger.length,1);assert.equal(before.soloRuns.length,1);
+  assert.deepEqual(await r.read(p.profileId),before);
+});
+
+test('home routes dex and original personal screens directly; profile slots use original view-only cards',async t=>{
+  const {r,p}=await created();await r.setActive(p.profileId);const h=home(t);
+  await h.p.showHome();assert.ok(h.options().some(o=>o.label==='宝可梦图鉴'));
+  await h.p.showPersonal();assert.deepEqual(h.options().slice(0,4).map(o=>o.label),['我的未孵化蛋','我的蛋券','成就','游戏统计']);
+  for(const mode of [api.Mode.ACHIEVEMENTS,api.Mode.GAME_STATS]){
+    await h.p.browse(mode);assert.equal(h.last()[0],mode);assert.equal(typeof h.last()[1].onCancel,'function');
+    h.last()[1].onCancel();await h.p.transitions;
+  }
+  await h.p.showProfile(p.profileId);assert.ok(h.options().some(o=>o.label==='冒险存档（3个槽位）'));
+  const before=await r.read(p.profileId);await h.p.browseSaveSlots(p.profileId);
+  assert.equal(h.last()[0],api.Mode.SAVE_SLOT);assert.equal(h.last()[1],api.SaveSlotUiMode.VIEW);
+  assert.equal(h.scene.gameData.localProfileId,p.profileId);assert.equal(await h.scene.gameData.saveSystem(),false);
+  h.last()[2](-1);await h.p.transitions;assert.deepEqual(await r.read(p.profileId),before);
+});
+
+test('original slot viewer cannot load or overwrite a slot and its cancel callback is consumed once',()=>{
+  const events=[],handler=Object.assign(Object.create(api.SaveSlotSelectUiHandler.prototype),{
+    scene:{ui:{playSelect(){},playError(){},setMode(){throw Error('MUST_NOT_START_ADVENTURE');}}},
+    uiMode:api.SaveSlotUiMode.VIEW,cursor:0,sessionSlots:[{loaded:true,hasData:true}],saveSlotSelectCallback:slot=>events.push(slot)});
+  assert.equal(handler.processInput(api.Button.ACTION),false);
+  assert.deepEqual(events,[]);
+  // Use the enum exported by the production battle scene, not synthetic writes.
+  handler.processInput(api.Button.CANCEL);handler.processInput(api.Button.CANCEL);
+  assert.deepEqual(events,[-1]);
+});
+
+test('original achievement IDs keep their meaning while all personal-page names and descriptions display in Chinese',async()=>{
+  const previous=api.i18next.language;await api.i18next.changeLanguage('zh-Hans');
+  try{
+    let name='',description='';const text={setText(){}};
+    const handler=Object.assign(Object.create(api.AchvsUiHandler.prototype),{scene:{gameData:{achvUnlocks:Object.fromEntries(Object.keys(api.achvs).map(id=>[id,1]))}},
+      titleText:{setText:v=>{name=v;}},scoreText:text,unlockText:text,showText:v=>{description=v;}});
+    for(const achv of Object.values(api.achvs)){
+      handler.showAchv(achv);assert.match(name,/[\u4e00-\u9fff]/,achv.id);assert.match(description,/[\u4e00-\u9fff]/,achv.id);
+      assert.equal(description.includes('{{'),false,achv.id);
+    }
+  }finally{await api.i18next.changeLanguage(previous);}
+});
 test('reserved cooperative eggs block solo entry but can still be viewed and imported without hatching',async t=>{
   const {r,p}=await created(),lease=await r.acquire(p.profileId,'test-owner');
   await r.save(p.profileId,0,lease,v=>({...v,originalSystem:{...v.originalSystem,eggs:[{id:123,gachaType:0,hatchWaves:0,timestamp:1}]},

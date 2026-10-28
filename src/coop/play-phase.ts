@@ -25,6 +25,7 @@ import {identifyHost,normalizeEndpoint,hostSocketUrl,hostScope,readHosts,remembe
 import {desktopHost,startDesktopHost} from '../desktop-host.mjs';
 import {renderTeams,renderInventory,progressText} from './room-display.mjs';
 import {captureRoomCatalog,roomSelectionData} from './room-catalog';
+import {beginLoading} from './loading-screen.mjs';
 
 const RULES_VERSION = 'early-vs02';
 const CONTENT_HASH = 'vs02-original-coop';
@@ -559,6 +560,7 @@ export default class CoopPlayPhase extends Phase {
   private async updateLobbyView(snapshot: any) {
     if (this.disposed) return;
     if (snapshot.personal.decision.kind === 'lobby') {
+      if(this.overlay)this.overlay.hidden=false;
       if (this.modifierLine) { this.modifierLine.hidden = true; this.modifierLine.textContent = ''; }
       const shared = snapshot.shared;
       this.roomLine.textContent = `房间 ${snapshot.roomId} · 席位 ${snapshot.seat + 1}`;
@@ -587,6 +589,7 @@ export default class CoopPlayPhase extends Phase {
     if (this.lobbySelections) this.lobbySelections.hidden = true;
     this.lobbyDraft = null; this.draftFinal = false;
     await this.enterBattle(snapshot);
+    if(this.overlay)this.overlay.hidden=false;
   }
 
   private async enterBattle(snapshot: any) {
@@ -600,6 +603,13 @@ export default class CoopPlayPhase extends Phase {
     }
     const signature = `${snapshot.connectionEpoch}:${snapshot.decisionId}:${snapshot.revision}`;
     if (this.battleSignature === signature) return;
+    const entering=!this.latest||this.latest.personal.decision.kind==='lobby';
+    const entryLoading=entering?beginLoading('正在进入战斗，准备本地素材…',null):null;
+    if(entering){
+      if(this.overlay)this.overlay.hidden=true;
+      this.controls?.replaceChildren();
+      if(this.lobbySelections)this.lobbySelections.hidden=true;
+    }
     const preparing = this.presentedSnapshot?.personal.decision.kind === 'preparation'
       && snapshot.personal.decision.kind === 'preparation'
       && this.presentedSnapshot.shared.waveIndex === snapshot.shared.waveIndex
@@ -625,6 +635,8 @@ export default class CoopPlayPhase extends Phase {
     } catch (error: any) {
       // Presentation is never allowed to hold the authoritative ACK forever.
       this.setStatus(`战斗展示回放失败：${error?.message ?? error}`, true);
+    } finally {
+      entryLoading?.complete();
     }
     if (this.epoch !== snapshot.connectionEpoch || this.disposed) return;
     this.renderReserve();

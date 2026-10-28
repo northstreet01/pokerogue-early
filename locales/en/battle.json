@@ -35,6 +35,7 @@
   "hitResultImmune": "{{pokemonName}} is unaffected!",
   "hitResultOneHitKo": "It’s a one-hit KO!",
   "attackFailed": "But it failed!",
+  "attackNoTarget": "There was no target for {{pokemonName}}'s attack!",
   "attackMissed": "{{pokemonNameWithAffix}} avoided the attack!",
   "attackHitsCount": "Hit {{count}} time(s)!",
   "rewardGain": "You received\n{{modifierName}}!",

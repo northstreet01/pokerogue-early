@@ -23,6 +23,7 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #coop-play-overlay.selecting-team .coop-room-controls{display:none}
 #coop-play-overlay:not(.room-lobby){position:relative;inset:auto;order:-1;flex:none}
 #coop-play-overlay [hidden]{display:none!important}
+#coop-play-overlay[hidden]{display:none!important}
 @media(max-width:600px){#coop-play-overlay.room-lobby:not(.selecting-team) .panel{padding:12px}#coop-play-overlay .room-players{grid-template-columns:1fr}#coop-play-overlay.room-lobby h1{font-size:20px}}
 
 #coop-play-overlay .coop-team-preview{width:100%;margin:8px 0}

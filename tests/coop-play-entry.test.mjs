@@ -1013,6 +1013,23 @@ test('failed presentation can retry the same snapshot instead of caching a succe
   await p.enterBattle(value);assert.equal(attempts,2,'a successful duplicate does not rebuild the menu');
 });
 
+test('first battle loading retires lobby controls before awaiting assets and only reveals the compact battle header',async()=>{
+  const {p}=phase();p.seat=0;p.epoch='load-epoch';p.model={applied:{}};
+  p.overlay=document.createElement('div');p.overlay.className='room-lobby';document.body.append(p.overlay);
+  p.lobbySelections=document.createElement('div');p.controls=document.createElement('div');p.controls.append(document.createElement('button'));
+  p.panel=document.createElement('div');p.roomLine={};p.budget={};
+  p.scene={ui:{setMode:async()=>{}}};p.renderReserve=p.renderPersonalModifiers=()=>{};
+  p.clearPreparationParty=p.clearActiveSwitchParty=()=>{};
+  const gate=deferred();p.presentation={apply:()=>gate.promise,playEvents:async()=>{}};
+  const value={connectionEpoch:'load-epoch',decisionId:'load',revision:1,shared:{waveIndex:1,turn:1},personal:{decision:{kind:'wait-actions'}}};
+  const loading=p.enterBattle(value);await new Promise(r=>setImmediate(r));
+  assert.equal(p.overlay.hidden,true);assert.equal(p.controls.children.length,0);assert.equal(p.lobbySelections.hidden,true);
+  assert.equal(document.getElementById('game-loading').hidden,false);
+  gate.resolve();await loading;p.latest=value;
+  await Object.getPrototypeOf(p).updateLobbyView.call(p,value);
+  assert.equal(p.overlay.hidden,false);assert.equal(p.overlay.classList.contains('room-lobby'),false);
+});
+
 test('cancel during message display prevents later text and leaves unfinished events replayable', async () => {
   let entered;
   const pending = new Promise(resolve => { entered = resolve; });

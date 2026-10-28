@@ -6,6 +6,14 @@ import {originalPhases} from './helpers/phase-model.mjs';
 import {actionContext,runAction,runHitCheck,abilityRules,advanceAction,nativeMoveDriver} from './helpers/move-execution-model.mjs';
 import {advanceQueuedMoveAction} from "./helpers/reference-rules/move-action-runner.mjs";
 
+test('co-op cancelled attack explains a departed target without changing the original PP, RNG or result',()=>{
+  const c=actionContext(0);c.roster.entries.find(e=>c.roster.field[2]===e.pokemon.id).pokemon.hp=0;
+  const solo=runAction(c),coop=runAction(c,{onBind:(_c,_p,b)=>{b.scene.nativeIndependentCommands=true;}});
+  assert.deepEqual(codec.capture(coop.context),codec.capture(solo.context));
+  assert.equal(coop.events.filter(e=>e.kind==='message'&&e.text.includes('battle:attackNoTarget')).length,1);
+  assert.equal(solo.events.some(e=>e.kind==='message'&&e.text.includes('battle:attackNoTarget')),false);
+});
+
 test('native MovePhase consumes PP/status/history and queues the same effects as frozen source for either owner',()=>{
   const cases=[()=>{},(c,p)=>{p.hp=0;},(c,p)=>{p.moveset[0].ppUsed=p.moveset[0].getMovePp();},
     (c,p)=>{p.summonData.disabledMove=p.moveset[0].moveId;},(c,p)=>{c.roster.field[2]=null;},

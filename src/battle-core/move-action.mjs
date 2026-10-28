@@ -55,6 +55,11 @@ export function executeMoveAction(phase, rules) {
         if (phase.move.moveId)
             phase.showMoveText();
         if ((moveQueue.length && moveQueue[0].move === Moves.NONE) || !targets.length) {
+            // Co-op must explain a vacated/untargetable choice without changing
+            // the original cancellation, PP, RNG or retargeting behavior.
+            if (!targets.length && !(moveQueue.length && moveQueue[0].move === Moves.NONE)
+                && phase.scene.nativeIndependentCommands && phase.pokemon.isPlayer())
+                phase.showFailedText(i18next.t('battle:attackNoTarget', { pokemonName: phase.pokemon.name }));
             moveQueue.shift();
             phase.cancel();
         }

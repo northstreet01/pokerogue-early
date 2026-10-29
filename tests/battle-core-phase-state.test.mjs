@@ -43,9 +43,25 @@ test('explicit manifest covers every original Phase declaration, inherited field
     // keep all original declarations subject to the exact AST comparison.
     const adapterFields=name==='CommandPhase'?['nativeIntent']:[];
     if(adapterFields.length){assert.equal(spec.fields.nativeIntent,'string');assert.ok(!spec.required.includes('nativeIntent'));}
-    assert.deepEqual([...Object.keys(spec.fields),...spec.display].sort(),[...c.members.filter(ts.isPropertyDeclaration).map(n=>n.name.getText()),...adapterFields].sort(),name);
+    const declarations=c.members.filter(ts.isPropertyDeclaration);
+    const erased=declarations.filter(n=>name==='EggHatchPhase'&&['presentation','presentationEnded'].includes(n.name.getText()));
+    // The local deferred-hatch renderer has two erased type declarations.
+    // They are absent from ordinary rule phases, and must NOT enter the codec.
+    // Keep the exception exact: any other erased declaration still fails here.
+    assert.deepEqual(erased.map(n=>n.name.getText()).sort(),name==='EggHatchPhase'?['presentation','presentationEnded']:[],name);
+    assert.ok(erased.every(n=>!n.initializer&&n.modifiers?.some(m=>m.kind===ts.SyntaxKind.DeclareKeyword)),name);
+    assert.deepEqual([...Object.keys(spec.fields),...spec.display].sort(),[...declarations.filter(n=>!erased.includes(n)).map(n=>n.name.getText()),...adapterFields].sort(),name);
   }
   assert.deepEqual(names.sort(),Object.keys(phaseStateFields).sort());
+});
+
+test('deferred hatch display callbacks stay absent from ordinary phases and cannot be checkpointed',()=>{
+ const c=initialDecision(),egg=new eggs.Egg(123,0,0,0);c.eggState={players:[[egg],[]]};
+ const ordinary=new phaseConstructors.EggHatchPhase({},egg);
+ assert.equal(Object.hasOwn(ordinary,'presentation'),false);assert.equal(Object.hasOwn(ordinary,'presentationEnded'),false);
+ const saved=phaseCodec.capture(ordinary,c,0);assert.deepEqual(Object.keys(saved.fields),['egg']);
+ const display=new phaseConstructors.EggHatchPhase({},egg,{onComplete(){},isCurrent:()=>true});
+ assert.throws(()=>phaseCodec.capture(display,c,0),/INVALID_PHASE_FIELD/);
 });
 test('every concrete original rule Phase restores original prototype without constructors, RNG or callbacks',()=>{
   const c=initialDecision();let count=0;

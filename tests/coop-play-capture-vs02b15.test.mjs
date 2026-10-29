@@ -82,13 +82,18 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry
       await consumer(message); peerLatest = message;
     }).catch(error => errors.push(error));
   });
+  // The active original ModifierSelect page can refresh callbacks in place.
+  // Model its display port too, rather than forcing every refresh into setMode.
+  const modifierHandler={active:false,clear(){this.active=false;},show(args){this.active=true;modes.push([api.Mode.MODIFIER_SELECT,...args]);return true;}};
   const ui = { mode: api.Mode.MESSAGE, modeChain:[], playSelect() {}, playError() { errors.push(Error('UI_ERROR')); },
-    getHandler:()=>({clear(){}}),
+    getMode(){return this.mode;},
+    getHandler:(mode)=>mode===api.Mode.MODIFIER_SELECT?modifierHandler:({clear(){}}),
     async setOverlayMode(mode,...args){this.modeChain.push(this.mode);this.mode=mode;modes.push([mode,...args]);},
     async revertMode(){this.mode=this.modeChain.pop();return true;},
     async setMode(mode, ...args) {
       if (ball.active) ball.clear();
       this.mode = mode; modes.push([mode, ...args]);
+      modifierHandler.active=mode===api.Mode.MODIFIER_SELECT;
       if (mode === api.Mode.BALL) ball.show(args);
     } };
   const scene = { ui, getCurrentPhase: () => phase, getStandbyPhase: () => phase,
@@ -145,9 +150,10 @@ async function openUiRoom(seat, t, lobbyOnly = false, prepared = null, homeEntry
     // Original Home callbacks and original GameData read, with display ports only.
     ui.clearText = () => {};
     await home.showHome(); modes.at(-1)[1].options.find(option=>option.label==='个人资料').handler(); await home.transitions;
-    modes.at(-1)[1].options.find(option=>option.label==='我的蛋券').handler();
+    modes.at(-1)[1].options.find(option=>option.label==='蛋扭蛋机').handler();
     await until(() => ui.mode === api.Mode.EGG_GACHA, 'home personal vouchers');
     assert.equal(scene.gameData.voucherCounts[0], 4);
+    assert.equal(modes.at(-1)[1].readOnly,true,'legacy collection without a selected profile stays read-only');
     modes.at(-1)[1].onCancel();
     await until(()=>modes.at(-1)?.[1]?.options?.some(option=>option.label==='联机冒险'),'home after personal view');
     assert.equal(await api.readLocalSave('data'), bytes); assert.equal(scene.gameData, own);
@@ -292,16 +298,20 @@ for (const seat of [0,1]) test(`VS22 seat ${seat}: shared stock preserves origin
   const itemIndex=row.shop.findIndex(o=>o.type.catalogId==='ETHER');assert.ok(itemIndex>=0);
   assert.ok(phase.model.applied.personal.party.some(e=>e.pokemon.getMoveset().some(move=>move.ppUsed>0)));
   menu[3](row.shop.length>6?3:2,itemIndex);
-  await until(()=>ui.mode===api.Mode.PARTY,'own original item target');
+  await until(()=>ui.mode===api.Mode.PARTY&&phase.inputReady&&!phase.actionId
+    &&phase.latest.personal.decision.players.selection?.optionId===row.shop[itemIndex].id,'owned reserved item target');
+  const reservedRevision=phase.latest.revision;
   const party=phase.scene.party,choose=modes.at(-1)[3];
   await until(()=>env.peerSnapshot().revision===phase.latest.revision,'peer initial stock');
   const peerOption=env.peerSnapshot().personal.decision.players.rewards.find(o=>o.type.catalogId==='POKEBALL');assert.ok(peerOption);
   env.submitPeer({kind:'preparation',operation:'reward',optionId:peerOption.id,pokemonId:null,moveIndex:null,fusionId:null});
-  await until(()=>phase.inputReady&&phase.latest.revision>initial.revision,'peer claims shared free stock');
+  await until(()=>phase.inputReady&&phase.latest.revision>reservedRevision
+    &&phase.latest.personal.decision.sharedMarket.rewardClaims.some(c=>c.optionId===peerOption.id),'peer claims shared free stock');
   assert.equal(ui.mode,api.Mode.PARTY);assert.equal(phase.scene.party,party);
   assert.deepEqual(phase.presentation.field,field);assert.deepEqual(visual.counts,allocations);
   await choose(-1,api.PartyOption.APPLY);
-  await until(()=>ui.mode===api.Mode.MODIFIER_SELECT,'return from retained target');
+  await until(()=>ui.mode===api.Mode.MODIFIER_SELECT&&phase.inputReady&&!phase.actionId
+    &&phase.latest.personal.decision.players.selection===null,'confirmed release and return from retained target');
   assert.equal(modes.at(-1)[5].allowReroll,false);
   let writes=0;const save=phase.storage.saveAction.bind(phase.storage);
   phase.storage={...phase.storage,saveAction:(...args)=>{writes++;return save(...args);}};

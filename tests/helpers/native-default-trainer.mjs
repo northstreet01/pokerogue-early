@@ -5,11 +5,11 @@ import {progressNatural,owned} from './native-natural-learning.mjs';
 
 // Fresh default collection from original GameData initialization, never a save
 // import or a fabricated wave/EXP/HP checkpoint. No permanent writes are made.
-export async function defaultTrainerRoute({seed='learning-natural-2'}={}) {
+export async function defaultTrainerRoute({seed='learning-natural-2',parties=[[909,7],[906,7]]}={}) {
   const api=createRequire(import.meta.url)('../../build/coop-runtime/original-runtime.cjs');
   const identities=[{trainerId:1,secretId:2},{trainerId:3,secretId:4}];
   const config={seed,identity:identities[0]},profiles=[];
-  for(const [seat,species] of [[0,[909,7]],[1,[906,7]]]){
+  for(const [seat,species] of parties.entries()){
     const runtime=api.createOriginalRuntime(seed,identities[seat]);
     const data=Object.assign(Object.create(api.GameData.prototype),{scene:runtime.scene,...identities[seat],eggs:[],starterEggMoveData:{}});
     api.withStarterRandomContext(runtime.context,()=>data.initDexData());

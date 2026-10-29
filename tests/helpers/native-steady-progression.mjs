@@ -59,11 +59,11 @@ export function steadyInput(api,c){
  return inputs;
 }
 
-export async function steadyRoute({seed='learning-natural-2',untilWave=26,onStep=()=>{},initialSaved}={}){
+export async function steadyRoute({seed='learning-natural-2',untilWave=26,onStep=()=>{},initialSaved,parties}={}){
  const api=createRequire(import.meta.url)('../../build/coop-runtime/original-runtime.cjs');api.describeOriginalCatalogs();
  let saved=initialSaved;
  if(!saved){
-  const initial=await defaultTrainerRoute({seed});await initial.h.close();
+  const initial=await defaultTrainerRoute({seed,parties});await initial.h.close();
   const provisioning={seed,identities:initial.profiles.map(p=>p.trainer),sharedPreparation:true};
   saved={formatVersion:3,runId:'steady-'+seed,stage:'battle',provisioning,lobby:null,nativeCheckpoint:initial.initial,intents:[]};
  }

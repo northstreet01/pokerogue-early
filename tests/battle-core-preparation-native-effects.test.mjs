@@ -40,6 +40,9 @@ test('real Worker can buy Revive then Potion for the same fainted Pokemon', asyn
     pokemon.hp = 0;
     pokemon.status = new api.Status(api.StatusEffect.FAINT);
     target.pokemon = api.capturePokemonState(pokemon);
+    // Model the original Faint boundary too: a manually fainted front member
+    // must leave the field before a preparation item can revive the bench.
+    c.roster.field[0] = null; c.battle.turnCommands[0] = null;
     let checkpoint = c;
     for (const catalogId of ['REVIVE', 'POTION']) {
       const option = checkpoint.decision.players[0].shop.find(option => option.type.catalogId === catalogId);
@@ -106,7 +109,7 @@ test('production reward validation rejects unsupported rewards and foreign targe
   try {
     const p = c.decision.players[0];
     const unsupported = structuredClone(p.rewards[0]);
-    unsupported.type = api.captureModifierTypeState(api.modifierTypes.EXP_BALANCE().withIdFromFunc(api.modifierTypes.EXP_BALANCE));
+    unsupported.type = api.captureModifierTypeState(api.modifierTypes.IV_SCANNER().withIdFromFunc(api.modifierTypes.IV_SCANNER));
     const unsupportedCheckpoint = structuredClone(c); unsupportedCheckpoint.decision.players[0].rewards[0] = unsupported;
     await assert.rejects(h.request('native-validate-preparation', { checkpoint: unsupportedCheckpoint, seat: 0,
       action: { kind: 'preparation', operation: 'reward', optionId: unsupported.id,
@@ -169,6 +172,7 @@ test(`native original consumable ${id} seat ${seat} changes only the owner and s
     pokemon.status = new api.Status(id.includes('REVIVE') ? api.StatusEffect.FAINT : api.StatusEffect.POISON);
     pokemon.getMoveset().forEach(move => { move.ppUsed = 3; move.ppUp = 0; });
     target.pokemon = api.capturePokemonState(pokemon);
+    if(id.includes('REVIVE')){c.roster.field[seat]=null;c.battle.turnCommands[seat]=null;}
     const type = api.modifierTypes[id](); type.id = id;
     const option = c.decision.players[seat].rewards[0]; option.type = api.captureModifierTypeState(type);
     const noTarget = ['POKEBALL', 'NUGGET'].includes(id), moveTarget = ['ETHER', 'MAX_ETHER', 'PP_UP', 'PP_MAX'].includes(id);

@@ -73,6 +73,27 @@ test('free shared reward is claimed once and auto finishes only its recipient',a
  assert.equal(projected.personal.decision.players.rewardResolved,false);
 });
 
+test('targeted item reservation survives restore, blocks peer and reroll, cancels without payment, then applies once',async()=>{
+ let c=await open();const option=c.decision.players[0].shop.find(o=>o.type.catalogId==='POTION');assert.ok(option);
+ const buyer=[0,1].find(seat=>member(c,seat).hp>0&&member(c,seat).hp<member(c,seat).stats[0]);assert.notEqual(buyer,undefined);
+ const reserve={kind:'preparation',operation:'reserve-item',optionId:option.id},money=c.players.map(p=>p.money);
+ c=(await act(c,buyer,reserve)).checkpoint;
+ assert.deepEqual(c.players.map(p=>p.money),money);
+ c=JSON.parse(JSON.stringify(c));
+ const projected=await route.h.request('native-project',{checkpoint:c,seat:1-buyer});
+ assert.deepEqual(projected.personal.decision.sharedMarket.reservations,[{optionId:option.id,seat:buyer}]);
+ assert.equal(projected.shared.activities[buyer],'item-target');
+ await assert.rejects(()=>act(c,1-buyer,reserve),/SHARED_ITEM_UNAVAILABLE/);
+ await assert.rejects(()=>act(c,1-buyer,{kind:'preparation',operation:'reroll'}),/SHARED_REWARD_POOL_LOCKED/);
+ c=(await act(c,buyer,{kind:'preparation',operation:'cancel-selection'})).checkpoint;
+ assert.equal(c.decision.players[buyer].selection,null);assert.deepEqual(c.players.map(p=>p.money),money);
+ c=(await act(c,buyer,reserve)).checkpoint;
+ c=(await act(c,buyer,{kind:'preparation',operation:'buy',optionId:option.id,pokemonId:member(c,buyer).id,moveIndex:null,fusionId:null})).checkpoint;
+ assert.equal(c.decision.players[buyer].selection,null);
+ assert.equal(c.players[buyer].money,money[buyer]-option.cost);
+ assert.deepEqual(c.decision.shared.shopClaims,[{optionId:option.id,seat:buyer}]);
+});
+
 
 test('remote both players use separate shared candies and retain independent original growth through restore',async()=>{
  let c=await open();const api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');

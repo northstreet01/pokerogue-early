@@ -24,12 +24,13 @@ export const coopFieldPosition = (shared: any, slot: number): FieldPosition =>
   slot === 2 && shared.battleSpec === BattleSpec.FINAL_BOSS && shared.field[3] === null
     ? FieldPosition.CENTER : slot % 2 ? FieldPosition.RIGHT : FieldPosition.LEFT;
 
-export function captureResultText(event: any): string {
+export function captureResultText(event: any, name=i18next.t('coop:unnamedTrainer')): string {
   const ball = getPokeballName(event.pokeballType);
-  if (event.outcome === 'caught') return i18next.t('coop:captureCaught',{ball});
-  if (event.outcome === 'failed') return i18next.t('coop:captureFailed',{ball});
-  if (event.outcome === 'cancelled') return i18next.t('coop:captureCancelled');
-  return i18next.t('coop:captureUnknown');
+  const owner=Number.isInteger(event.seat)?i18next.t('coop:captureOwner',{name}):'';
+  if (event.outcome === 'caught') return owner+i18next.t('coop:captureCaught',{ball});
+  if (event.outcome === 'failed') return owner+i18next.t('coop:captureFailed',{ball});
+  if (event.outcome === 'cancelled') return owner+i18next.t('coop:captureCancelled');
+  return owner+i18next.t('coop:captureUnknown');
 }
 
 const within = async (task: Promise<unknown>, ms: number, signal: AbortSignal) => {
@@ -91,7 +92,7 @@ export class CoopBattlePresentation {
   private looks = new Map<number, string>();
   private audio: CoopBattleAudio;
   private static readonly EVENT_STORAGE = 'coop-presentation-events-v1';
-  constructor(private scene: BattleScene) {
+  constructor(private scene: BattleScene,private playerName:(seat:number)=>string=()=>i18next.t('coop:unnamedTrainer')) {
     this.audio = new CoopBattleAudio(scene);
     try {
       const saved = globalThis.sessionStorage?.getItem(CoopBattlePresentation.EVENT_STORAGE);
@@ -143,7 +144,10 @@ export class CoopBattlePresentation {
     try {
       for (const event of ordered) {
         if (signal.aborted || context.isCurrent?.() === false) return;
-        if (Date.now() - started > budget) throw new Error('PRESENTATION_TIMEOUT');
+        if (Date.now() - started > budget) {
+          console.warn('Co-op replay budget exhausted; reconciling committed frame', {revision:context.revision});
+          break;
+        }
         if (!event || typeof event !== 'object') continue;
         const key = event.eventId ?? `${context.revision ?? 'r'}:${event.eventIndex ?? '?'}:${event.kind}`;
         if (this.playedEvents.has(key)) continue;
@@ -175,8 +179,15 @@ export class CoopBattlePresentation {
           else if (event.kind === 'level-stats') await this.playLevelStats(event, signal);
           else if (event.kind === 'evolution-display') await this.playEvolution(event, signal);
           else if (event.kind === 'form-change') await this.playFormChange(event, signal);
-          else if (event.kind === 'capture-result') await this.playMessage({ text: captureResultText(event) }, signal);
-        } catch (error) { if (signal.aborted) return; throw error; }
+          else if (event.kind === 'capture-result') await this.playMessage({ text: captureResultText(event,this.playerName(event.seat)) }, signal);
+        } catch (error) {
+          if (signal.aborted) return;
+          if ((error as Error)?.message !== 'PRESENTATION_TIMEOUT') throw error;
+          // Each bounded effect cancels its own animation before rejecting.
+          // A missed display callback must not replay the same turn forever or
+          // obscure a later learning/target prompt. Rules were committed first.
+          console.warn('Co-op display effect timed out', {revision:context.revision,kind:event.kind,phase:event.phase});
+        }
         if (signal.aborted) return;
         this.playedEvents.add(key);
         this.playedEvents = new Set([...this.playedEvents].slice(-500));
@@ -198,7 +209,7 @@ export class CoopBattlePresentation {
   }
 
   private async playPhase(event: any, signal: AbortSignal) {
-    if (event.phase === 'NextEncounterPhase' || event.phase === 'NewBiomeEncounterPhase') {
+    if (event.phase === 'EncounterPhase' || event.phase === 'NextEncounterPhase' || event.phase === 'NewBiomeEncounterPhase') {
       const batch = this.pending;
       if (!batch || batch.encounterShown) return;
       batch.encounterShown = true;
@@ -274,7 +285,12 @@ export class CoopBattlePresentation {
         if (Object.prototype.hasOwnProperty.call(target, 'getMaxHp')) target.getMaxHp = () => event.maxHp;
         else target.stats[0] = event.maxHp;
       }
-      await within(Promise.resolve(target.updateInfo?.(false)), 5500, signal);
+      try { await within(Promise.resolve(target.updateInfo?.(false)), 5500, signal); }
+      catch(error){
+        const info=(target as any).battleInfo;
+        for(const node of [info,info?.hpBar,info?.expBar].filter(Boolean))this.scene.tweens.killTweensOf(node);
+        throw error;
+      }
     }
   }
 
@@ -512,10 +528,17 @@ export class CoopBattlePresentation {
     if (!info) return;
     // Original double-battle minis deliberately hide numeric HP and EXP. Each
     // co-op client owns one full panel; the peer keeps the public mini panel.
-    // Stack by local ownership, not seat number, so seat 2 gets the same layout.
+    // Retain the original right-hand double-battle stack and field positions.
+    // The local panel uses single-battle numbers/EXP; the peer uses the native
+    // mini texture. Fit the larger pair above the original message box.
     info.setMini(!own);
     info.setOffset(false);
-    info.setY(own ? -72 : -110);
+    const width=(this.scene.game?.canvas?.width??1920)/6;
+    info.x=width-10;
+    info.setScale?.(0.8);
+    info.setY(own?-65:-90);
+    this.scene.fieldUI?.bringToTop?.(info);
+    this.scene.fieldUI?.setDepth?.(1.5); // Above combat sprites, below original menus (depth 2).
   }
 
   private paint(shared: any) {
@@ -559,16 +582,23 @@ export class CoopBattlePresentation {
     if (batch.preserveFieldBinding) this.field = batch.field;
     else this.attachField(batch.field, batch.snapshot.shared);
     if (batch.sceneChanged) this.paint(batch.snapshot.shared);
-    if (!batch.replay || !(batch.snapshot.events ?? []).some((event: any) => event.kind === 'bgm')) this.audio.apply(batch.snapshot);
+    // Intro sprites and temporary music are event-scoped. Always reconcile to
+    // the committed battle after replay, including a shortened replay.
+    this.trainerSprite?.setVisible(false);this.scene.trainer?.setVisible(false);
+    this.scene.field?.setDepth?.(0);
+    this.audio.apply(batch.snapshot);
     this.lastSnapshot = batch.snapshot; this.pending = null;
   }
 
-  async apply(snapshot: any, applied: any, options: { replay?: boolean; preserveFieldBinding?: boolean } = {}) {
+  async apply(snapshot: any, applied: any, options: { replay?: boolean; entrance?:boolean; preserveFieldBinding?: boolean } = {}) {
     this.cancel(); this.lifetime = new AbortController();
     const signal = this.lifetime.signal, shared = snapshot.shared;
     const continuous = !!this.lastSnapshot && this.lastSnapshot.runId === snapshot.runId
       && this.lastSnapshot.connectionEpoch === snapshot.connectionEpoch;
-    const replay = !!options.replay && continuous;
+    // A confirmed lobby start has no prior battle frame. Keep its original
+    // entrance events alive; reconnecting directly to a battle still restores
+    // the final frame without replaying old attacks.
+    const replay = !!options.replay && (continuous || !!options.entrance);
     const loading = !continuous ? beginLoading('正在加载战斗场景，等待双方就绪', this.scene.load) : null;
     const entries = new Map<number, any>();
     const batch = { snapshot, applied, entries, field: [] as (Pokemon | null)[], replay, preserveFieldBinding: !!options.preserveFieldBinding };

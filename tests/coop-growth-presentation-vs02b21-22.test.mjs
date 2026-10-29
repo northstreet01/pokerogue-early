@@ -85,6 +85,17 @@ test('canceling the actual original UI transition fences a late evolution scene 
  assert.equal(ui.mode,api.Mode.MESSAGE);assert.deepEqual(shown,[]);
 });
 
+test('instant experience reconciliation jumps directly to the committed level without timers or sounds',async()=>{
+ const runtime=api.createOriginalRuntime('instant-exp',{trainerId:1,secretId:2}),pokemon=api.constructOriginalPokemon(runtime,1,25);
+ let level,ratio;
+ const info=Object.assign(Object.create(api.BattleInfo.prototype),{lastLevel:1,scene:{getMaxExpLevel:()=>100,
+   tweens:{add(){assert.fail('instant EXP must not schedule a tween');}},time:{delayedCall(){assert.fail('instant EXP must not wait between levels');}}},
+   expBar:{setScale(value){ratio=value;}},setLevel(value){level=value;}});
+ await info.updatePokemonExp(pokemon,true);
+ assert.equal(level,25);assert.equal(info.lastExp,pokemon.exp);assert.equal(info.lastLevelExp,pokemon.levelExp);
+ assert.ok(ratio>=0&&ratio<=1);
+});
+
 test('canceling the level panel stops its fanfare and cannot resume music from a later screen',async()=>{
  const callbacks=[],controller=new AbortController();let stopped=0,resumed=0,visible=true;
  const sound={totalDuration:2,stop(){stopped++;}},handler={promptLevelUpStatsValues:()=>new Promise(()=>{}),levelUpStatsContainer:{setVisible:v=>visible=v}};

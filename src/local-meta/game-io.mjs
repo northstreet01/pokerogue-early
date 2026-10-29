@@ -7,6 +7,8 @@ export async function openGameProfileIO(repository, profileId, {mode='solo',read
     check(profile.soloRuns.every(r=>r.ownership==='confirmed'),'LOCAL_SOLO_OWNERSHIP_REQUIRED');
     // Do not let the original solo EggLapse consume a cooperative reserved egg.
     check(profile.deferredHatches.length===0,'LOCAL_EGGS_RESERVED');
+    check(!profile.hatchResults?.length,'LOCAL_HATCH_RESULTS_PENDING');
+    check(!profile.eggRun?.eggs.length,'LOCAL_EGGS_RESERVED');
   }
   const lease=readOnly?null:await repository.acquire(profileId,owner);
   let timer;
@@ -66,7 +68,7 @@ export async function openGameProfileIO(repository, profileId, {mode='solo',read
       }
       current();
       if(!pending.length)return json(profile.originalSystem);
-      const proposed=await apply(json(profile.originalSystem),pending.map(item=>item.grant));
+      const proposed=await apply(json(profile.originalSystem),pending.map(item=>item.grant),json(profile));
       current();
       check(proposed && Array.isArray(proposed.kinds) && proposed.kinds.length===pending.length
         && proposed.kinds.every(kind=>['seen','caught','ivs','evolution','voucher','completion'].includes(kind)),
@@ -74,12 +76,22 @@ export async function openGameProfileIO(repository, profileId, {mode='solo',read
       const nextSystem=system(proposed.system);
       // This phase handles permanent results only. Egg progress and hatching
       // have separate ownership/terminal rules and cannot be overwritten here.
-      check(JSON.stringify(nextSystem.eggs)===JSON.stringify(profile.originalSystem.eggs),'COOP_EGG_INVENTORY_CHANGED');
+      const eggFacts=pending.some(item=>item.grant.payload.version===2&&item.grant.payload.facts?.some(f=>['egg-progress','egg-terminal','session-start'].includes(f.kind)));
+      if(!eggFacts)check(JSON.stringify(nextSystem.eggs)===JSON.stringify(profile.originalSystem.eggs),'COOP_EGG_INVENTORY_CHANGED');
       let next;
       try {
         next=await repository.save(profileId,profile.revision,lease,p=>{
           current();
           p.originalSystem=nextSystem;
+          if(eggFacts){check(Array.isArray(proposed.deferredHatches)&&proposed.eggRun!==undefined,'COOP_EGG_RESERVATIONS_REQUIRED');
+            p.schemaVersion=2;p.hatchResults??=[];p.eggRun=proposed.eggRun;
+            p.deferredHatches=proposed.deferredHatches.map(h=>{
+              if(h.state!=='released'||p.grantLedger.some(g=>g.id===h.terminal.receiptId))return h;
+              const receipt=pending.find(item=>item.grant.id===h.terminal.receiptId
+                &&item.grant.payload.facts?.some(f=>f.kind==='egg-terminal'));
+              check(receipt,'COOP_EGG_TERMINAL_RECEIPT_REQUIRED');
+              return {...h,terminal:{...h.terminal,receiptId:receipt.key}};
+            });}
           pending.forEach((item,index)=>p.grantLedger.push({id:item.key,sourceRunId:binding.runId,
             ownerProfileId:profileId,kind:proposed.kinds[index],payloadHash:item.payloadHash,revision:p.revision+1}));
           return p;
@@ -92,12 +104,39 @@ export async function openGameProfileIO(repository, profileId, {mode='solo',read
   return Object.freeze({profileId,mode,
     get displayName(){return profile.displayName;},get profile(){return json(profile);},
     applyCoopGrants,
+    // Whole System + egg receipt are one lease/CAS transaction. Retrying a
+    // failed write uses the same staged result; no RNG runs inside storage.
+    async commitEggOperation(operationId,expected,nextSystem,{deferredHatches,hatchResults,kind='voucher'}={}) {
+      check(id(operationId)&&['voucher','hatch'].includes(kind),'INVALID_EGG_OPERATION');
+      const key='egg:'+operationId;
+      const payloadHash=await digest({expected:system(expected),nextSystem:system(nextSystem),
+        deferredHatches:deferredHatches??null,hatchResults:hatchResults??null,kind});
+      return enqueue(p=>{
+        const previous=p.grantLedger.find(g=>g.id===key);
+        if(previous){check(previous.payloadHash===payloadHash,'LOCAL_EGG_OPERATION_CONFLICT');return p;}
+        check(JSON.stringify(p.originalSystem)===JSON.stringify(system(expected)),'LOCAL_REVISION_CONFLICT');
+        p.originalSystem=system(nextSystem);
+        if(deferredHatches)p.deferredHatches=json(deferredHatches);
+        if(hatchResults){p.schemaVersion=2;p.eggRun??=null;p.hatchResults=json(hatchResults);}
+        // The operation ID belongs to this immutable local writer, not a room.
+        p.grantLedger.push({id:key,sourceRunId:operationId,ownerProfileId:profileId,kind,
+          payloadHash,revision:p.revision+1});
+        return p;
+      }).then(next=>JSON.stringify(next.originalSystem));
+    },
+    acknowledgeHatch(resultId){return enqueue(p=>{check(p.schemaVersion===2,'LOCAL_VERSION_MISMATCH');
+      p.hatchResults=p.hatchResults.filter(r=>r.id!==resultId);return p;});},
     async read(key){assertAlive();if(key==='data')return JSON.stringify(profile.originalSystem);
       const m=/^sessionData([12])?$/.exec(key);check(m,'UNSUPPORTED_PROFILE_KEY');
       const run=profile.soloRuns.find(r=>r.legacySlot===Number(m[1]??0));return run?JSON.stringify(run.originalSession):null;},
     writeSystem(value,expected) {
       return enqueue(p=>{if(expected!==undefined&&expected!==null)check(JSON.stringify(p.originalSystem)===JSON.stringify(json(JSON.parse(expected))),'LOCAL_REVISION_CONFLICT');
-        p.originalSystem=system(value);
+        const next=system(value);
+        for(const reserved of [...(p.eggRun?.eggs??[]),...p.deferredHatches.map(h=>({id:h.eggId,timestamp:h.eggTimestamp}))]){
+          const find=eggs=>eggs.find(e=>e.id===reserved.id&&e.timestamp===reserved.timestamp);
+          check(JSON.stringify(find(p.originalSystem.eggs))===JSON.stringify(find(next.eggs)),'LOCAL_EGGS_RESERVED');
+        }
+        p.originalSystem=next;
         if(clearSlot!==null)p.soloRuns=p.soloRuns.filter(r=>r.legacySlot!==clearSlot);
         return p;
       }).then(next=>{clearSlot=null;return JSON.stringify(next.originalSystem);});

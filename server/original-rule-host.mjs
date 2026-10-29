@@ -4,10 +4,10 @@ const failure = code => Object.assign(new Error(code), { code });
 
 /** One independent original module graph per room. No test helpers, browser
  * globals, saves or renderer are loaded in the HTTP/WebSocket process. */
-export async function createOriginalRuleHost({ seed, identity, randomState, timeoutMs = 15000 }) {
+export async function createOriginalRuleHost({ seed, identity, randomState, deferEggs = false, timeoutMs = 15000 }) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) throw failure('INVALID_RUNTIME_TIMEOUT');
   const worker = new Worker(new URL('./original-rule-worker.mjs', import.meta.url), {
-    workerData: { seed, identity, randomState }, execArgv: [], stdout: true, stderr: true
+    workerData: { seed, identity, randomState, deferEggs }, execArgv: [], stdout: true, stderr: true
   });
   // Original constructors currently log moves / shiny rolls. Keep them out of
   // server output (and never forward profile data to a remote client).

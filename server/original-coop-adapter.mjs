@@ -11,7 +11,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
 // The desktop host, local development server and standalone server share one
 // production configuration. Player identity/team arrive through verified profiles.
 export function createPlayerHostAdapter({seedFactory=()=>randomUUID(),hostFactory}={}) {
-  return createOriginalCoopAdapter({hostFactory,seedFactory,fixture:{profileLobby:true,sharedPreparation:true,roomSharing:true,permanentResults:true,
+  return createOriginalCoopAdapter({hostFactory,seedFactory,fixture:{profileLobby:true,sharedPreparation:true,roomSharing:true,permanentResults:true,eggLifecycle:1,
     identities:[{trainerId:0,secretId:0},{trainerId:0,secretId:0}]}});
 }
 
@@ -55,7 +55,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
   const failed = new Set();
 
   async function createRoom(runId, provisioning) {
-    const host = await hostFactory({ seed: provisioning.seed, identity: provisioning.identities[0] });
+    const host = await hostFactory({ seed: provisioning.seed, identity: provisioning.identities[0], deferEggs:provisioning.eggLifecycle===1 });
     const room = { runId, host, provisioning: clone(provisioning), species: null, diagnosticCheckpoint: null };
     rooms.set(runId, room);
     try {
@@ -92,7 +92,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       if (room.host === originalHost) {
         if (!room.recovery) room.recovery = (async () => {
           await originalHost.close().catch(() => {});
-          const replacement = await hostFactory({ seed: room.provisioning.seed, identity: room.provisioning.identities[0] });
+          const replacement = await hostFactory({ seed: room.provisioning.seed, identity: room.provisioning.identities[0], deferEggs:room.provisioning.eggLifecycle===1 });
           try {
             check(!failed.has(room.runId) && rooms.get(room.runId) === room, 'ROOM_WORKER_FAILED');
             const catalogs = await replacement.request('catalogs');
@@ -124,7 +124,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       const intent = {
         // Preserve old capture source IDs while giving new per-seat facts an
         // explicit owner key. A capture's converted roster ID is not a reward ID.
-        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${['achievement-check','achievement-approved','voucher-pending','completion-pending','statistics'].includes(raw.kind)&&[0,1].includes(raw.owner)?raw.owner+':':''}${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`
+        id: `${checkpoint.battle?.waveIndex ?? 0}:${raw.kind}:${['achievement-check','achievement-approved','voucher-pending','completion-pending','statistics','egg-progress','voucher-item'].includes(raw.kind)&&[0,1].includes(raw.owner)?raw.owner+':':''}${raw.sourcePokemonId ?? pokemonId ?? raw.waveIndex ?? raw.id ?? raw.kind}`
           +(raw.factVersion===1&&['seen','evolution-pending','dex-ivs'].includes(raw.kind)?`:${raw.speciesId}:${raw.dexAttr??canonical(raw.ivs)}`:''),
         owner: [0, 1].includes(raw.owner) ? raw.owner : entry ? entry.owner : null,
         source: 'scene',
@@ -147,15 +147,22 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
     if(!previous.provisioning.permanentResults)return result;
     const old=new Set(previous.intents.map(f=>f.id));
     const fresh=result.context.intents.filter(f=>!old.has(f.id)&&f.payload.factVersion===1);
-    const allowed=new Set(['seen','dex-ivs','capture-pending','evolution-pending','achievement-approved','voucher-pending','completion-pending','statistics']);
+    const allowed=new Set(['seen','dex-ivs','capture-pending','evolution-pending','achievement-approved','voucher-pending','completion-pending','statistics','egg-progress','voucher-item']);
     result.grants=[0,1].flatMap(seat=>{
       const facts=fresh.filter(f=>allowed.has(f.type)&&(f.owner===seat||f.owner===null&&f.type==='seen'));
       if(!previous.checkpoint&&result.context.checkpoint)facts.push({id:'session-start',type:'session-start',
-        payload:{starters:clone(previous.lobby.players[seat].profile.starters)}});
-      if(!facts.length)return [];
+        payload:{starters:clone(previous.lobby.players[seat].profile.starters),
+          ...(previous.provisioning.eggLifecycle===1?{eggs:clone(previous.lobby.players[seat].profile.eggs)}:{})}});
+      if(!facts.length&&!(previous.provisioning.eggLifecycle===1&&result.context.checkpoint?.decision.kind==='ended'))return [];
       // Catalog IDs (e.g. a repeated boss voucher) may recur in another wave;
       // retain the normalized source as well as the original catalog ID.
-      const payload={version:1,facts:facts.map(f=>({...clone(f.payload),sourceId:f.id,kind:f.type}))};
+      if(previous.provisioning.eggLifecycle===1&&result.context.checkpoint?.decision.kind==='ended'&&previous.checkpoint?.decision.kind!=='ended'){
+        const decision=result.context.checkpoint.decision;
+        check(['victory','defeat'].includes(decision.reason),'INVALID_EGG_TERMINAL');
+        facts.push({id:'egg-terminal',type:'egg-terminal',payload:{owner:seat,result:decision.reason}});
+      }
+      if(!facts.length)return [];
+      const payload={version:previous.provisioning.eggLifecycle===1?2:1,facts:facts.map(f=>({...clone(f.payload),sourceId:f.id,kind:f.type}))};
       const id='results:'+createHash('sha256').update(canonical({runId:previous.runId,seat,payload})).digest('hex');
       return [{id,seat,payload}];
     });
@@ -303,7 +310,7 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       check(Array.isArray(fixtureIdentities) && fixtureIdentities.length === 2, 'INVALID_TRAINER_IDENTITY');
       const seed = fixture.profileLobby && typeof seedFactory === 'function' ? seedFactory() : fixture.seed;
       check(typeof seed === 'string' && seed.length > 0, 'INVALID_ROOM_SEED');
-      const provisioning = { seed, identities: clone(fixtureIdentities), ...(fixture.sharedPreparation ? {sharedPreparation:true} : {}),...(fixture.roomSharing?{roomSharing:true}:{}),...(fixture.permanentResults?{permanentResults:true}:{}) };
+      const provisioning = { seed, identities: clone(fixtureIdentities), ...(fixture.sharedPreparation ? {sharedPreparation:true} : {}),...(fixture.roomSharing?{roomSharing:true}:{}),...(fixture.permanentResults?{permanentResults:true}:{}),...(fixture.eggLifecycle===1?{eggLifecycle:1}:{}) };
       const room = await roomFor(runId, provisioning);
       if (fixture.profileLobby) {
         const context = contextFor(room, profileLobbyState(), null, []);
@@ -342,6 +349,8 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       throw Object.assign(new Error('UNSUPPORTED_DECISION'), { code: 'UNSUPPORTED_DECISION' });
     },
 
+    isImmediateAction(context,seat,action){return context.checkpoint?.decision.kind==='wait-actions'&&action?.kind==='form-toggle';},
+
     async validateAction(context, seat, action) {
       check(seat === 0 || seat === 1, 'INVALID_SEAT');
       const room = await roomFor(context.runId, context.provisioning, context.formatVersion === PROFILE_FORMAT);
@@ -354,6 +363,9 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       if (context.lobby) { await validateLobbyAction(room, action); return; }
       const decision = context.checkpoint.decision;
       if (decision.kind === 'wait-actions' || decision.kind === 'wait-target') {
+        if(decision.kind==='wait-actions'&&action?.kind==='form-toggle'){
+          await request(room,'native-validate-preparation',{checkpoint:context.checkpoint,seat,action:COPY(action)});return;
+        }
         check((decision.kind === 'wait-target' ? ['target'] : ['fight', 'switch', 'ball']).includes(action?.kind), 'INVALID_ACTION');
         await request(room, 'native-validate', { checkpoint: context.checkpoint, seat, action: COPY(action) });
         return;
@@ -441,7 +453,10 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
         intents = normalizeIntents(checkpoint, intents, result.intents);
         events.push(...(result.events ?? []).map(event => scopeEvent(event, checkpoint)));
       };
-      if (decision.kind === 'wait-actions' || decision.kind === 'wait-target') {
+      if(decision.kind==='wait-actions'&&Object.values(inputs??{}).some(action=>action?.kind==='form-toggle')){
+        const seats=Object.keys(inputs);check(seats.length===1,'INVALID_FORM_TOGGLE');
+        await apply('native-prepare-action',{checkpoint,seat:Number(seats[0]),action:COPY(inputs[seats[0]])});
+      }else if (decision.kind === 'wait-actions' || decision.kind === 'wait-target') {
         check(inputs && canonical(Object.keys(inputs).sort()) === canonical(decision.requiredSeats.map(String).sort()), 'INCOMPLETE_COMMAND_INPUTS');
         await apply('native-submit', { checkpoint, inputs: COPY(inputs) });
       } else if (decision.kind === 'preparation') {
@@ -482,7 +497,8 @@ export function createOriginalCoopAdapter({ fixture, hostFactory = createOrigina
       check(Object.keys(checkpoint).sort().join(',') === 'formatVersion,intents,lobby,nativeCheckpoint,provisioning,runId,stage', 'INVALID_CHECKPOINT');
       check([2, 3].includes(checkpoint.formatVersion) && typeof checkpoint.runId === 'string'
         && checkpoint.runId.length > 0, 'INVALID_CHECKPOINT');
-      check(checkpoint.provisioning && ['identities,seed','identities,seed,sharedPreparation','identities,roomSharing,seed','identities,roomSharing,seed,sharedPreparation','identities,permanentResults,roomSharing,seed,sharedPreparation'].includes(Object.keys(checkpoint.provisioning).sort().join(','))
+      check(checkpoint.provisioning && ['eggLifecycle,identities,permanentResults,roomSharing,seed,sharedPreparation','identities,seed','identities,seed,sharedPreparation','identities,roomSharing,seed','identities,roomSharing,seed,sharedPreparation','identities,permanentResults,roomSharing,seed,sharedPreparation'].includes(Object.keys(checkpoint.provisioning).sort().join(','))
+        && (!Object.hasOwn(checkpoint.provisioning,'eggLifecycle')||checkpoint.provisioning.eggLifecycle===1)
         && (!Object.hasOwn(checkpoint.provisioning,'permanentResults') || checkpoint.provisioning.permanentResults===true)
         && (!Object.hasOwn(checkpoint.provisioning,'roomSharing') || checkpoint.provisioning.roomSharing===true)
         && (!Object.hasOwn(checkpoint.provisioning,'sharedPreparation') || checkpoint.provisioning.sharedPreparation === true)

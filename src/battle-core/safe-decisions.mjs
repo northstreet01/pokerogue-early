@@ -1,6 +1,6 @@
 import { copy, canonical, requireContract as check } from './coop-contract.mjs';
 import {createLearnDecision,resolveLearnIntent} from './learn-command.mjs';
-import {validateSharedPreparation,validateSharedPreparationAction} from './shared-preparation.mjs';
+import {validateSharedPreparation,validateSharedPreparationAction,validatePreparationReservation} from './shared-preparation.mjs';
 
 const exact=(v,keys)=>check(v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===[...keys].sort().join(','),'INVALID_SAFE_DECISION');
 const uint=v=>Number.isSafeInteger(v)&&v>=0;
@@ -86,7 +86,12 @@ export function createSafeDecisionCodec({evolution,modifierType,hasBiome,hasMove
     else if(d.kind==='map') {exact(a,['kind','biome']);check(a.kind==='map'&&d.biomes.includes(a.biome),'INVALID_ACTION');}
     else if(d.kind==='preparation') {
       const p=d.players[seat];
+      if(a?.kind==='preparation'&&['reserve-item','cancel-selection'].includes(a.operation)){validatePreparationReservation(c,seat,a);return;}
       if(p.subdecision!==null){validateAction({...c,decision:p.subdecision},seat,a);return;}
+      if(a?.kind==='form-toggle'){
+        exact(a,['kind','pokemonId','item','active']);
+        check(p.selection===null&&owned(c,seat,a.pokemonId)&&uint(a.item)&&typeof a.active==='boolean','INVALID_FORM_TOGGLE');return;
+      }
       if(a?.kind==='preparation'&&a.operation==='unpause-evolution'){
         exact(a,['kind','operation','pokemonId']);
         check(p.selection===null&&owned(c,seat,a.pokemonId),'INVALID_PREPARATION_OWNER');return;

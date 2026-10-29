@@ -1,7 +1,7 @@
 import {deviceStorage} from '../platform/preferences.mjs';
 import BattleScene, { PokeballCounts, bypassLogin } from "../battle-scene";
 import i18next from '../i18n';
-import Pokemon, { EnemyPokemon, PlayerPokemon, restorePokemonState } from "../field/pokemon";
+import Pokemon, { EnemyPokemon, PlayerPokemon, restorePokemonState, capturePokemonState } from "../field/pokemon";
 import { pokemonPrevolutions } from "../data/pokemon-evolutions";
 import PokemonSpecies, { allSpecies, getPokemonSpecies, speciesStarters } from "../data/pokemon-species";
 import { Species } from "../data/enums/species";
@@ -17,7 +17,9 @@ import { trainerConfigs } from "../data/trainer-config";
 import { Setting, setSetting, settingDefaults } from "./settings";
 import { achvs } from "./achv";
 import EggData from "./egg-data";
-import { Egg } from "../data/egg";
+import { Egg, GachaType, drawGachaEggs } from "../data/egg";
+import { EggHatchPhase } from '../egg-hatch-phase';
+import {canonical} from '../battle-core/coop-contract.mjs';
 import { VoucherType, vouchers } from "./voucher";
 import { AES, enc } from "crypto-js";
 import { Mode } from "../ui/ui";
@@ -177,6 +179,104 @@ export class GameData {
   private scene: BattleScene;
   private localSystemSnapshot: string | null = null;
   private localSystemSaveQueue: Promise<void> = Promise.resolve();
+  private pendingEggOperation:any;
+  private eggOperationBusy=false;
+
+  private detachedSystem(system:any):{scene:any,data:GameData}{
+    const scene:any=Object.create(this.scene),data:GameData=Object.create(GameData.prototype);
+    Object.assign(data,this.parseSystemData(JSON.stringify(system)));
+    data.scene=scene;data.eggs=data.eggs.map((egg:any)=>egg.toEgg());scene.gameData=data;
+    scene.ui={showText:(_text,_delay,callback)=>callback?.(),achvBar:{showAchv(){}}};
+    scene.playSoundWithoutBgm=()=>{};
+    scene.unlockAchv=BattleScene.prototype.unlockAchv;
+    scene.validateVoucher=BattleScene.prototype.validateVoucher;
+    scene.validateAchv=BattleScene.prototype.validateAchv;
+    return {scene,data};
+  }
+
+  /** Stage original RNG once. Failed storage retries the same eggs, before any
+   * animation or live counters change. The profile lease excludes other writers. */
+  public async purchaseEggs(choice:number,gacha:GachaType):Promise<Egg[]>{
+    if(!this.profileIO||this.readonlyView||this.profileClosing||this.eggOperationBusy)throw new Error('LOCAL_EGG_WRITER_REQUIRED');
+    this.eggOperationBusy=true;
+    try{
+      await this.localSystemSaveQueue.catch(()=>{});
+      if(!this.pendingEggOperation){
+        const offers=[[0,1,1],[0,10,10],[1,1,5],[2,1,10],[3,1,25]];
+        const offer=offers[choice];
+        if(!offer||![0,1,2].includes(gacha))throw new Error('INVALID_GACHA_SELECTION');
+        const expected=await this.profileIO.read('data'),{data}=this.detachedSystem(JSON.parse(expected));
+        const [voucher,cost,count]=offer;
+        if(data.voucherCounts[voucher]<cost)throw new Error('GACHA_VOUCHERS_REQUIRED');
+        if(data.eggs.length+count>=100)throw new Error('GACHA_INVENTORY_FULL');
+        data.voucherCounts[voucher]-=cost;
+        const eggs=drawGachaEggs(data,gacha,count,Math.random);
+        this.pendingEggOperation={id:crypto.randomUUID(),type:'gacha',expected,next:data.captureSystemData(),eggs,choice,gacha};
+      }
+      const op=this.pendingEggOperation;
+      if(op.type!=='gacha'||op.choice!==choice||op.gacha!==gacha)throw new Error('GACHA_RETRY_PENDING');
+      await this.commitStagedEggOperation(op);
+      return op.eggs;
+    }finally{this.eggOperationBusy=false;}
+  }
+
+  private async commitStagedEggOperation(op:any):Promise<void>{
+    const write=this.profileIO.commitEggOperation(op.id,op.expected,op.next,op.options);
+    this.localSystemSaveQueue=write.then(()=>{});
+    void this.localSystemSaveQueue.catch(()=>{});
+    this.localSystemSnapshot=await write;
+    this.resultsGeneration++;
+    if(!await this.loadSystem({readOnly:true}))throw new Error('LOCAL_EGG_REFRESH_FAILED');
+    this.pendingEggOperation=null;
+  }
+
+  public get pendingHatchResults():any[]{return this.profileIO?.profile.hatchResults??[];}
+  public get hasReservedCoopEggs():boolean{const p=this.profileIO?.profile;return !!(p?.eggRun?.eggs.length||p?.deferredHatches.some(h=>h.state==='waiting-terminal'));}
+  public deferredEggState(eggId:number):string|null{return this.profileIO?.profile.deferredHatches.find(h=>h.eggId===eggId)?.state??null;}
+
+  /** Commit the fixed original result and rewards first. The retained v2
+   * presentation receipt is removed only after the original animation finishes. */
+  public async prepareDeferredHatch():Promise<any|null>{
+    if(!this.profileIO||this.profileClosing||this.eggOperationBusy)throw new Error('LOCAL_EGG_WRITER_REQUIRED');
+    this.eggOperationBusy=true;
+    try{
+      await this.localSystemSaveQueue.catch(()=>{});
+      if(this.pendingHatchResults.length)return this.pendingHatchResults[0];
+      if(!this.pendingEggOperation){
+        const profile=this.profileIO.profile,reservation=profile.deferredHatches.find(h=>h.state==='released');
+        if(!reservation)return null;
+        if(profile.schemaVersion!==2)throw new Error('LOCAL_LEGACY_EGGS_RECOVERY_REQUIRED');
+        const expected=await this.profileIO.read('data'),{scene,data}=this.detachedSystem(JSON.parse(expected));
+        // Staging must not attach sprites/HUD to the live scene. This is the
+        // original Pokemon constructor; init() belongs to playback after commit.
+        scene.addPlayerPokemon=(species,level,abilityIndex,formIndex,gender,shiny,ivs,nature)=>
+          new PlayerPokemon(scene,species,level,abilityIndex,formIndex,gender,shiny,ivs,nature,undefined);
+        const egg=data.eggs.find(e=>e.id===reservation.eggId&&e.timestamp===reservation.eggTimestamp);
+        if(!egg||egg.hatchWaves>0)throw new Error('DEFERRED_EGG_MISMATCH');
+        const phase=new EggHatchPhase(scene,egg),pokemon=phase.generatePokemon();
+        try{
+          if(pokemon.fusionSpecies)pokemon.clearFusionSpecies();
+          if(pokemon.species.mythical)scene.validateAchv(achvs.HATCH_MYTHICAL);
+          if(pokemon.species.legendary)scene.validateAchv(achvs.HATCH_LEGENDARY);
+          if(pokemon.isShiny())scene.validateAchv(achvs.HATCH_SHINY);
+          data.updateSpeciesDexIvs(pokemon.species.speciesId,pokemon.ivs);
+          await data.setPokemonCaught(pokemon,true,true);
+          const eggMoveIndex=phase.getEggMoveIndex();await data.setEggMoveUnlocked(pokemon.species,eggMoveIndex);
+          data.eggs=data.eggs.filter(e=>e!==egg);
+          const result={id:crypto.randomUUID(),egg:{...new EggData(egg)},pokemon:capturePokemonState(pokemon),eggMoveIndex};
+          this.pendingEggOperation={id:result.id,type:'hatch',expected,next:data.captureSystemData(),result,options:{kind:'hatch',
+            deferredHatches:profile.deferredHatches.filter(h=>h!==reservation),hatchResults:[result]}};
+        }finally{pokemon.destroy?.();}
+      }
+      const op=this.pendingEggOperation;if(op.type!=='hatch')throw new Error('GACHA_RETRY_PENDING');
+      await this.commitStagedEggOperation(op);return op.result;
+    }finally{this.eggOperationBusy=false;}
+  }
+
+  public async acknowledgeHatch(resultId:string):Promise<void>{
+    const write=this.profileIO.acknowledgeHatch(resultId);this.localSystemSaveQueue=write.then(()=>{});
+    void this.localSystemSaveQueue.catch(()=>{});await write;
+  }
   private profileIO: any = null;
   private profileClosing = false;
   private resultsGeneration = 0;
@@ -264,7 +364,7 @@ export class GameData {
     const current=binding.isCurrent;
     const work=this.localSystemSaveQueue.catch(()=>{}).then(async()=>{
       const system=await this.profileIO.applyCoopGrants(grants,{...binding,isCurrent:()=>!this.profileClosing&&current()},
-        (system,pending)=>this.reduceCoopResults(system,pending));
+        (system,pending,profile)=>this.reduceCoopResults(system,pending,profile,binding));
       this.resultsGeneration++;
       this.localSystemSnapshot=JSON.stringify(system);
       if(!await this.loadSystem({readOnly:true}))throw new Error('LOCAL_COOP_REFRESH_FAILED');
@@ -273,21 +373,15 @@ export class GameData {
     return work;
   }
 
-  private async reduceCoopResults(system: any, grants: any[]): Promise<any> {
-    const scene:any=Object.create(this.scene);
-    const data:GameData=Object.create(GameData.prototype);
-    Object.assign(data,this.parseSystemData(JSON.stringify(system)));
-    data.scene=scene;data.eggs=data.eggs.map((egg:any)=>egg.toEgg());
-    scene.gameData=data;
-    scene.ui={showText:(_text,_delay,callback)=>callback?.(),achvBar:{showAchv(){}}};
-    scene.playSoundWithoutBgm=()=>{};
-    scene.unlockAchv=BattleScene.prototype.unlockAchv;
-    scene.validateVoucher=BattleScene.prototype.validateVoucher;
-    scene.validateAchv=BattleScene.prototype.validateAchv;
+  private async reduceCoopResults(system: any, grants: any[], profile?:any, binding?:any): Promise<any> {
+    const deferredHatches=structuredClone(profile?.deferredHatches??[]);
+    let eggRun=structuredClone(profile?.eggRun??null);
+    let eggFacts=false;
+    const {scene,data}=this.detachedSystem(system);
     const {modifierTypes}=await import('../modifier/modifier-type');
     for(const grant of grants){
       const payload=grant.payload;
-      if(payload?.version!==1||!Array.isArray(payload.facts)||!payload.facts.length||payload.facts.length>1000)
+      if(![1,2].includes(payload?.version)||!Array.isArray(payload.facts)||!payload.facts.length||payload.facts.length>1000)
         throw new Error('UNSUPPORTED_COOP_RESULTS');
       const completions=payload.facts.filter(f=>f.kind==='completion-pending');
       for(const fact of payload.facts){
@@ -315,6 +409,10 @@ export class GameData {
             if(!scene.validateVoucher(vouchers[fact.id])&&fact.repeat===true)modifierTypes.VOUCHER().newModifier().apply([scene]);
             break;
           }
+          case 'voucher-item': {
+            if(payload.version!==2||!['VOUCHER','VOUCHER_PLUS','VOUCHER_PREMIUM'].includes(fact.catalogId))throw new Error('INVALID_VOUCHER_ITEM');
+            modifierTypes[fact.catalogId]().newModifier().apply([scene]);break;
+          }
           case 'completion-pending':
             if(fact.achievementId!=='CLASSIC_VICTORY'||fact.sessionsWon!==1||!Array.isArray(fact.unlockCandidates)
               ||!fact.unlockCandidates.every(v=>Object.prototype.hasOwnProperty.call(data.unlocks,v)))throw new Error('INVALID_COOP_COMPLETION');
@@ -323,6 +421,11 @@ export class GameData {
             for(const unlock of fact.unlockCandidates)data.unlocks[unlock]=true;
             break;
           case 'session-start':
+            if(payload.version===2){
+              if(!binding||!Array.isArray(fact.eggs)||canonical(fact.eggs)!==canonical(system.eggs)
+                ||eggRun?.eggs.length&&eggRun.sourceRunId!==binding.runId)throw new Error('COOP_EGG_INVENTORY_CONFLICT');
+              eggFacts=true;eggRun={sourceRunId:binding.runId,eggs:fact.eggs.map(e=>({id:e.id,timestamp:e.timestamp}))};
+            }
             data.gameStats.classicSessionsPlayed++;
             // Remember only preferences independently legal in this profile.
             // A room-borrowed form or egg move never becomes a permanent unlock.
@@ -333,6 +436,32 @@ export class GameData {
               const form=species.forms.length?species.forms[index]:species;
               if(form?.validateStarterMoveset(starter.moveset,data.starterEggMoveData[starter.speciesId]??0))
                 data.starterMoveData[starter.speciesId]=[...starter.moveset];
+            }break;
+          case 'egg-progress': {
+            if(payload.version!==2||!binding||!Array.isArray(fact.before)||!Array.isArray(fact.after)
+              ||fact.before.length!==fact.after.length)throw new Error('INVALID_EGG_PROGRESS');
+            const {originalOwnedEggStateCodec}=await import('../original-phase-checkpoints');
+            originalOwnedEggStateCodec.restore({players:[fact.before,fact.after]});
+            if(fact.before.length&&(eggRun?.sourceRunId!==binding.runId||canonical(eggRun.eggs)!==canonical(fact.before.map(e=>({id:e.id,timestamp:e.timestamp})))))throw new Error('COOP_EGG_INVENTORY_CONFLICT');
+            eggFacts=true;
+            for(let index=0;index<fact.before.length;index++){
+              const before=fact.before[index],after=fact.after[index];
+              if(canonical({...before,hatchWaves:before.hatchWaves>0?before.hatchWaves-1:before.hatchWaves})!==canonical(after))throw new Error('INVALID_EGG_PROGRESS');
+              const egg=data.eggs.find(e=>e.id===before.id&&e.timestamp===before.timestamp);
+              const reserved=deferredHatches.find(h=>h.eggId===before.id);
+              if(!egg||canonical({...new EggData(egg)})!==canonical(before)
+                ||reserved&&reserved.sourceRunId!==binding.runId)throw new Error('COOP_EGG_INVENTORY_CONFLICT');
+              egg.hatchWaves=after.hatchWaves;
+              if(egg.hatchWaves<=0&&!reserved)deferredHatches.push({sourceRunId:binding.runId,eggId:egg.id,
+                eggTimestamp:egg.timestamp,state:'waiting-terminal',terminal:null});
+            }break;
+          }
+          case 'egg-terminal':
+            if(payload.version!==2||!binding||!['victory','defeat'].includes(fact.result))throw new Error('INVALID_EGG_TERMINAL');
+            eggFacts=true;
+            if(eggRun?.sourceRunId===binding.runId)eggRun=null;
+            for(const hatch of deferredHatches)if(hatch.sourceRunId===binding.runId){
+              hatch.state='released';hatch.terminal={result:fact.result,receiptId:grant.id};
             }break;
           case 'statistics':
             for(const [key,value] of Object.entries(fact.values)){
@@ -345,7 +474,7 @@ export class GameData {
       }
     }
     // Preserve original serialization and untouched inventory/identity fields.
-    return {system:JSON.parse(data.captureSystemData()),kinds:grants.map(()=> 'completion')};
+    return {system:JSON.parse(data.captureSystemData()),kinds:grants.map(()=> 'completion'),...(eggFacts?{deferredHatches,eggRun}:{})};
   }
 
   /** Original system serialization, also used to create a genuinely new profile. */

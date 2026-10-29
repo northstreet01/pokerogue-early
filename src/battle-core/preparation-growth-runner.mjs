@@ -2,7 +2,9 @@ import {canonical,copy,requireContract as check} from './coop-contract.mjs';
 import {advanceQueuedRulePhase} from './rule-phase-runner.mjs';
 import {advanceProgressionChoice} from './progression-choice-runner.mjs';
 
-const types=['LevelUpPhase','LearnMovePhase','EvolutionPhase','EndEvolutionPhase'];
+// Original move learning can enqueue automatic form changes (e.g. Keldeo).
+// Keep them owned and inside the same protected growth queue, not a new choice.
+const types=['LevelUpPhase','LearnMovePhase','EvolutionPhase','EndEvolutionPhase','FormChangePhase','QuietFormChangePhase'];
 const prefix=seat=>`preparation-growth-${seat}-`;
 const nextId=id=>{const m=/^(.*?)(?:~(\d+))?$/.exec(id),n=Number(m[2]??0)+1;
   check(Number.isSafeInteger(n)&&`${m[1]}~${n}`.length<=128,'DECISION_SEQUENCE_EXHAUSTED');return `${m[1]}~${n}`;};
@@ -40,7 +42,14 @@ export async function advancePreparationGrowth(context,seat,action,codec,safe,dr
   }
   let steps=0;
   while(c.decision.kind==='continuing'){
-    const state=c.continuation,next=state.phaseQueuePrepend[0]??state.phaseQueue[0];
+    const state=c.continuation;
+    // LearnMove appends delayed form changes. Resolve this seat's growth
+    // before returning to its menu, without executing/reordering shared phases.
+    if(!state.phaseQueuePrepend.length&&sharedIds.has(state.phaseQueue[0]?.phaseId)){
+      const index=state.phaseQueue.findIndex(p=>!sharedIds.has(p.phaseId));
+      if(index>0)state.phaseQueue.unshift(state.phaseQueue.splice(index,1)[0]);
+    }
+    const next=state.phaseQueuePrepend[0]??state.phaseQueue[0];
     if(!next||sharedIds.has(next.phaseId))break;
     check(++steps<=1000,'PREPARATION_GROWTH_LIMIT');
     const wire=codec.capture(c),record=wire.continuation.phaseQueuePrepend[0]??wire.continuation.phaseQueue[0];

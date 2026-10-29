@@ -15,6 +15,14 @@ before(async()=>{
 });
 const fixture=()=>presentationFixture(api);
 
+test('confirmed first lobby start retains entrance batch, while a direct reconnect restores only its final frame',async()=>{
+ for(const entrance of [true,false]){
+  const f=fixture();await f.p.apply(f.snapshot,f.applied,{replay:true,entrance});
+  assert.equal(!!f.p.pending,entrance);
+  if(entrance){assert.equal(f.p.pending.replay,true);await f.p.playEvents([]);assert.equal(f.p.pending,null);}
+ }
+});
+
 test('one final Boss uses the original center position while both player fronts retain left/right positions',async()=>{
  const f=fixture(),positions=[],make=f.p.container.bind(f.p);
  f.p.container=(...args)=>{const p=make(...args);p.setFieldPosition=position=>positions.push([p.id,position]);return p;};

@@ -10,6 +10,7 @@ try {
   if (!existsSync(bundle)) throw new Error('ORIGINAL_RUNTIME_BUILD_REQUIRED');
   const api = createRequire(import.meta.url)(fileURLToPath(bundle));
   const runtime = api.createOriginalRuntime(workerData.seed, workerData.identity, workerData.randomState);
+  runtime.scene.gameData.deferCoopEggs = workerData.deferEggs === true;
   // Native phases are callable for bounded validation. This is not a mounted
   // gameplay adapter: formal IO/profile/projection/UI integration is pending.
   let chain = Promise.resolve();

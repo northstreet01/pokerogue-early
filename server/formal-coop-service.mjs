@@ -124,12 +124,16 @@ export async function attachFormalCoopServer(httpServer, { adapter = null, store
   async function advance(room) {
     if (blocked(room)) return;
     const ctx = await context(room), nextDecision = await decision(ctx);
+    // A verified configuration update (currently owned form items) changes no
+    // turn resources. Resolve it before collecting attacks, then invalidate old
+    // choices through the normal new-decision snapshot/ACK barrier.
+    const immediate=Object.entries(room.inputs).find(([seat,action])=>adapter.isImmediateAction?.(ctx,Number(seat),action)===true);
     if (nextDecision.collection!=='auto'&&(!nextDecision.requiredSeats.length || (nextDecision.collection === 'incremental'
-      ? !Object.keys(room.inputs).length : !nextDecision.requiredSeats.every(seat => Object.hasOwn(room.inputs, seat))))) return;
+      ? !Object.keys(room.inputs).length : !immediate&&!nextDecision.requiredSeats.every(seat => Object.hasOwn(room.inputs, seat))))) return;
     try {
       // Each accepted input is already durable. Runner only mutates a restored
       // candidate; failures never replace the committed context or consume its RNG.
-      const result = await adapter.advanceToDecision(ctx, copy(room.inputs));
+      const result = await adapter.advanceToDecision(ctx, copy(immediate?{[immediate[0]]:immediate[1]}:room.inputs));
       const next = copy(room), checkpoint = copy(await adapter.captureCheckpoint(result.context));
       check(!Object.hasOwn(checkpoint, 'runId') || checkpoint.runId === room.runId, 'RUN_MISMATCH');
       await adapter.validateCheckpoint(copy(checkpoint));

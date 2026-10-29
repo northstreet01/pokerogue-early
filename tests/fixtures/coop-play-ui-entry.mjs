@@ -64,3 +64,6 @@ export {originalSaveCodec} from '../../src/local-meta/original-save-codec';
 export {achvs} from '../../src/system/achv';
 export {vouchers} from '../../src/system/voucher';
 export { default as i18next } from '../../src/i18n';
+export {originalDecisionStateCodec,originalPhaseStateCodec} from '../../src/original-phase-checkpoints';
+export {EggLapsePhase,SelectModifierPhase} from '../../src/phases';
+export {Status,StatusEffect} from '../../src/data/status-effect';

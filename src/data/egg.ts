@@ -103,3 +103,53 @@ export function getLegendaryGachaSpeciesForTimestamp(scene: BattleScene, timesta
 
   return ret;
 }
+/** Original draw rules shared by solo and the transactional local-profile UI. */
+export function drawGachaEggs(data: any, gachaType: GachaType, pullCount: number, localRandom?:()=>number): Egg[] {
+  // Local-profile draws may run alongside rule verification; their randomness
+  // belongs to the personal machine, never the authoritative room stream.
+  const randInt=localRandom?(range:number,min=0)=>range===1?min:Math.floor(localRandom()*range)+min:Utils.randInt;
+  const eggs: Egg[] = [];
+  const tierValueOffset = gachaType === GachaType.LEGENDARY ? 1 : 0;
+  const tiers = new Array(pullCount).fill(null).map(() => {
+    const tierValue = randInt(256);
+    return tierValue >= 52 + tierValueOffset ? EggTier.COMMON : tierValue + tierValueOffset >= 8 ? EggTier.GREAT : tierValue >= 1 + tierValueOffset ? EggTier.ULTRA : EggTier.MASTER;
+  });
+  if (pullCount >= 25 && !tiers.filter(t => t >= EggTier.ULTRA).length)
+    tiers[randInt(tiers.length)] = EggTier.ULTRA;
+  else if (pullCount >= 10 && !tiers.filter(t => t >= EggTier.GREAT).length)
+    tiers[randInt(tiers.length)] = EggTier.GREAT;
+
+  const timestamp = new Date().getTime();
+
+  const usedIds=new Set(data.eggs.map((egg:Egg)=>egg.id));
+  for (let tier of tiers) {
+    let id=randInt(EGG_SEED, EGG_SEED * tier),attempts=0;
+    while(usedIds.has(id)){
+      if(++attempts>32)throw new Error('GACHA_DUPLICATE_EGG');
+      id=randInt(EGG_SEED, EGG_SEED * tier);
+    }
+    usedIds.add(id);
+    const egg = new Egg(id, gachaType, getEggTierDefaultHatchWaves(tier), timestamp);
+    if (egg.isManaphyEgg()) {
+      data.gameStats.manaphyEggsPulled++;
+      egg.hatchWaves = getEggTierDefaultHatchWaves(EggTier.ULTRA);
+    } else {
+      switch (tier) {
+        case EggTier.GREAT:
+          data.gameStats.rareEggsPulled++;
+          break;
+        case EggTier.ULTRA:
+          data.gameStats.epicEggsPulled++;
+          break;
+        case EggTier.MASTER:
+          data.gameStats.legendaryEggsPulled++;
+          break;
+      }
+    }
+    eggs.push(egg);
+    data.eggs.push(egg);
+    data.gameStats.eggsPulled++;
+  }
+
+  return eggs;
+}

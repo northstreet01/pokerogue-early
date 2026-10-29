@@ -338,7 +338,7 @@ export default class BattleInfo extends Phaser.GameObjects.Container {
         if ((this.lastExp !== pokemon.exp || this.lastLevel !== pokemon.level)) {
           const originalResolve = resolve;
           let durationMultipler = Math.max(Phaser.Tweens.Builders.GetEaseFunction('Cubic.easeIn')(1 - (Math.min(pokemon.level - this.lastLevel, 10) / 10)), 0.1);
-          resolve = () => this.updatePokemonExp(pokemon, false, durationMultipler).then(() => originalResolve());
+          resolve = () => this.updatePokemonExp(pokemon, instant, durationMultipler).then(() => originalResolve());
         } else if (isLevelCapped !== this.lastLevelCapped)
           this.setLevel(pokemon.level);
 
@@ -379,6 +379,15 @@ export default class BattleInfo extends Phaser.GameObjects.Container {
 
   updatePokemonExp(pokemon: Pokemon, instant?: boolean, levelDurationMultiplier: number = 1): Promise<void> {
     return new Promise(resolve => {
+      // Loading/reconnection reconciles a committed frame, without replaying
+      // every intermediate level or scheduling delayed level-up callbacks.
+      if(instant){
+        this.lastExp=pokemon.exp;this.lastLevel=pokemon.level;this.lastLevelExp=pokemon.levelExp;
+        const relative=getLevelRelExp(pokemon.level+1,pokemon.species.growthRate);
+        const capped=pokemon.level>=(this.scene as BattleScene).getMaxExpLevel(true);
+        this.expBar.setScale(capped?0:relative?pokemon.levelExp/relative:0,1);
+        this.setLevel(pokemon.level);resolve();return;
+      }
       const levelUp = this.lastLevel < pokemon.level;
       const relLevelExp = getLevelRelExp(this.lastLevel + 1, pokemon.species.growthRate);
       const levelExp = levelUp ? relLevelExp : pokemon.levelExp;

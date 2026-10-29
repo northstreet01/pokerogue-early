@@ -3,12 +3,28 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import i18next from 'i18next';
 import {readFileSync} from 'node:fs';
-import {renderTeams,renderInventory,progressText} from '../src/coop/room-display.mjs';
+import {renderTeams,renderInventory,progressText,roomPlayerName} from '../src/coop/room-display.mjs';
 function setup(language='zh-Hans'){
   globalThis.document=new JSDOM('<!doctype html><body></body>').window.document;
   const translator=i18next.createInstance();translator.init({lng:language,initAsync:false,resources:Object.fromEntries(['en','zh-Hans'].map(lang=>[lang,{coop:JSON.parse(readFileSync(new URL('../locales/'+lang+'/coop.json',import.meta.url),'utf8'))}]))});
   return {target:document.createElement('div'),t:(key,params)=>translator.t('coop:'+key,params)};
 }
+
+test('display ownership resolves room nicknames for either seat and never invents numbered player labels',()=>{
+ const {t}=setup();
+ for(const seat of [0,1]){
+  assert.equal(roomPlayerName(['小智','小霞'],0,seat,t),'小智');
+  assert.equal(roomPlayerName(['小智','小霞'],1,seat,t),'小霞');
+  assert.equal(roomPlayerName([],seat,seat,t),t('you'));
+  assert.equal(roomPlayerName([],1-seat,seat,t),t('partner'));
+ }
+ assert.equal(roomPlayerName(['@s{fanfare}\n小智'],0,0,t),'＠s{fanfare} 小智');
+ assert.equal(roomPlayerName([],0,null,t),t('unnamedTrainer'));
+ assert.equal(roomPlayerName(['小智','小智'],0,0,t),'小智（你）');
+ assert.equal(roomPlayerName(['小智','小智'],1,0,t),'小智（队友）');
+ const s={personal:{decision:{kind:'wait-actions',requiredSeats:[0,1]}}},m={online:[true,true],submitted:[true,false]};
+ const text=progressText(m,s,0,t,['小智','小霞']);assert.match(text,/小智：/);assert.match(text,/小霞：/);assert.doesNotMatch(text,/玩家[12]/);
+});
 test('team previews show own row first, accepted forms/costs and empty slots without exposing private records',()=>{
   const {target,t}=setup(),records=[{seat:0,state:'draft',ready:false,total:0.5,starters:[{speciesId:1,formIndex:2,cost:0.5}],eggs:['private']},{seat:1,state:'confirmed',ready:true,total:3,starters:[]}];
   const before=JSON.stringify(records);
@@ -43,5 +59,7 @@ test('peer status distinguishes loading, disconnect, submitted actions and finis
     assert.equal(progressText({...m,reason:'WAITING_ACK',blocked:true},s,0,t),t('loadingTogether'));
     s.personal.decision={kind:'preparation',sharedMarket:{finished:[true,false]}};
     assert.ok(progressText(m,s,0,t).includes(t('finishedShopping')));assert.ok(progressText(m,s,0,t).includes(t('choosingItems')));
+    s.shared={activities:['finished','learn-move']};assert.ok(progressText(m,s,0,t).includes(t('learningMove')));
+    s.shared.activities[1]='item-target';assert.ok(progressText(m,s,0,t).includes(t('choosingItemTarget')));
   }
 });

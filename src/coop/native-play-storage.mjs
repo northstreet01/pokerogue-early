@@ -7,7 +7,16 @@ export function createNativePlayStorage(bridge){
   const selected=(r,origin)=>Object.entries(r).filter(([key])=>key.startsWith(origin+'|'));
   return Object.freeze({
     async listSeats(origin){return selected(await seats.read(null),origin).map(([,v])=>v).filter(v=>/^[A-Z0-9]{6}$/i.test(v?.roomId)&&[0,1].includes(v.seat)&&typeof v.token==='string'&&v.token)
-      .map(v=>({roomId:v.roomId,seat:v.seat,...(v.profileId?{profileId:v.profileId}:{}),...(v.hostId?{hostId:v.hostId,endpoint:v.endpoint}:{})}));},
+      .map(v=>({roomId:v.roomId,seat:v.seat,...(v.profileId?{profileId:v.profileId}:{}),...(typeof v.runId==='string'?{runId:v.runId}:{}),...(v.hostId?{hostId:v.hostId,endpoint:v.endpoint}:{}),...(v.summary?{summary:v.summary}:{}),...(typeof v.displayName==='string'?{displayName:v.displayName}:{})}));},
+    async deleteSeat(origin,roomId,seat){
+      const key=seatKey(origin,roomId,seat),active=`active:${origin}`;
+      await seats.transact([key,active],r=>({changes:{[key]:null,
+        ...(r[active]===key||r[active]?.key===key?{[active]:{key:null,paused:true}}:{})}}));
+      // Delete the credential first. If cleanup fails, orphaned outbox rows
+      // cannot restore/replay a seat; retrying this operation is idempotent.
+      await outbox.transact(null,r=>({changes:Object.fromEntries(Object.keys(r).filter(k=>k.startsWith(key+'|')).map(k=>[k,null]))}));
+      return true;
+    },
     resumeSession(origin,session,roomId,seat){
       const key=seatKey(origin,roomId,seat),active=`active:${origin}`;
       return seats.transact([key,active],r=>{

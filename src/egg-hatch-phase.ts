@@ -13,6 +13,10 @@ import { achvs } from "./system/achv";
 import { pokemonPrevolutions } from "./data/pokemon-evolutions";
 import { EggTier } from "./data/enums/egg-type";
 import PokemonInfoContainer from "./ui/pokemon-info-container";
+import {speciesEggMoves} from './data/egg-moves';
+import {allMoves} from './data/move';
+
+type DeferredHatchPresentation={pokemon:PlayerPokemon;eggMoveIndex:number;isCurrent:()=>boolean;onComplete:()=>void};
 
 export class EggHatchPhase extends Phase {
   private egg: Egg;
@@ -35,26 +39,32 @@ export class EggHatchPhase extends Phase {
   private skipped: boolean;
   private evolutionBgm: AnySound;
 
-  constructor(scene: BattleScene, egg: Egg) {
+  // This callback is display-only. Do not add an own field on ordinary original
+  // phases: their exact checkpoint schema must remain unchanged.
+  declare private readonly presentation?:DeferredHatchPresentation;
+  declare private presentationEnded?:boolean;
+  constructor(scene: BattleScene, egg: Egg, presentation?:DeferredHatchPresentation) {
     super(scene);
 
     this.egg = egg;
+    if(presentation)this.presentation=presentation;
   }
 
   start() {
     super.start();
 
-    this.scene.ui.setModeForceTransition(Mode.EGG_HATCH_SCENE).then(() => {
+    this.scene.ui.setModeForceTransition(Mode.EGG_HATCH_SCENE,this).then(() => {
+      if(this.presentation&&!this.presentation.isCurrent())return;
 
       if (!this.egg)
         return this.end();
 
       const eggIndex = this.scene.gameData.eggs.findIndex(e => e.id === this.egg.id);
 
-      if (eggIndex === -1)
+      if (!this.presentation && eggIndex === -1)
         return this.end();
 
-      this.scene.gameData.eggs.splice(eggIndex, 1);
+      if(!this.presentation)this.scene.gameData.eggs.splice(eggIndex, 1);
 
       this.scene.fadeOutBgm(null, false);
 
@@ -100,7 +110,7 @@ export class EggHatchPhase extends Phase {
 
       this.eggHatchContainer.add(this.infoContainer);
 
-      const pokemon = this.generatePokemon();
+      const pokemon = this.presentation?.pokemon ?? this.generatePokemon();
       if (pokemon.fusionSpecies)
         pokemon.clearFusionSpecies();
 
@@ -109,6 +119,7 @@ export class EggHatchPhase extends Phase {
       this.pokemon = pokemon;
 
       pokemon.loadAssets().then(() => {
+        if(this.presentation&&!this.presentation.isCurrent())return;
         this.scene.time.delayedCall(1000, () => {
           this.evolutionBgm = this.scene.playSoundWithoutBgm('evolution');
           this.canSkip = true;
@@ -196,6 +207,7 @@ export class EggHatchPhase extends Phase {
   }
 
   doHatch(): void {
+    if(this.presentation&&!this.presentation.isCurrent())return;
     this.canSkip = false;
     SoundFade.fadeOut(this.scene, this.evolutionBgm, Utils.fixedInt(100));
     for (let e = 0; e < 5; e++)
@@ -210,11 +222,11 @@ export class EggHatchPhase extends Phase {
     });
     this.scene.time.delayedCall(Utils.fixedInt(1500), () => {
       const isShiny = this.pokemon.isShiny();
-      if (this.pokemon.species.mythical)
+      if (!this.presentation && this.pokemon.species.mythical)
         this.scene.validateAchv(achvs.HATCH_MYTHICAL);
-      if (this.pokemon.species.legendary)
+      if (!this.presentation && this.pokemon.species.legendary)
         this.scene.validateAchv(achvs.HATCH_LEGENDARY);
-      if (isShiny)
+      if (!this.presentation && isShiny)
         this.scene.validateAchv(achvs.HATCH_SHINY);
       this.eggContainer.setVisible(false);
       this.pokemonSprite.play(this.pokemon.getSpriteKey(true));
@@ -234,6 +246,10 @@ export class EggHatchPhase extends Phase {
           this.scene.playSoundWithoutBgm('evolution_fanfare');
           
           this.scene.ui.showText((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('egg:hatchFromTheEgg',{pokemonName:this.pokemon.name}):`${this.pokemon.name} hatched from the egg!`, null, () => {
+            if(this.presentation){
+              const move=allMoves[speciesEggMoves[this.pokemon.species.speciesId]?.[this.presentation.eggMoveIndex]];
+              this.scene.ui.showText(move?i18next.t('egg:eggMove',{moveName:move.name}):null,0,()=>this.end(),null,true,3000);return;
+            }
             this.scene.gameData.updateSpeciesDexIvs(this.pokemon.species.speciesId, this.pokemon.ivs);
             this.scene.gameData.setPokemonCaught(this.pokemon, true, true).then(() => {
               this.scene.gameData.setEggMoveUnlocked(this.pokemon.species, this.eggMoveIndex).then(() => {
@@ -396,5 +412,15 @@ export class EggHatchPhase extends Phase {
     }, this.egg.id, EGG_SEED.toString());
     
     return ret;
+  }
+
+  public getEggMoveIndex():number{return this.eggMoveIndex;}
+
+  end():void{
+    if(!this.presentation){super.end();return;}
+    if(this.presentationEnded)return;this.presentationEnded=true;
+    this.eggHatchOverlay?.destroy();
+    this.pokemon?.destroy();
+    this.presentation.onComplete();
   }
 }

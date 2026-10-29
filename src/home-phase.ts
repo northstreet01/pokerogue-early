@@ -15,6 +15,10 @@ import {digest} from './local-meta/codec.mjs';
 import i18next from './i18n';
 import {readHosts,hostScope} from './coop/host-connection.mjs';
 import {SaveSlotUiMode} from './ui/save-slot-select-ui-handler';
+import {Egg} from './data/egg';
+import {EggHatchPhase} from './egg-hatch-phase';
+import {restorePokemonState,PlayerPokemon} from './field/pokemon';
+import {createCoopPokemonDisplay} from './coop/battle-presentation';
 
 /** Root has no login/save/room side effects. Direct game entries retain login. */
 export function entryPhases(scene: BattleScene, coop: boolean, solo: boolean): Phase[] {
@@ -47,7 +51,7 @@ export class HomePhase extends Phase {
       this.backdrop.setOrigin(0).setScale(6).setDepth(0.5);
     }
     this.scene.events.once('shutdown', () => this.dispose());
-    void this.showHome();
+    void this.finishEggHatches();
   }
 
   private current(epoch: number): boolean { return !this.disposed && epoch === this.epoch; }
@@ -57,14 +61,14 @@ export class HomePhase extends Phase {
     this.music.abort(); this.scene.fadeOutBgm?.(150, true);
     this.fileInput?.remove();
     this.backdrop?.destroy();
-    this.releaseView();
+    void this.releaseView().catch(()=>{});
   }
 
-  private releaseView(): void {
+  private async releaseView(): Promise<void> {
     if (this.originalData) {
       const view=this.scene.gameData;
+      await view.closeProfile();
       this.scene.gameData = this.originalData; this.originalData = undefined;
-      void view.closeProfile().catch(()=>{});
     }
   }
 
@@ -80,7 +84,7 @@ export class HomePhase extends Phase {
     const transition = this.transitions.catch(() => {}).then(async () => {
       if (!this.current(epoch)) return;
       await this.scene.ui.setMode(Mode.MESSAGE);
-      this.releaseView();
+      await this.releaseView();
       if (!this.current(epoch)) return;
       this.scene.ui.clearText();
       if (view) { this.originalData = this.scene.gameData; this.scene.gameData = view; }
@@ -105,6 +109,9 @@ export class HomePhase extends Phase {
   }
 
   async showHome(): Promise<void> {
+    // The Home menu key must not clear the original hatch sprites while their
+    // timers are playing. Confirm/cancel still use the original skip control.
+    if(this.originalData&&this.scene.ui.getMode()===Mode.EGG_HATCH_SCENE)return;
     // Root creates a battle backdrop before an adventure. Home shows only menus.
     for (const object of [this.scene.field, this.scene.fieldUI, this.scene.arenaBg,
       this.scene.arenaBgTransition, this.scene.arenaPlayer, this.scene.arenaEnemy,
@@ -134,7 +141,8 @@ export class HomePhase extends Phase {
     const epoch = ++this.epoch;
     return this.menu(epoch, [
       ['我的未孵化蛋', () => { void this.browse(Mode.EGG_LIST); }],
-      ['我的蛋券', () => { void this.browse(Mode.EGG_GACHA); }],
+      ['蛋扭蛋机', () => { void this.browse(Mode.EGG_GACHA); }],
+      ['领取已完成孵化', () => { void this.finishEggHatches(); }],
       ['成就', () => { void this.browse(Mode.ACHIEVEMENTS); }],
       ['游戏统计', () => { void this.browse(Mode.GAME_STATS); }],
       ['返回初始界面', () => { void this.showHome(); }],
@@ -147,8 +155,9 @@ export class HomePhase extends Phase {
     try {
       // Original parsing/consolidation runs on an isolated view. A late load may
       // finish after return, but cannot mutate the scene's live personal data.
-      const view = new GameData(this.scene, { readOnly: true });
-      if(this.activeProfile)view.bindProfileIO(await openGameProfileIO(this.repository(epoch),this.activeProfile,{readOnly:true}));
+      const writable=mode===Mode.EGG_GACHA&&!!this.activeProfile;
+      const view = new GameData(this.scene, { readOnly: !writable });
+      if(this.activeProfile)view.bindProfileIO(await openGameProfileIO(writable?profileRepository(()=>!this.disposed):this.repository(epoch),this.activeProfile,{readOnly:!writable,mode:'home'}));
       const exists = await view.loadSystem({ readOnly: true });
       if (!this.current(epoch)) { await view.closeProfile();return; }
       if (!exists) {
@@ -157,13 +166,62 @@ export class HomePhase extends Phase {
         return;
       }
       const onCancel = () => { if (this.current(epoch)) void this.showHome(); };
-      const options = { readOnly: true, onCancel };
+      const options = { readOnly: !writable, onCancel };
       await this.display(epoch, mode, mode === Mode.STARTER_SELECT ? [() => {}, options] : [options], view);
     } catch {
       if (this.current(epoch)) await this.menu(epoch, [
         ['个人资料读取失败，重试', () => { void this.browse(mode); }],
         ['返回初始界面', () => { void this.showHome(); }],
       ]);
+    }
+  }
+
+  /** A saved terminal receipt, never a URL flag, authorizes deferred hatching.
+   * Rewards are durable before animation; interrupted playback resumes the same
+   * v2 result next time this profile enters Home. */
+  private async finishEggHatches():Promise<void>{
+    const epoch=++this.epoch;
+    let view:GameData|undefined;
+    try{
+      const index=await this.repository(epoch).list();if(!this.current(epoch))return;
+      if(!index.activeProfileId){await this.showHome();return;}
+      const profile=await this.repository(epoch).read(index.activeProfileId);
+      if(!profile.deferredHatches.some(h=>h.state==='released')&&!profile.hatchResults?.length){await this.showHome();return;}
+      view=new GameData(this.scene);
+      view.bindProfileIO(await openGameProfileIO(profileRepository(()=>!this.disposed),index.activeProfileId,{mode:'home'}));
+      await view.loadSystem({readOnly:true});
+      await this.display(epoch,Mode.MESSAGE,[],view);
+      await this.playDeferredHatches(view,epoch);
+      this.scene.playBgm?.('menu',false,this.music.signal);
+      if(this.current(epoch))await this.showHome();
+    }catch(error){
+      if(view&&this.scene.gameData!==view)await view.closeProfile().catch(()=>{});
+      if(this.current(epoch))await this.menu(epoch,[['重试领取孵化结果',()=>this.finishEggHatches()],
+        ['返回大厅',()=>this.showHome()]],'孵化尚未完成保存，蛋和已生成结果会保留。');
+    }
+  }
+
+  private async playDeferredHatches(view:GameData,epoch:number):Promise<void>{
+    while(this.current(epoch)){
+      try{
+        const result=await view.prepareDeferredHatch();if(!result)return;
+        this.scene.fieldUI.setVisible(true);
+        const pokemon=createCoopPokemonDisplay(this.scene,restorePokemonState(result.pokemon),true) as PlayerPokemon;
+        pokemon.init();
+        await new Promise<void>(resolve=>new EggHatchPhase(this.scene,
+          new Egg(result.egg.id,result.egg.gachaType,result.egg.hatchWaves,result.egg.timestamp),
+          {pokemon,eggMoveIndex:result.eggMoveIndex,isCurrent:()=>this.current(epoch),onComplete:resolve}).start());
+        if(!this.current(epoch))return;
+        await view.acknowledgeHatch(result.id);
+        await this.scene.ui.setMode(Mode.MESSAGE);
+      }catch(error){
+        if(!this.current(epoch))return;
+        console.warn('Deferred hatch is waiting for retry',{code:error?.code??error?.message});
+        // Keep the same writer and staged result on failure. Acknowledgement
+        // retries cannot reroll or repeat the already committed collection.
+        await new Promise<void>(resolve=>{void this.scene.ui.setMode(Mode.TITLE,{options:[{
+          label:'保存失败，确认重试孵化',keepOpen:true,handler:()=>{resolve();return true;}}],noCancel:true});});
+      }
     }
   }
 
@@ -180,23 +238,41 @@ export class HomePhase extends Phase {
     }catch(error){await view.closeProfile();if(this.current(epoch))await this.showError(error);}
   }
 
-  private async showRecovery(): Promise<void> {
+  private async showRecovery(page=0): Promise<void> {
     const epoch = ++this.epoch;
     await this.menu(epoch, [['正在读取，返回', () => { void this.showHome(); }]]);
     try {
       const storage=createPlayStorage();
-      const legacy=(await storage.listSeats(location.origin)).map(value=>({...value,legacy:true}));
+      const legacy=(await storage.listSeats(location.origin)).map(value=>({...value,legacy:true,scope:location.origin}));
       const hosts=readHosts().hosts;
       const hosted=(await Promise.all(hosts.map(async host=>(await storage.listSeats(hostScope(location.origin,host.hostId,this.activeProfile)))
-        .map(value=>({...value,hostId:host.hostId,endpoint:host.endpoint,legacy:false}))))).flat();
+        .map(value=>({...value,hostId:host.hostId,endpoint:host.endpoint,legacy:false,scope:hostScope(location.origin,host.hostId,this.activeProfile)}))))).flat();
       const seats=[...legacy,...hosted].filter(value=>(value.profileId??null)===this.activeProfile);
       if (!this.current(epoch)) return;
-      await this.menu(epoch, [
-        ...seats.map(value => [`房间 ${value.roomId} · 玩家${value.seat + 1}${value.hostId?' · '+value.endpoint:''}`, () =>
-          this.navigate(`/coop-play.html?resumeRoom=${encodeURIComponent(value.roomId)}&resumeSeat=${value.seat}`
-            +(value.hostId?`&host=${encodeURIComponent(value.endpoint)}&hostId=${encodeURIComponent(value.hostId)}`:this.scene.navigateApp?'&legacy=1':''))] as [string, () => void]),
-        [seats.length ? '返回初始界面' : '没有可恢复席位，返回', () => { void this.showHome(); }],
-      ]);
+      if(!seats.length){await this.menu(epoch,[['没有可恢复席位，返回',()=>this.showHome()]]);return;}
+      const pages=Math.ceil(seats.length/3),index=Math.max(0,Math.min(page,pages-1)),rows=seats.slice(index*3,index*3+3);
+      await this.display(epoch,Mode.SAVE_SLOT,[SaveSlotUiMode.COOP,(cursor:number)=>{
+        if(!this.current(epoch))return;
+        if(cursor<0){void this.showHome();return;}
+        const value=rows[cursor];if(!value)return;
+        void this.menu(epoch,[
+          ['恢复联机',()=>this.navigate(`/coop-play.html?resumeRoom=${encodeURIComponent(value.roomId)}&resumeSeat=${value.seat}`
+            +(value.hostId?`&host=${encodeURIComponent(value.endpoint)}&hostId=${encodeURIComponent(value.hostId)}`:this.scene.navigateApp?'&legacy=1':''))],
+          ['删除本机续连记录',()=>this.confirm(epoch,'删除本机续连记录及未发送操作？\n不会删除房主存档、图鉴或其他玩家的记录。',async()=>{
+            if(this.activeProfile){
+              const profile=await this.repository(epoch).read(this.activeProfile);
+              const runs=[...(profile.eggRun?.eggs.length?[profile.eggRun.sourceRunId]:[]),
+                ...profile.deferredHatches.filter(h=>h.state==='waiting-terminal').map(h=>h.sourceRunId)];
+              // Losing this credential would strand the inventory reservation.
+              if(runs.length&&(!value.runId||runs.includes(value.runId)))throw new Error('LOCAL_EGGS_RESERVED');
+            }
+            await storage.deleteSeat(value.scope,value.roomId,value.seat);if(this.current(epoch))await this.showRecovery(index);
+          },()=>this.showRecovery(index))],
+          ['返回存档列表',()=>this.showRecovery(index)],
+        ],`房间 ${value.roomId} · ${value.displayName||this.profileName||i18next.t('coop:unnamedTrainer')}`);
+      },{rows,label:`联机存档 ${index+1}/${pages} · ←→翻页 · Esc返回`,onPage:(direction:number)=>{
+        if(this.current(epoch))void this.showRecovery((index+direction+pages)%pages);
+      }}]);
     } catch {
       if (this.current(epoch)) await this.menu(epoch, [
         ['读取失败，重试', () => { void this.showRecovery(); }],

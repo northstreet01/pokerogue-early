@@ -1,4 +1,5 @@
 import BattleScene, { Button } from "../battle-scene";
+import i18next from '../i18n';
 import { Mode } from "./ui";
 import PokemonIconAnimHandler, { PokemonIconAnimMode } from "./pokemon-icon-anim-handler";
 import { TextStyle, addTextObject } from "./text";
@@ -186,7 +187,9 @@ export default class EggListUiHandler extends MessageUiHandler {
         day: 'numeric'
       })
     );
-    this.eggHatchWavesText.setText(getEggHatchWavesMessage(egg.hatchWaves));
+    const deferred=this.scene.gameData.deferredEggState?.(egg.id);
+    this.eggHatchWavesText.setText(deferred==='waiting-terminal'?i18next.t('egg:waitingCoopTerminal')
+      :deferred==='released'?i18next.t('egg:readyInHome'):getEggHatchWavesMessage(egg.hatchWaves));
     this.eggGachaInfoText.setText(getEggGachaTypeDescriptor(this.scene, egg));
   }
 

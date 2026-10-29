@@ -5,6 +5,7 @@ import UiHandler from "./ui-handler";
 
 export default class EggHatchSceneHandler extends UiHandler {
   public eggHatchContainer: Phaser.GameObjects.Container;
+  private phase?:EggHatchPhase;
 
   constructor(scene: BattleScene) {
     super(scene, Mode.EGG_HATCH_SCENE);
@@ -22,8 +23,9 @@ export default class EggHatchSceneHandler extends UiHandler {
     });
   }
 
-  show(_args: any[]): boolean {
-    super.show(_args);
+  show(args: any[]): boolean {
+    super.show(args);
+    this.phase=args[0];
 
     this.getUi().showText(null, 0);
 
@@ -32,7 +34,7 @@ export default class EggHatchSceneHandler extends UiHandler {
 
   processInput(button: Button): boolean {
     if (button === Button.ACTION || button === Button.CANCEL) {
-      const phase = this.scene.getCurrentPhase();
+      const phase = this.phase??this.scene.getCurrentPhase();
       if (phase instanceof EggHatchPhase && phase.trySkip())
         return true;
     }
@@ -46,6 +48,7 @@ export default class EggHatchSceneHandler extends UiHandler {
 
   clear() {
     super.clear();
+    this.phase=undefined;
     this.eggHatchContainer.removeAll(true);
   }
 }

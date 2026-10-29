@@ -100,6 +100,7 @@ function validateProfileSelection(value, allowEmpty: boolean) {
 
 /** Capture only the identity, selected starters, cost counters, and egg mirror. */
 function captureProfileSelection(gameData, starters, allowEmpty: boolean) {
+  if(gameData?.hasReservedCoopEggs)fail('LOCAL_EGGS_RESERVED');
   array(starters, allowEmpty ? 0 : 1, 6, 'INVALID_PROFILE_STARTERS');
   if (!gameData || !isInt(gameData.trainerId) || gameData.trainerId < 0 || gameData.trainerId >= 65536
     || !isInt(gameData.secretId) || gameData.secretId < 0 || gameData.secretId >= 65536)

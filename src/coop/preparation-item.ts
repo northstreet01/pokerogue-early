@@ -13,7 +13,7 @@ import { AddPokeballModifier, MoneyRewardModifier, PokemonHpRestoreModifier, Pok
   PokemonInstantReviveModifier, ExpBalanceModifier, PokemonFriendshipBoosterModifier, MultipleParticipantExpBonusModifier,
   DamageMoneyRewardModifier, MoneyInterestModifier, MegaEvolutionAccessModifier, GigantamaxAccessModifier,
   TerastallizeAccessModifier, PokemonFormChangeItemModifier, TerastallizeModifier, FusePokemonModifier, UnfusePokemonModifier,
-  RememberMoveModifier } from '../modifier/modifier';
+  RememberMoveModifier, AddVoucherModifier } from '../modifier/modifier';
 
 // Admission is by verified original mechanism, including generated variants.
 // Exact prototypes prevent an unverified specialised subclass entering by accident.
@@ -60,15 +60,17 @@ export function isPreparationModifier(modifier) {
 // admitted only when their actual variant has a connected targeting mechanism.
 const generatedMechanisms=new Set(['TEMP_STAT_BOOSTER','BASE_STAT_BOOSTER','ATTACK_TYPE_BOOSTER','BERRY',
   'TM_COMMON','TM_GREAT','TM_ULTRA','EVOLUTION_ITEM','RARE_EVOLUTION_ITEM','FORM_CHANGE_ITEM','TERA_SHARD']);
-export function preparationRewardExclusions():string[]{
+export function preparationRewardExclusions(vouchers=false):string[]{
   return Object.entries(modifierTypes).filter(([id,factory])=>{
     const type=factory();
+    if(!vouchers&&type.newModifier&&['VOUCHER','VOUCHER_PLUS','VOUCHER_PREMIUM'].includes(id))return true;
     return type instanceof ModifierTypeGenerator?!generatedMechanisms.has(id):preparationItemTarget(type)===null;
   }).map(([id])=>id);
 }
 
 export function isPreparationConsumable(modifier) {
   return modifier instanceof AddPokeballModifier || modifier instanceof MoneyRewardModifier
+    || Object.getPrototypeOf(modifier) === AddVoucherModifier.prototype
     || modifier instanceof PokemonHpRestoreModifier || modifier instanceof PokemonStatusHealModifier
     || modifier instanceof PokemonPpRestoreModifier || modifier instanceof PokemonAllMovePpRestoreModifier
     || modifier instanceof PokemonPpUpModifier || modifier instanceof PokemonLevelIncrementModifier

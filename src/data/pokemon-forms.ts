@@ -203,6 +203,22 @@ export class SpeciesFormChangeItemTrigger extends SpeciesFormChangeTrigger {
   }
 }
 
+/** The original Party menu exposes active items first. A second form item can
+ * be enabled only after disabling the active one; never use a modifier index
+ * received from another player's inventory. */
+export function getPokemonFormChangeItems(pokemon:Pokemon):PokemonFormChangeItemModifier[]{
+  const items=pokemon.scene.findModifiers(m=>m instanceof PokemonFormChangeItemModifier&&m.pokemonId===pokemon.id) as PokemonFormChangeItemModifier[];
+  return items.some(m=>m.active)?items.filter(m=>m.active):items;
+}
+
+export function setPokemonFormChangeItemActive(pokemon:Pokemon,item:FormChangeItem,active:boolean,modal=false):boolean{
+  const modifier=getPokemonFormChangeItems(pokemon).find(m=>m.formChangeItem===item);
+  if(!modifier||modifier.active===active)return false;
+  modifier.active=active;
+  pokemon.scene.triggerPokemonFormChange(pokemon,SpeciesFormChangeItemTrigger,false,modal);
+  return true;
+}
+
 export class SpeciesFormChangeTimeOfDayTrigger extends SpeciesFormChangeTrigger {
   public timesOfDay: TimeOfDay[];
 

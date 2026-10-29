@@ -199,7 +199,17 @@ test('stale draft retries once with a new ID only after resync; persisted retry 
   const actions = sent.filter(message => message.type === 'submitAction');
   assert.equal(actions.length, 2); assert.notEqual(actions[0].actionId, actions[1].actionId);
   assert.deepEqual(actions[0].action, actions[1].action);
-  assert.ok(p.lobbyDraft.error.includes('STALE_DECISION'));
+  assert.ok(p.lobbyDraft.error.includes('同步'));
+});
+
+test('peer revision changes during draft persistence discard the unsent envelope and preserve local selection',async()=>{
+ const {p,config,sent}=await draftPhase(),gate=deferred(),store=p.storage;
+ p.storage={...store,async saveAction(...args){await gate.promise;return store.saveAction(...args);}};
+ config.onChange(draftStarters([1]));await waitUntil(()=>!!p.actionId);
+ p.latest=await snapshot(1);gate.resolve();
+ await waitUntil(()=>sent.some(m=>m.type==='requestSnapshot'&&m.reason==='DRAFT_RETRY'));
+ assert.equal(sent.some(m=>m.type==='submitAction'),false);assert.equal(p.actionId,null);
+ assert.ok(p.lobbyDraft.profile.starters.length);assert.deepEqual(await store.pendingActions(origin,p.roomId,p.seat),[]);
 });
 
 test('failed draft disk write is bounded; exit and old Starter callbacks cannot save or reactivate a session', async () => {
@@ -872,7 +882,7 @@ function preparationPhase() {
   const { p, sent, errors } = phase(); const modes = [], controls = [];
   p.roomId = 'ABCDEF'; p.runId = 'run-1'; p.seat = 0; p.epoch = 'epoch-1';
   p.inputReady = true;
-  p.scene = { gameMode: { hasNoShop: false }, ui: { setMode: async (...args) => modes.push(args) } };
+  p.scene = { gameMode: { hasNoShop: false }, ui: { setMode: async (...args) => modes.push(args), showText(text) { this.text = text; } } };
   p.renderPreparationControls = player => controls.push(structuredClone(player));
   p.latest = { runId: p.runId, revision: 4, decisionId: 'prep-4', personal: { resources: { money: 300 },
     decision: { id: 'prep-4', kind: 'preparation', requiredSeats: [0, 1], players: {
@@ -880,6 +890,86 @@ function preparationPhase() {
       shop: [], rerollCost: 250, selection: null, subdecision: null } } } };
   return { p, sent, errors, modes, controls };
 }
+
+test('shared reroll replaces active original menu contents but stock-only updates preserve its cursor',async()=>{
+ const {p}=preparationPhase();let clears=0,draws=[];
+ const handler={active:true,clear(){clears++;this.active=false;},show(args){draws.push(args[1][0].type.id);this.active=true;}};
+ p.scene.ui={getMode:()=>api.Mode.MODIFIER_SELECT,getHandler:()=>handler};
+ const options=id=>[true,[{type:api.modifierTypes[id]().withIdFromFunc(api.modifierTypes[id])}],()=>{},250,{shopOptions:[]}];
+ await p.showOriginalPreparationMenu(...options('POTION'));const before=clears;
+ await p.showOriginalPreparationMenu(...options('POTION'));assert.equal(clears,before);
+ await p.showOriginalPreparationMenu(...options('POKEBALL'));assert.equal(clears,before+1);
+ assert.deepEqual(draws,['POTION','POTION','POKEBALL']);
+});
+
+test('capture ownership uses current room nicknames for either seat and each outcome',async()=>{
+ const names=['小智','小霞'],shown=[],p=new api.CoopBattlePresentation({ui:{showText:text=>shown.push(text)}},seat=>names[seat]);
+ for(const seat of [0,1])for(const outcome of ['caught','failed','cancelled','unknown']){
+  await p.playEvents([{kind:'capture-result',seat,outcome,pokeballType:0,eventId:`nickname-${seat}-${outcome}`}]);
+  assert.ok(shown.at(-1).startsWith(names[seat]+'：'));assert.doesNotMatch(shown.at(-1),/玩家[12]/);
+ }
+ names[1]='新昵称';await p.playEvents([{kind:'capture-result',seat:1,outcome:'caught',pokeballType:0,eventId:'nickname-updated'}]);
+ assert.ok(shown.at(-1).startsWith('新昵称：'));
+});
+
+test('original shop refreshes nickname ownership labels without changing claims or targets',()=>{
+ const names=['小智','小霞'],seen=[],reward={setStockOwner(...args){seen.push(args);}},paid={setStockOwner(...args){seen.push(args);}};
+ const stock={rewards:[0],shop:[1],reservedShop:[0]},before=structuredClone(stock);
+ const h=Object.assign(Object.create(api.ModifierSelectUiHandler.prototype),{options:[reward],shopOptionsRows:[[paid]],
+  stockIndices:new WeakMap([[paid,0]]),inputPresentation:{stock,playerName:seat=>names[seat]}});
+ h.refreshOwnerLabels();assert.equal(seen[0][2],'小智');assert.equal(seen[1][2],'小霞');assert.equal(seen[1][1],true);
+ names[1]='新昵称';h.refreshOwnerLabels();assert.equal(seen.at(-1)[2],'新昵称');assert.deepEqual(stock,before);
+});
+
+test('saved recovery metadata keeps the room nickname while hiding the resume credential',async()=>{
+ const {p}=phase();await p.storage.beginSession(origin,p.session());
+ p.roomId='ABCDEF';p.seat=0;p.token='synthetic-private';p.playerNames=['小智','小霞'];
+ await p.persistSeat();const rows=await p.storage.listSeats(origin);
+ assert.equal(rows[0].displayName,'小智');assert.equal(rows[0].token,undefined);
+});
+
+test('shared targeted item waits for host reservation before opening the original Party menu',async()=>{
+ const {p,sent,modes}=personalPotionPhase();
+ p.latest.personal.decision.sharedMarket={rewardClaims:[],shopClaims:[],reservations:[]};
+ await p.choosePreparationReward(p.latest.personal.decision.players.rewards[0],p.latest,p.epoch);
+ assert.equal(sent[0].action.operation,'reserve-item');assert.equal(modes.length,0);
+});
+
+test('deleting local IDB recovery removes only the selected credential/outbox and fences delayed writes',async()=>{
+ const store=createPlayStorage(new IDBFactory()),session={id:'active',isCurrent:()=>true};
+ await store.beginSession(origin,session);
+ const row={roomId:'ABC123',seat:0,token:'private',summary:{wave:8,party:[]}};
+ await store.saveSeat(origin,row,session);await store.saveSeat('other',row);
+ await store.saveAction(origin,0,{roomId:'ABC123',actionId:'a',expectedRevision:1});
+ await store.deleteSeat(origin,'ABC123',0);
+ assert.equal(await store.loadSeat(origin),null);assert.deepEqual(await store.listSeats(origin),[]);
+ assert.deepEqual(await store.pendingActions(origin,'ABC123',0),[]);
+ assert.equal((await store.loadSeat('other')).token,'private');
+ assert.equal(await store.saveSeat(origin,row,session),false);
+});
+
+test('lobby seat persistence omits unavailable battle summary instead of sending undefined JSON to native SQLite',async()=>{
+ const {p}=phase();p.roomId='ABCDEF';p.seat=0;p.token='synthetic';p.runId='run-1';p.latest=await snapshot();
+ let saved;
+ p.storage={saveSeat:async(_origin,value)=>{saved=value;assert.equal(Object.hasOwn(value,'summary'),false);return true;}};
+ await p.persistSeat();assert.equal(saved.runId,'run-1');
+});
+
+test('a bounded display timeout skips that effect once and continues the following message',async()=>{
+ const messages=[],p=new api.CoopBattlePresentation({ui:{showText:text=>messages.push(text)}});
+ p.playAnimation=async()=>{throw Error('PRESENTATION_TIMEOUT');};
+ const events=[{kind:'battle-animation',eventId:'timeout-regression-1'},{kind:'message',text:'继续',eventId:'timeout-regression-2'}];
+ await p.playEvents(events);await p.playEvents(events);
+ assert.deepEqual(messages,['继续']);
+});
+
+test('same requested battle BGM resumes a paused track and restarts a stopped one',()=>{
+ let track={key:'grass',isPlaying:true},plays=0,resumes=0;
+ const audio=new api.CoopBattleAudio({playBgm(){plays++;},getBgmState:()=>track,isBgmPlaying:()=>track.isPlaying,resumeBgm(){resumes++;}});
+ audio.play('grass');audio.play('grass');assert.equal(plays,1);
+ track={key:'grass',isPlaying:false,isPaused:true};audio.play('grass');assert.equal(resumes,1);
+ track={key:'grass',isPlaying:false,isPaused:false};audio.play('grass');assert.equal(plays,2);
+});
 
 test('original preparation UI receives authoritative shop/rewards and reroll without changing gameMode', async () => {
   const { p, modes, controls, sent } = preparationPhase(); const mode = p.scene.gameMode;
@@ -1188,7 +1278,8 @@ test('both local seats retain original numeric HP and EXP while the peer stays p
     presentation.layoutPlayerInfo({battleInfo:peer},1-seat,false);
     assert.equal(own.hpNumbersContainer.visible,true);assert.equal(own.expBar.visible,true);
     assert.equal(peer.hpNumbersContainer.visible,false);assert.equal(peer.expBar.visible,false);
-    assert.ok(own.y-peer.y>=38);
+    assert.equal(own.x,peer.x,'retain the original right-hand double-battle stack');
+    assert.equal(own.y,-65);assert.equal(peer.y,-90);
     const before=[own.x,own.y,peer.x,peer.y];
     presentation.layoutPlayerInfo({battleInfo:own},seat,true);
     presentation.layoutPlayerInfo({battleInfo:peer},1-seat,false);
@@ -1267,7 +1358,7 @@ test('late original trainer asset completion cannot revive a cleared trainer; re
   assert.equal(scene.trainer.visible,false,'a late loader cannot overwrite the new wild encounter');
   scene.textures.exists=()=>true;
   await presentation.apply({shared:{...shared,trainer}},{byId:new Map()});
-  assert.equal(scene.trainer.visible,true);assert.equal(scene.trainer.x,106,'restored trainer does not wait offscreen for a deduplicated entrance');
+  assert.equal(scene.trainer.visible,false,'restoring a committed battle must not leave its entrance trainer visible');
 });
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -1516,11 +1607,29 @@ test('active Party selection cannot submit after its awaited mode transition cro
   }
 });
 
-test('cooperative active Party permits only SEND_OUT and summary; local release and Baton Pass cannot execute', async () => {
+test('owned form menu submits stable identity without local mutation, including a lone active member',async()=>{
+ for(const battle of [false,true]){
+  const {p,modes,sent,entry}=personalPotionPhase();
+  const factory=api.modifierTypes.FORM_CHANGE_ITEM;
+  const item=factory().withIdFromFunc(factory).generateType([entry.pokemon],[api.FormChangeItem.CHARIZARDITE_X]).newModifier(entry.pokemon);
+  item.active=false;p.model.applied.personal.resources={modifiers:[item]};
+  if(battle){p.latest.personal.decision={id:'fight-form',kind:'wait-actions',requiredSeats:[0,1],options:[]};p.latest.decisionId='fight-form';p.battleInputActive=true;}
+  const before=api.capturePokemonState(entry.pokemon);
+  if(battle)await p.openActiveSwitchParty();else await p.openPreparationParty();
+  assert.equal(modes.at(-1)[0],api.Mode.PARTY);assert.equal(modes.at(-1)[7].allowFormChangeItems,true);
+  await modes.at(-1)[3](0,api.PartyOption.FORM_CHANGE_ITEM);
+  assert.deepEqual(sent[0].action,{kind:'form-toggle',pokemonId:entry.id,item:api.FormChangeItem.CHARIZARDITE_X,active:true});
+  assert.equal(item.active,false);assert.deepEqual(api.capturePokemonState(entry.pokemon),before);
+  await p.onMessage({type:'actionReceipt',roomId:p.roomId,actionId:p.actionId,decisionId:p.latest.decisionId,revision:p.latest.revision,accepted:true,code:null});
+  assert.equal(p.submitted,true,'the menu stays locked until the durable new snapshot arrives');
+ }
+});
+
+test('cooperative active Party permits switch, summary and submitted form items; local release and Baton Pass cannot execute', async () => {
   const { p, modes, sent } = activeSwitchPhase();
   await p.openActiveSwitchParty();
   const permitted = modes.at(-1)[7].allowedOptions;
-  assert.deepEqual(permitted, [api.PartyOption.SEND_OUT, api.PartyOption.SUMMARY]);
+  assert.deepEqual(permitted, [api.PartyOption.SEND_OUT, api.PartyOption.SUMMARY,api.PartyOption.FORM_CHANGE_ITEM]);
   for (const option of [api.PartyOption.RELEASE, api.PartyOption.UNPAUSE_EVOLUTION, api.PartyOption.PASS_BATON]) {
     const handler = Object.assign(Object.create(api.PartyUiHandler.prototype), {
       optionsMode: true, options: [option], optionsCursor: 0,
@@ -1962,7 +2071,7 @@ test('public teammate and enemy display retain visible status and clear it on th
 
 test('waiting room exposes both seats and no ready/edit actions until both models are acknowledged',async()=>{
  const {p}=phase();await p.onMessage(welcome);await p.onMessage(await snapshot());p.inputReady=false;p.online=[true,false];
- api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.match(p.controls.textContent,/玩家2：等待加入/);assert.equal(p.controls.querySelectorAll('button').length,0);
+ api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.match(p.controls.textContent,/队友：等待加入/);assert.equal(p.controls.querySelectorAll('button').length,0);
  p.online=[true,true];p.inputReady=true;api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.match(p.controls.textContent,/提交准备/);assert.match(p.controls.textContent,/选择队伍/);
  p.inputReady=false;api.CoopPlayPhase.prototype.renderLobbyControls.call(p);assert.equal(p.controls.querySelectorAll('button').length,0);
 });

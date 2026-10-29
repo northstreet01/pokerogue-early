@@ -10,6 +10,7 @@ import { Biome } from '../data/enums/biome';
 export class CoopBattleAudio {
   private controller = new AbortController();
   private key: string | null = null;
+  private requestedAt=0;
   constructor(private scene: BattleScene) {}
   apply(snapshot: any) {
     if (typeof this.scene.playBgm !== 'function') return;
@@ -27,8 +28,15 @@ export class CoopBattleAudio {
     this.play(key);
   }
   play(key: string) {
-    if (!key || key === this.key || typeof this.scene.playBgm !== 'function') return;
+    if (!key || typeof this.scene.playBgm !== 'function') return;
+    if(key===this.key){
+      const track=this.scene.getBgmState?.();
+      if(typeof this.scene.isBgmPlaying!=='function'||track?.key===key&&this.scene.isBgmPlaying())return;
+      if(!track&&Date.now()-this.requestedAt<5000)return; // One load may still be pending.
+      if(track?.key===key&&track.isPaused&&!track.pendingRemove){this.scene.resumeBgm?.();return;}
+    }
     this.controller.abort(); this.controller = new AbortController(); this.key = key;
+    this.requestedAt=Date.now();
     // Arena's original loop point selection uses this bgm and biome.
     this.scene.playBgm(key, true, this.controller.signal);
   }

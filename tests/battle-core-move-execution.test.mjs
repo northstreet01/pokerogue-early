@@ -1,10 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {codec} from './helpers/decision-model.mjs';
-import {pokemon,status,moves} from './helpers/original-model.mjs';
+import {pokemon,status,moves,battler} from './helpers/original-model.mjs';
 import {originalPhases} from './helpers/phase-model.mjs';
 import {actionContext,runAction,runHitCheck,abilityRules,advanceAction,nativeMoveDriver} from './helpers/move-execution-model.mjs';
 import {advanceQueuedMoveAction} from "./helpers/reference-rules/move-action-runner.mjs";
+
+test('paralysis and confusion check once per action with original 1/4 and 1/2 outcomes for either seat',()=>{
+ for(const seat of [0,1])for(const effect of ['paralysis','confusion']){
+  const range=effect==='paralysis'?4:2;let blocked=0;
+  for(let roll=0;roll<range;roll++){
+   const c=actionContext(seat),p=c.roster.entries[seat].pokemon;let phase,checks=0;
+   if(effect==='paralysis')p.status=new status.Status(status.StatusEffect.PARALYSIS);
+   else p.summonData.tags=[battler.getBattlerTag('CONFUSED',3,moves.Moves.CONFUSE_RAY,p.id)];
+   runAction(c,{onBind:(_c,current)=>{phase=current;const random=current.pokemon.randSeedInt.bind(current.pokemon);
+    // Audit the pre-action chance only. The headless codec intentionally lacks
+    // the visual confusion phase; downstream move effects have separate tests.
+    current.scene.unshiftPhase=()=>{};
+    current.scene.getCurrentPhase=()=>current;
+    current.pokemon.damageAndUpdate=amount=>{current.pokemon.hp-=amount;};
+    current.pokemon.randSeedInt=(size,...args)=>{if(size===range){checks++;return roll;}return random(size,...args);};}});
+   assert.equal(checks,1,`${effect} must not roll once per player or repeat on replay`);
+   if(phase.cancelled)blocked++;
+  }
+  assert.equal(blocked,1);
+ }
+});
 
 test('co-op cancelled attack explains a departed target without changing the original PP, RNG or result',()=>{
   const c=actionContext(0);c.roster.entries.find(e=>c.roster.field[2]===e.pokemon.id).pokemon.hp=0;

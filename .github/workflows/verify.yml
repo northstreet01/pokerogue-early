@@ -2,8 +2,9 @@ name: Verify LAN game
 
 on:
   push:
-    branches-ignore: ['dependabot/**']
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,37 +14,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  checks:
+    name: checks (${{ matrix.suite }})
     runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: foundation
+          - suite: battle
+          - suite: coop-1
+            shard: 1/4
+          - suite: coop-2
+            shard: 2/4
+          - suite: coop-3
+            shard: 3/4
+          - suite: coop-4
+            shard: 4/4
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: npm
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
       - name: Type check
+        if: matrix.suite == 'foundation'
         run: npm run typecheck
       - name: Utility tests
+        if: matrix.suite == 'foundation'
         run: npm test
       - name: Build original rule Worker
         run: npm run build:coop-runtime
       - name: Local save regression tests
+        if: matrix.suite == 'foundation'
         run: npm run test:local-save
       - name: Desktop storage, transport and package replacement
+        if: matrix.suite == 'foundation'
         run: npm run test:desktop
       - name: Local profiles and guarded navigation
+        if: matrix.suite == 'foundation'
         run: node --test --test-concurrency=1 tests/local-meta.test.mjs tests/local-meta-ui.test.mjs tests/local-meta-entry.test.mjs
       - name: Cooperative battle and socket regression tests
-        run: npm run test:coop
+        if: matrix.shard != ''
+        # Native Node shards partition FILES. Keep one file at a time inside
+        # each isolated runner because several fixtures rebuild the same Worker.
+        run: node --test --test-concurrency=1 --test-shard=${{ matrix.shard }} tests/coop*.test.mjs
       - name: Original battle rule compatibility tests
+        if: matrix.suite == 'battle'
         run: npm run test:battle-core
       - name: Upstream localization compatibility tests
+        if: matrix.suite == 'foundation'
         run: npm run test:localization
       - name: Review project boundaries
+        if: matrix.suite == 'foundation'
         run: npm run review:code
       - name: Build game documents
+        if: matrix.suite == 'foundation'
         run: npm run build
+  # Retain the existing required-check name; a failed/cancelled shard cannot
+  # turn this aggregate green. All suites still run, with no failure exclusions.
+  verify:
+    if: always()
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every suite to pass
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+        run: test "$CHECKS_RESULT" = success

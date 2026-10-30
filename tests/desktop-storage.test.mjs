@@ -26,6 +26,19 @@ function bridgeFor(db,{approve=true}={}){
       return {initialized:true,value:snap.records[r.key]};})};
 }
 function setup(options){const dir=directory(),db=openDesktopStorage(dir,options),bundle=empty();db.initialize(bundle,bundleDigest(bundle));return {dir,db,bridge:bridgeFor(db)};}
+
+test('native recovery deletion is scoped, durable and prevents a delayed session from recreating the seat',async()=>{
+ const e=setup(),store=createNativePlayStorage(e.bridge),origin='http://delete-test',session={id:'active',isCurrent:()=>true};
+ try{
+  const row={roomId:'ABC123',seat:0,token:'private',summary:{wave:12,party:[]}};
+  await store.beginSession(origin,session);await store.saveSeat(origin,row,session);await store.saveSeat('other',row);
+  await store.saveAction(origin,0,{roomId:'ABC123',actionId:'a',expectedRevision:1});
+  await store.deleteSeat(origin,'ABC123',0);assert.equal(await store.loadSeat(origin),null);
+  assert.deepEqual(await store.pendingActions(origin,'ABC123',0),[]);
+  assert.equal(await store.saveSeat(origin,row,session),false);assert.equal((await store.loadSeat('other')).token,'private');
+  assert.equal(e.db.snapshot('seats',null).records[origin+'|ABC123|0'],undefined);
+ }finally{e.db.close();}
+});
 function commit(db,scope,changes){const snap=db.snapshot(scope,Object.keys(changes));return db.commit({scope,keys:Object.keys(changes),expectedRevision:snap.revision,changes});}
 
 test('SQLite keeps all rows atomic, rejects stale CAS and persists across reopen',async()=>{
@@ -108,11 +121,12 @@ test('migration refusal, source change and failed initialization preserve old ID
 test('native seats/outbox preserve identity and reject delayed old sessions even after CAS retry',async()=>{
   const e=setup();let current=true;const first={id:'first',isCurrent:()=>current},second={id:'second',isCurrent:()=>true};
   const play=createNativePlayStorage(e.bridge),origin='host-identity|profile-identity';
-  const seat={roomId:'ABC123',seat:0,token:'synthetic-private',hostId:'host-identity',profileId:'profile-identity',runId:'original-run'};
+  const seat={roomId:'ABC123',seat:0,token:'synthetic-private',hostId:'host-identity',profileId:'profile-identity',runId:'original-run',displayName:'小智'};
   try{
     await play.beginSession(origin,first);assert.equal(await play.saveSeat(origin,seat,first),true);
     const action={roomId:'ABC123',actionId:'original-action',expectedRevision:4,payload:{pick:0}};await play.saveAction(origin,0,action);
     assert.deepEqual(await play.pendingActions(origin,'ABC123',0),[action]);assert.equal((await play.listSeats(origin))[0].token,undefined);
+    assert.equal((await play.listSeats(origin))[0].displayName,'小智');
     const originalCommit=e.bridge.storageCommit;let inject=true;
     e.bridge.storageCommit=request=>{if(inject&&request.scope==='seats'){inject=false;commit(e.db,'seats',{['active:'+origin]:{sessionId:second.id,key:null,paused:false}});}return originalCommit(request);};
     assert.equal(await play.saveSeat(origin,{...seat,token:'wrong'},first),false);

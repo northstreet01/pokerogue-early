@@ -32,16 +32,17 @@ function home(t) {
   globalThis.location={origin:dom.window.location.origin,search:'',assign:url=>assigned.push(url)};
   globalThis.localStorage=dom.window.localStorage;globalThis.sessionStorage=dom.window.sessionStorage;
   const runtime=api.createOriginalRuntime('home-default',{trainerId:1,secretId:2});
-  const scene={gameData:{unchanged:true},executeWithSeedOffset:(fn,offset,seed)=>api.withStarterRandomContext(runtime.context,()=>runtime.scene.executeWithSeedOffset(fn,offset,seed)),events:{once(){}},fadeOutBgm(){},ui:{fadeIn(){},clearText(){},
+  const scene={gameData:{unchanged:true},executeWithSeedOffset:(fn,offset,seed)=>api.withStarterRandomContext(runtime.context,()=>runtime.scene.executeWithSeedOffset(fn,offset,seed)),events:{once(){}},fadeOutBgm(){},ui:{fadeIn(){},clearText(){},showText(){},getMode:()=>modes.at(-1)?.[0]??0,
     setMode:async (...args)=>{modes.push(args);}}};
   const p=new api.HomePhase(scene),showHome=p.showHome.bind(p);
-  p.showHome=(...args)=>p.homeReady=showHome(...args);p.start();
+  p.showHome=(...args)=>p.homeReady=showHome(...args);
+  const startEgg=p.finishEggHatches.bind(p);p.finishEggHatches=(...args)=>p.startReady=startEgg(...args);p.start();
   t.after(async()=>{p.dispose();dom.window.close();
     await new Promise((resolve,reject)=>{const q=factory.deleteDatabase('coop-play-v1');q.onsuccess=resolve;q.onerror=()=>reject(q.error);});
   });
   return {p,scene,assigned,modes};
 }
-async function settle(p) {await p.homeReady;await p.transitions;await new Promise(r=>setTimeout(r,10));await p.transitions;}
+async function settle(p) {await p.startReady;await p.homeReady;await p.transitions;await new Promise(r=>setTimeout(r,10));await p.transitions;}
 
 test('original Title callbacks route once, obsolete callbacks cannot navigate, return stays available',async t=>{
   const {p,assigned,modes}=home(t);await settle(p);
@@ -182,11 +183,13 @@ test('real IDB conscious recovery lists own metadata only; paused seat and outbo
   await store.saveSeat('http://other',{roomId:'OTHER1',seat:1,token:'other-private'});
   const action={roomId:'ABC123',actionId:'action',expectedRevision:2};await store.saveAction(origin,0,action);
   await store.pauseSession(origin,old);
-  assert.deepEqual(await store.listSeats(origin),[{roomId:'ABC123',seat:0}]);
+  assert.deepEqual(await store.listSeats(origin),[{roomId:'ABC123',seat:0,runId:'run'}]);
   assert.equal(await store.loadSeat(origin),null);
   modes.at(-1)[1].options[2].handler();await settle(p);
-  const options=modes.at(-1)[1].options;
-  assert.ok(options[0].label.includes('ABC123'));options[0].handler();
+  const cards=modes.at(-1);assert.equal(cards[0],api.Mode.SAVE_SLOT);
+  assert.equal(cards[3].rows[0].roomId,'ABC123');assert.equal(cards[3].rows[0].token,undefined);
+  cards[2](0);await settle(p);
+  const options=modes.at(-1)[1].options;options[0].handler();
   assert.deepEqual(assigned,['/coop-play.html?resumeRoom=ABC123&resumeSeat=0']);
   assert.equal(await store.loadSeat(origin),null);
   assert.equal(await store.resumeSession(origin,{id:'stale',isCurrent:()=>false},'ABC123',0),null);
@@ -208,7 +211,7 @@ test('original readonly Starter opens, shows owned IVs, blocks add/start/move ed
   Object.assign(h,{genSpecies:[[species]],starterSelectGenIconContainers:[{getAt:()=>icon}],
     startLabel:renderPort(),valueLimitLabel:renderPort(),starterSelectContainer:renderPort(),
     startCursorObj:renderPort(),pokemonSprite:renderPort(),statsContainer:{...renderPort(),updateIvs:ivs=>ivCalls.push(ivs)},
-    starterGens:[],starterCursors:[],starterAttr:[],starterNatures:[],starterMovesets:[],starterIcons:[],collectionProgressText:renderPort(),
+    starterGens:[],starterCursors:[],starterAttr:[],starterNatures:[],starterMovesets:[],starterIcons:[],collectionProgressText:renderPort(),starterIcons:[],collectionProgressText:renderPort(),
     setCursor(){},setGenMode(){},speciesStarterDexEntry:gd.dexData[1],genMode:false,statsMode:false});
   let submits=0,changes=0,cancels=0;
   assert.equal(h.show([()=>submits++,{readOnly:true,onChange:()=>changes++,onCancel:()=>cancels++}]),true);
@@ -284,4 +287,23 @@ test('returning home hides the battle backdrop, combatants and HUD while preserv
  assert.equal(scene.field.visible,false);assert.equal(scene.fieldUI.visible,false);assert.equal(scene.arenaBg.visible,false);
  assert.equal(scene.uiContainer.visible,true);assert.equal(modes.at(-1)[0],api.Mode.TITLE);
  modes.at(-1)[1].options[0].handler();assert.deepEqual(assigned,['/?solo=1']);
+});
+
+
+test('deleting recovery cannot strand bound eggs, while an unrelated run can still be removed',async t=>{
+  const {p,modes}=home(t);await settle(p);
+  p.activeProfile='egg-profile';p.profileName='小智';
+  p.repository=()=>({read:async()=>({eggRun:{sourceRunId:'egg-run',eggs:[{id:123,timestamp:1}]},deferredHatches:[]})});
+  const store=createPlayStorage(),origin=location.origin;
+  await store.saveSeat(origin,{roomId:'BOUND1',seat:0,runId:'egg-run',profileId:'egg-profile',token:'reserved-token'});
+  await store.saveSeat(origin,{roomId:'OTHER1',seat:0,runId:'other-run',profileId:'egg-profile',token:'other-token'});
+  await p.showRecovery();await settle(p);modes.at(-1)[2](0);await settle(p);
+  modes.at(-1)[1].options.find(o=>o.label==='删除本机续连记录').handler();await settle(p);
+  assert.equal(modes.at(-1)[0],api.Mode.CONFIRM);modes.at(-1)[1]();await settle(p);
+  assert.equal((await store.listSeats(origin)).length,2);
+  await p.showRecovery();await settle(p);modes.at(-1)[2](1);await settle(p);
+  modes.at(-1)[1].options.find(o=>o.label==='删除本机续连记录').handler();await settle(p);
+  modes.at(-1)[1]();await settle(p);
+  assert.deepEqual((await store.listSeats(origin)).map(s=>s.roomId),['BOUND1']);
+  assert.equal((await store.resumeSession(origin,{id:'resume-bound',isCurrent:()=>true},'BOUND1',0)).token,'reserved-token');
 });

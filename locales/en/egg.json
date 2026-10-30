@@ -27,5 +27,9 @@
   "moveUpGacha": "Move UP!",
   "shinyUpGacha": "Shiny UP!",
   "legendaryUpGacha": "UP!",
-  "vouchersExceedEggCap": "All vouchers exceed Egg cap!"
+  "vouchersExceedEggCap": "All vouchers exceed Egg cap!",
+  "waitingCoopTerminal": "Ready to hatch\nFinish co-op run",
+  "readyInHome": "Ready to hatch\nReturn home",
+  "savePullFailed": "Save failed. Confirm to retry the same draw.",
+  "eggMove": "Egg move: {{moveName}}"
 }

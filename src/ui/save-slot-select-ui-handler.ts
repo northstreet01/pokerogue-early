@@ -10,13 +10,15 @@ import PokemonData from "../system/pokemon-data";
 import { PokemonHeldItemModifier } from "../modifier/modifier";
 import { TitlePhase } from "../phases";
 import MessageUiHandler from "./message-ui-handler";
+import {getPokemonSpecies} from '../data/pokemon-species';
 
 const sessionSlotCount = 3;
 
 export enum SaveSlotUiMode {
   LOAD,
   SAVE,
-  VIEW
+  VIEW,
+  COOP
 }
 
 export type SaveSlotSelectCallback = (cursor: integer) => void;
@@ -34,6 +36,7 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
 
   private cursorObj: Phaser.GameObjects.NineSlice;
   private viewLabel:Phaser.GameObjects.Text;
+  private recovery: {rows:any[];label:string;onPage?:(direction:number)=>void} | null = null;
 
   constructor(scene: BattleScene) {
     super(scene, Mode.SAVE_SLOT);
@@ -78,11 +81,13 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
 
     this.uiMode = args[0] as SaveSlotUiMode;;
     this.saveSlotSelectCallback = args[1] as SaveSlotSelectCallback;
+    this.recovery = this.uiMode===SaveSlotUiMode.COOP ? args[2] : null;
 
     this.saveSlotSelectContainer.setVisible(true);
     this.populateSessionSlots();
     this.setCursor(0);
-    this.viewLabel.setVisible(this.uiMode===SaveSlotUiMode.VIEW);
+    this.viewLabel.setText(this.recovery?.label??'存档一览 · 仅查看 · Esc返回');
+    this.viewLabel.setVisible(this.uiMode===SaveSlotUiMode.VIEW||!!this.recovery);
 
     return true;
   }
@@ -99,11 +104,12 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
       const originalCallback = this.saveSlotSelectCallback;
       if (button === Button.ACTION) {
         if(this.uiMode===SaveSlotUiMode.VIEW)return false;
-        if (this.uiMode === SaveSlotUiMode.LOAD && !this.sessionSlots[this.cursor].hasData)
+        if ((this.uiMode === SaveSlotUiMode.LOAD || this.uiMode===SaveSlotUiMode.COOP) && !this.sessionSlots[this.cursor].hasData)
           error = true;
         else {
           switch (this.uiMode) {
             case SaveSlotUiMode.LOAD:
+            case SaveSlotUiMode.COOP:
               this.saveSlotSelectCallback = null;
               originalCallback(this.cursor);
               break;
@@ -136,6 +142,9 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
       }
     } else {
       switch (button) {
+        case Button.LEFT:
+        case Button.RIGHT:
+          if(this.recovery?.onPage){this.recovery.onPage(button===Button.LEFT?-1:1);success=true;}break;
         case Button.UP:
           success = this.setCursor(this.cursor ? this.cursor - 1 : 0);
           break;
@@ -156,7 +165,8 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
   populateSessionSlots() {
     for (let s = 0; s < sessionSlotCount; s++) {
       const sessionSlot = new SessionSlot(this.scene, s);
-      sessionSlot.load();
+      if(this.recovery)sessionSlot.setupCoop(this.recovery.rows[s]);
+      else sessionSlot.load();
       this.scene.add.existing(sessionSlot);
       this.sessionSlotsContainer.add(sessionSlot);
       this.sessionSlots.push(sessionSlot);
@@ -196,6 +206,7 @@ export default class SaveSlotSelectUiHandler extends MessageUiHandler {
     this.saveSlotSelectContainer.setVisible(false);
     this.eraseCursor();
     this.saveSlotSelectCallback = null;
+    this.recovery = null;
     this.clearSessionSlots();
   }
 
@@ -291,6 +302,32 @@ class SessionSlot extends Phaser.GameObjects.Container {
     }
 
     this.add(modifierIconsContainer);
+  }
+
+  /** Public recovery summary only; no seat credential or rule model is loaded. */
+  setupCoop(record:any) {
+    this.loaded=true;this.hasData=!!record;
+    if(!record){this.loadingLabel.setText(i18next.t('saveSlotSelectUiHandler:empty'));return;}
+    this.remove(this.loadingLabel,true);
+    const summary=record.summary;
+    const name=Array.from(record.displayName||i18next.t('coop:unnamedTrainer'));
+    const shortName=name.slice(0,8).join('')+(name.length>8?'…':'');
+    const lines=[`联机 ${record.roomId} · ${shortName}`,
+      summary?`第 ${summary.wave??'?'} 波 · ₽${summary.money??0}`:'旧记录 · 连接后更新详情',
+      summary?.updatedAt?new Date(summary.updatedAt).toLocaleString(): '选择恢复／删除'];
+    lines.forEach((line,i)=>{
+      const label=addTextObject(this.scene,8,5+i*14,line,TextStyle.WINDOW);
+      // Keep long nicknames inside the left column, clear of party icons.
+      if(i===0&&label.displayWidth>132)label.setScale(label.scaleX*132/label.displayWidth);
+      this.add(label);
+    });
+    for(const [i,p] of (summary?.party??[]).slice(0,6).entries()){
+      const species=getPokemonSpecies(p.speciesId);
+      const icon=this.scene.add.sprite(146+i*26,3,species.getIconAtlasKey(p.formIndex),species.getIconId(false,p.formIndex??0,false));
+      icon.setOrigin(0,0).setScale(0.75);this.add(icon);
+      this.add(addTextObject(this.scene,146+i*26,28,`Lv${p.level}`,TextStyle.WINDOW,{fontSize:'30px'}));
+      this.add(addTextObject(this.scene,146+i*26,39,`${p.hp}/${p.maxHp}`,TextStyle.WINDOW,{fontSize:'24px'}));
+    }
   }
 
   async load(): Promise<boolean> {

@@ -1422,6 +1422,12 @@ export default class BattleScene extends Phaser.Scene {
 		return this.bgm && this.bgm.isPlaying;
 	}
 
+	/** Read-only playback status for scene lifecycle reconciliation. */
+	getBgmState() {
+		return this.bgm ? {key:this.bgm.key,isPlaying:this.bgm.isPlaying,isPaused:this.bgm.isPaused,
+			pendingRemove:this.bgm.pendingRemove} : null;
+	}
+
 	playBgm(bgmName?: string, fadeOut?: boolean, signal?: AbortSignal): void {
 		if (signal?.aborted) return;
 		if (bgmName === undefined)

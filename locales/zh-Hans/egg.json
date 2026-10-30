@@ -27,5 +27,9 @@
   "moveUpGacha": "蛋招式UP!",
   "shinyUpGacha": "闪光UP!",
   "legendaryUpGacha": "UP!",
-  "vouchersExceedEggCap": "你的扭蛋劵超过了蛋上限！"
+  "vouchersExceedEggCap": "你的扭蛋劵超过了蛋上限！",
+  "waitingCoopTerminal": "已准备好\n等待本次联机结束",
+  "readyInHome": "已准备好\n返回大厅孵化",
+  "savePullFailed": "保存失败，尚未确认扣券。按确认重试同一次抽取。",
+  "eggMove": "蛋招：{{moveName}}"
 }

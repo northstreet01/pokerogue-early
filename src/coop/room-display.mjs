@@ -1,5 +1,17 @@
 // Display only: atlas frames and verified public selections never mutate rule state.
 const atlasCache=new WeakMap();
+// Display identity only; seat numbers remain internal protocol/save keys.
+export function roomPlayerName(names,seat,localSeat,t){
+  const cleanName=name=>typeof name==='string'?name.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,24).replace(/@(?=[cds]\{)/g,'＠'):'';
+  const clean=cleanName(names?.[seat]);
+  // Original message boxes parse @c/@d/@s directives; nicknames stay plain text.
+  if(clean){
+    if(localSeat!==null&&localSeat!==undefined&&cleanName(names?.[1-seat])===clean)
+      return t('namedPlayer',{name:clean,role:t(seat===localSeat?'you':'partner')});
+    return clean;
+  }
+  return t(localSeat===null||localSeat===undefined?'unnamedTrainer':seat===localSeat?'you':'partner');
+}
 export function atlasIcon(scene,key,frameName,label){
   const icon=document.createElement('span');icon.className='coop-atlas-icon';icon.setAttribute('aria-hidden','true');
   if(!scene.textures?.exists?.(key))return icon;
@@ -86,15 +98,18 @@ export function renderInventory(target,scene,items,t){
   });target.append(strip);
 }
 
-export function progressText(message,snapshot,seat,t){
+export function progressText(message,snapshot,seat,t,names=[]){
   if(!message.online?.every(Boolean))return t('waitingConnection');
   if(message.reason==='WAITING_ACK')return t('loadingTogether');
   if(message.blocked)return t('waitingRecovery');
   const kind=snapshot.personal.decision.kind;
   if(kind==='lobby')return t('prepareTogether');
   const state=owner=>{
+    const activity=snapshot.shared?.activities?.[owner];
+    const activityKey={'learn-move':'learningMove',evolution:'choosingEvolution','item-target':'choosingItemTarget'}[activity];
+    if(activityKey)return t(activityKey);
     if(kind==='preparation')return snapshot.personal.decision.sharedMarket?.finished?.[owner]?t('finishedShopping'):t('choosingItems');
     return message.submitted?.[owner]?t('actionSubmitted'):snapshot.personal.decision.requiredSeats?.includes(owner)?t('choosingAction'):t('waitingResult');
   };
-  return `${t('you')}：${state(seat)} · ${t('partner')}：${state(1-seat)}`;
+  return `${roomPlayerName(names,seat,seat,t)}：${state(seat)} · ${roomPlayerName(names,1-seat,seat,t)}：${state(1-seat)}`;
 }

@@ -15,7 +15,7 @@ import { StatusEffect } from "../data/status-effect";
 import PokemonIconAnimHandler, { PokemonIconAnimMode } from "./pokemon-icon-anim-handler";
 import { pokemonEvolutions } from "../data/pokemon-evolutions";
 import { addWindow } from "./window";
-import { SpeciesFormChangeItemTrigger } from "../data/pokemon-forms";
+import { getPokemonFormChangeItems, setPokemonFormChangeItemActive } from "../data/pokemon-forms";
 import { SummaryUiMode } from './summary-ui-handler';
 
 const defaultMessage = () => i18next.t('partyUiHandler:choosePokemon');
@@ -100,6 +100,7 @@ export default class PartyUiHandler extends MessageUiHandler {
   private moveSelectFilter: PokemonMoveSelectFilter;
   private tmMoveId: Moves;
   private allowedOptions: Set<PartyOption> | undefined;
+  private allowFormChangeItems = false;
 
   private iconAnimHandler: PokemonIconAnimHandler;
 
@@ -202,6 +203,7 @@ export default class PartyUiHandler extends MessageUiHandler {
     this.allowedOptions = args[6]?.allowedOptions
       ? new Set<PartyOption>([...args[6].allowedOptions, PartyOption.CANCEL]) : undefined;
     this.readOnlySummary = args[6]?.readOnlySummary === true;
+    this.allowFormChangeItems = args[6]?.allowFormChangeItems === true;
     this.submitReleaseOnly = args[6]?.submitReleaseOnly === true;
     this.submitUnpauseOnly = args[6]?.submitUnpauseOnly === true;
 
@@ -236,7 +238,7 @@ export default class PartyUiHandler extends MessageUiHandler {
     if (this.optionsMode) {
       if (button === Button.ACTION) {
         const option = this.options[this.optionsCursor];
-        if (this.allowedOptions && !this.allowedOptions.has(option)
+        if (this.allowedOptions && !this.allowedOptions.has(option) && !(this.allowFormChangeItems && option >= PartyOption.FORM_CHANGE_ITEM)
           && option !== PartyOption.SCROLL_UP && option !== PartyOption.SCROLL_DOWN) {
           ui.playError();
           return false;
@@ -262,7 +264,8 @@ export default class PartyUiHandler extends MessageUiHandler {
           || (option === PartyOption.RELEASE && this.partyUiMode === PartyUiMode.RELEASE)) {
           let filterResult: string;
           if (option !== PartyOption.TRANSFER && option !== PartyOption.SPLICE) {
-            filterResult = (this.selectFilter as PokemonSelectFilter)(pokemon);
+            filterResult = this.allowFormChangeItems && option >= PartyOption.FORM_CHANGE_ITEM
+              ? null : (this.selectFilter as PokemonSelectFilter)(pokemon);
             if (filterResult === null && this.partyUiMode === PartyUiMode.MOVE_MODIFIER)
               filterResult = this.moveSelectFilter(pokemon.moveset[this.optionsCursor]);
           } else {
@@ -298,12 +301,9 @@ export default class PartyUiHandler extends MessageUiHandler {
                   case PartyUiMode.SWITCH:
                   case PartyUiMode.FAINT_SWITCH:
                   case PartyUiMode.POST_BATTLE_SWITCH:
-                    let formChangeItemModifiers = this.scene.findModifiers(m => m instanceof PokemonFormChangeItemModifier && m.pokemonId === pokemon.id) as PokemonFormChangeItemModifier[];
-                    if (formChangeItemModifiers.find(m => m.active))
-                      formChangeItemModifiers = formChangeItemModifiers.filter(m => m.active);
+                    const formChangeItemModifiers = getPokemonFormChangeItems(pokemon);
                     const modifier = formChangeItemModifiers[option - PartyOption.FORM_CHANGE_ITEM];
-                    modifier.active = !modifier.active;
-                    this.scene.triggerPokemonFormChange(pokemon, SpeciesFormChangeItemTrigger, false, true);
+                    setPokemonFormChangeItemActive(pokemon, modifier.formChangeItem, !modifier.active, true);
                     break;
                 }
               } else if (this.cursor)
@@ -515,7 +515,7 @@ export default class PartyUiHandler extends MessageUiHandler {
     
     this.optionsMode = true;
 
-    let optionsMessage = 'Do what with this Pokémon?';
+    let optionsMessage = i18next.t('partyUiHandler:doWhatWithThisPokemon');
 
     switch (this.partyUiMode) {
       case PartyUiMode.MOVE_MODIFIER:
@@ -572,10 +572,8 @@ export default class PartyUiHandler extends MessageUiHandler {
                   && (m as SwitchEffectTransferModifier).pokemonId === this.scene.getPlayerField()[this.fieldIndex].id))
               this.options.push(PartyOption.PASS_BATON);
           }
-          if (this.scene.getCurrentPhase() instanceof CommandPhase) {
-            formChangeItemModifiers = this.scene.findModifiers(m => m instanceof PokemonFormChangeItemModifier && m.pokemonId === pokemon.id) as PokemonFormChangeItemModifier[];
-            if (formChangeItemModifiers.find(m => m.active))
-              formChangeItemModifiers = formChangeItemModifiers.filter(m => m.active);
+          if (!this.allowFormChangeItems && this.scene.getCurrentPhase() instanceof CommandPhase) {
+            formChangeItemModifiers = getPokemonFormChangeItems(pokemon);
             for (let i = 0; i < formChangeItemModifiers.length; i++)
               this.options.push(PartyOption.FORM_CHANGE_ITEM + i);
           }
@@ -620,7 +618,14 @@ export default class PartyUiHandler extends MessageUiHandler {
         this.options.push(im);
     }
 
-    if (this.allowedOptions) this.options = this.options.filter(option => this.allowedOptions.has(option));
+    // Cooperative callers submit item identity/state to the host. They never
+    // mutate these display copies or reuse a client-side modifier index.
+    if (this.allowFormChangeItems) {
+      formChangeItemModifiers = getPokemonFormChangeItems(pokemon);
+      this.options.push(...formChangeItemModifiers.map((_, i) => PartyOption.FORM_CHANGE_ITEM + i));
+    }
+    if (this.allowedOptions) this.options = this.options.filter(option => this.allowedOptions.has(option)
+      || this.allowFormChangeItems && option >= PartyOption.FORM_CHANGE_ITEM);
     this.optionsScrollTotal = this.options.length;
     let optionStartIndex = this.optionsScrollCursor;
     let optionEndIndex = Math.min(this.optionsScrollTotal, optionStartIndex + (!optionStartIndex || this.optionsScrollCursor + 8 >= this.optionsScrollTotal ? 8 : 7));
@@ -792,6 +797,7 @@ export default class PartyUiHandler extends MessageUiHandler {
   clear() {
     super.clear();
     this.allowedOptions = undefined;
+    this.allowFormChangeItems = false;
     this.readOnlySummary = false;
     this.submitReleaseOnly = false;
     this.submitUnpauseOnly = false;

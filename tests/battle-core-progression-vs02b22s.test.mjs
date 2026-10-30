@@ -15,7 +15,10 @@ const transitions=new Map();
 const front=c=>(c.continuation.phaseQueuePrepend.at(-1)??c.continuation.phaseQueue[0])?.phase.type;
 before(async()=>{
  await buildCoopRuntime();api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');api.describeOriginalCatalogs();
- route=await steadyRoute({untilWave:25,onStep:(_step,saved)=>{
+ // Legal default-profile starters, one per seat, keep original EXP together.
+ // The older two-member bot now naturally loses to the wave-20 gym; that is
+ // valid gameplay, not a rule-runner failure or a reason to weaken assertions.
+ route=await steadyRoute({parties:[[909],[906]],untilWave:25,onStep:(_step,saved)=>{
   const c=saved.nativeCheckpoint;
   if([10,20].includes(c.battle.waveIndex)&&c.decision.kind!=='continuing')transitions.set(c.battle.waveIndex,structuredClone(saved));
  }});
@@ -117,7 +120,9 @@ test('same-seed original trainer keeps generated stats and personality while onl
 });
 
 test('normal defeat persists an empty original phase queue and projects a terminal Home reason to both owners',async()=>{
- const ended=await steadyRoute({initialSaved:route.milestones.get(25),untilWave:26});
+ // Exercise the unchanged two-member player's actual losing route separately
+ // from the winning milestone fixture, without manufacturing a faint/HP edit.
+ const ended=await steadyRoute({untilWave:26});
  assert.equal(ended.error,undefined);const saved=ended.saved,c=saved.nativeCheckpoint;
  assert.equal(c.decision.kind,'ended');assert.equal(c.decision.reason,'defeat');assert.equal(c.decision.victory,false);
  assert.ok(c.roster.entries.filter(e=>e.owner!==null).every(e=>e.pokemon.fields.hp===0));

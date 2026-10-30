@@ -24,7 +24,8 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
   private displayGeneration = 0;
   private stockIndices = new WeakMap<ModifierOption,number>();
   private inputPresentation: { shopOptions?: ModifierTypeOption[]; allowReroll?: boolean; allowTransfer?: boolean;
-    stock?: {rewards:(number|null)[];shop:(number|null)[]};
+    playerName?:(seat:number)=>string;
+    stock?: {rewards:(number|null)[];shop:(number|null)[];reservedRewards?:number[];reservedShop?:number[]};
     preparation?: { automatic?:boolean; ready: boolean; rewardResolved: boolean; onComplete: () => void } } = {};
 
   public options: ModifierOption[];
@@ -393,15 +394,18 @@ export default class ModifierSelectUiHandler extends AwaitableUiHandler {
     this.updateRerollCostText();
   }
 
+  /** Nicknames can arrive in room presence without a new rule revision. */
+  refreshOwnerLabels() { this.refreshStock(); }
+
   private refreshStock() {
     const stock=this.inputPresentation.stock;
     if (!stock) return;
-    this.options.forEach((option,index)=>option.setStockOwner(stock.rewards[index]));
+    this.options.forEach((option,index)=>option.setStockOwner(stock.rewards[index],stock.reservedRewards?.includes(index),this.inputPresentation.playerName?.(stock.rewards[index])));
     for (const option of this.shopOptionsRows.flat()) {
       // The original visual paid rows are reversed relative to callback rows.
       // Match the actual original option object instead of deleting/reindexing.
       const index=this.stockIndices.get(option);
-      option.setStockOwner(stock.shop[index]);
+      option.setStockOwner(stock.shop[index],stock.reservedShop?.includes(index),this.inputPresentation.playerName?.(stock.shop[index]));
     }
   }
 
@@ -658,9 +662,9 @@ class ModifierOption extends Phaser.GameObjects.Container {
     this.itemCostText.setShadowColor(getTextColor(textStyle, true));
   }
 
-  setStockOwner(owner:number|null|undefined) {
+  setStockOwner(owner:number|null|undefined,reserved=false,name=i18next.t('coop:unnamedTrainer')) {
     const claimed=owner===0||owner===1;
     this.setAlpha(claimed?0.35:1);
-    this.itemText.setText(this.modifierTypeOption.type.getDisplayName() + (claimed ? '\n'+i18next.t(this.modifierTypeOption.cost?'coop:stockPaid':'coop:stockReward',{player:owner+1}) : ''));
+    this.itemText.setText(this.modifierTypeOption.type.getDisplayName() + (claimed ? '\n'+i18next.t(reserved?'coop:stockReserved':this.modifierTypeOption.cost?'coop:stockPaid':'coop:stockReward',{name}) : ''));
   }
 }

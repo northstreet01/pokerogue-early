@@ -43,8 +43,25 @@ export function createMetaCodec(original) {
   function profile(input) {
     const p = json(input);
     exact(p, ['format','schemaVersion','profileId','revision','createdAt','updatedAt','displayName','avatarId',
-      'originalSystem','soloRuns','grantLedger','deferredHatches','preferences','migration','isolated']);
-    check(p.format === 'pokerogue-local-profile' && p.schemaVersion === 1, 'LOCAL_VERSION_MISMATCH');
+      'originalSystem','soloRuns','grantLedger','deferredHatches','preferences','migration','isolated'],p.schemaVersion===2?['hatchResults','eggRun']:[]);
+    check(p.format === 'pokerogue-local-profile' && [1,2].includes(p.schemaVersion), 'LOCAL_VERSION_MISMATCH');
+    // v1 remains byte-compatible on read. The first egg-lifecycle grant or
+    // durable hatch upgrades to v2; playback receipts survive interruptions.
+    if(p.schemaVersion===2){
+      check(Object.hasOwn(p,'eggRun'),'INVALID_EGG_RUN');
+      if(p.eggRun!==null){
+        exact(p.eggRun,['sourceRunId','eggs']);check(id(p.eggRun.sourceRunId)&&Array.isArray(p.eggRun.eggs),'INVALID_EGG_RUN');
+        unique(p.eggRun.eggs.map(e=>e.id));
+        for(const egg of p.eggRun.eggs){exact(egg,['id','timestamp']);
+          check(uint(egg.id)&&uint(egg.timestamp)&&p.originalSystem.eggs.some(e=>e.id===egg.id&&e.timestamp===egg.timestamp),'EGG_RUN_INVENTORY_MISMATCH');}
+      }
+      check(Array.isArray(p.hatchResults)&&p.hatchResults.length<=10000,'INVALID_HATCH_RESULTS');
+      unique(p.hatchResults.map(r=>r.id));
+      for(const result of p.hatchResults){
+        exact(result,['id','egg','pokemon','eggMoveIndex']);check(id(result.id),'INVALID_HATCH_RESULT');
+        check(typeof original.hatchResult==='function','ORIGINAL_HATCH_CODEC_REQUIRED');original.hatchResult(result);
+      }
+    }
     check(id(p.profileId) && uint(p.revision) && uint(p.createdAt) && uint(p.updatedAt) && p.updatedAt >= p.createdAt);
     check(typeof p.displayName === 'string' && p.displayName.trim().length > 0 && p.displayName.length <= 40);
     check(p.avatarId === 'default', 'UNSUPPORTED_LOCAL_AVATAR');
@@ -73,7 +90,9 @@ export function createMetaCodec(original) {
       check(p.originalSystem.eggs.some(e => e.id === h.eggId && e.timestamp === h.eggTimestamp && e.hatchWaves <= 0), 'DEFERRED_EGG_MISMATCH');
       check(['waiting-terminal','released'].includes(h.state));
       if (h.state === 'waiting-terminal') check(h.terminal === null, 'NONTERMINAL_HATCH');
-      else { exact(h.terminal, ['result','receiptId']); check(['victory','defeat'].includes(h.terminal.result) && factId(h.terminal.receiptId)); }
+      else { exact(h.terminal, ['result','receiptId']); check(['victory','defeat'].includes(h.terminal.result) && factId(h.terminal.receiptId));
+        if(p.schemaVersion===2)check(p.grantLedger.some(g=>g.id===h.terminal.receiptId&&g.sourceRunId===h.sourceRunId&&g.kind==='completion'),'COOP_EGG_TERMINAL_RECEIPT_REQUIRED');
+      }
     }
     exact(p.preferences, ['settings','tutorials','prLang']);
     for (const key of ['settings','tutorials']) if (p.preferences[key] !== null) {

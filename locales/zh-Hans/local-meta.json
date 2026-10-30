@@ -6,7 +6,7 @@
   "preview":"导入预览 · {{name}}", "summary":"{{slots}} 份单人冒险 · {{eggs}} 颗蛋", "install":"导入并使用（保留原资料）",
   "replace":"完整替换这份档案", "replacePrompt":"收藏、蛋、余额和账本将一起恢复，当前档案保留备份。",
   "slot":"旧槽位 {{slot}}：第 {{wave}} 波", "slotConfirmed":"旧冒险归属已确认", "confirmSlots":"确认这些旧冒险属于本人",
-  "ownershipRequired":"请先在档案管理中确认旧冒险归属。", "eggsReserved":"合作冒险仍有待孵化蛋，暂不能切换到单人消费。",
+  "ownershipRequired":"请先在档案管理中确认旧冒险归属。", "eggsReserved":"蛋仍绑定在未结束的联机冒险中。请先恢复并完成该冒险；已结束的请返回大厅领取孵化结果。",
   "backupOrigin":"首次迁移 / 导入恢复点", "backupPrevious":"上次恢复前的档案", "backupAuto":"自动备份 {{number}}", "restorePrompt":"恢复完整档案？现有有效档案会保留为恢复点。",
   "busy":"该档案正在另一页面使用，请先退出那一页面。", "lost":"档案写入权已失效，请返回局外后重试。",
   "closed":"当前页面已失效，请返回局外。", "conflict":"档案已被更新，请重新读取后再操作。", "failed":"资料操作失败，原有效存档没有被替换。",

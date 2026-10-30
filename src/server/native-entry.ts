@@ -14,6 +14,7 @@ import { preparationItemTarget, isPreparationModifier, isPreparationPersistent, 
 import { CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase } from '../phases';
 import { Mode } from '../ui/ui';
 import { GameData } from '../system/game-data';
+import { EggHatchPhase } from '../egg-hatch-phase';
 import { GameStats } from '../system/game-stats';
 import { BattleAnim } from '../data/battle-anims';
 import { createOriginalRuntime, constructOriginalPokemon, constructSelectedStarterInstance, capturePokemonState } from './original-runtime';
@@ -51,7 +52,7 @@ import { pokemonEvolutions } from '../data/pokemon-evolutions';
 import { createCaptureChoice, validateCaptureChoice } from '../battle-core/capture-choice.mjs';
 import { hasLegacyCaptures, legacyCaptureOptions, validateLegacyCapture } from '../battle-core/legacy-capture.mjs';
 import { nextSafeDecisionId } from '../battle-core/safe-decisions.mjs';
-import { PokemonHeldItemModifier, MoneyInterestModifier, captureModifierState } from '../modifier/modifier';
+import { PokemonHeldItemModifier, MoneyInterestModifier, AddVoucherModifier, captureModifierState } from '../modifier/modifier';
 import { EncoreTag, TrappedTag } from '../data/battler-tags';
 import { CheckTrappedAbAttr, applyCheckTrappedAbAttrs } from '../data/ability';
 import * as Utils from '../utils';
@@ -71,7 +72,8 @@ import { GameOverPhase, UnlockPhase } from '../phases';
 import { BattleSpec } from '../enums/battle-spec';
 import { bindCoopGameOver } from '../battle-core/coop-game-over.mjs';
 import { achvs } from '../system/achv';
-import {getSpeciesFormChangeMessage} from '../data/pokemon-forms';
+import {getSpeciesFormChangeMessage,getPokemonFormChangeItems,setPokemonFormChangeItemActive} from '../data/pokemon-forms';
+import {applyPreparationReservation} from '../battle-core/shared-preparation.mjs';
 import { vouchers } from '../system/voucher';
 
 // Progression choices append a safe sequence suffix. Keep the legacy native
@@ -123,7 +125,7 @@ class DisplayTarget {
 
 const supportedPhases = [SummonPhase, SummonMissingPhase, PostSummonPhase, ToggleDoublePositionPhase, TurnInitPhase, CommandPhase, SelectTargetPhase, MessagePhase, ShinySparklePhase, ShowTrainerPhase,
   EnemyCommandPhase, TurnStartPhase, MovePhase, MoveEffectPhase, MoveEndPhase, DamagePhase, StatChangePhase, TurnEndPhase, PostTurnStatusEffectPhase, CommonAnimPhase, ObtainStatusEffectPhase, ShowAbilityPhase,
-  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, EvolutionPhase, EndEvolutionPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, ModifierRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase, LevelCapPhase, WeatherEffectPhase, QuietFormChangePhase, GameOverPhase];
+  FaintPhase, VictoryPhase, ExpPhase, ShowPartyExpBarPhase, HidePartyExpBarPhase, LevelUpPhase, LearnMovePhase, EvolutionPhase, EndEvolutionPhase, BattleEndPhase, EggLapsePhase, CheckSwitchPhase, SwitchPhase, SwitchSummonPhase, ReturnPhase, TrainerVictoryPhase, MoneyRewardPhase, ModifierRewardPhase, AttemptCapturePhase, BerryPhase, PokemonHealPhase, LevelCapPhase, WeatherEffectPhase, QuietFormChangePhase, FormChangePhase, GameOverPhase];
 const supportsPhase = p => supportedPhases.some(ctor => Object.getPrototypeOf(p) === ctor.prototype);
 const switchKind = p => p instanceof SelectTargetPhase ? 'wait-target' : p instanceof CommandPhase ? 'wait-actions' : p instanceof AttemptCapturePhase ? 'capture-select' : p instanceof CheckSwitchPhase ? 'switch-confirm'
   : p.isModal ? 'wait-switch' : 'switch-select';
@@ -198,7 +200,7 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
   root.field = { list: [], add(p) { this.list.push(p); return this; },
     getIndex(p) { return this.list.indexOf(p); }, getAll() { return [...this.list]; },
     remove(p) { const i = this.getIndex(p); if (i >= 0) this.list.splice(i, 1); }, moveBelow() {} };
-  const deferredData = (owner: number | null = null) => ({ ...identity, unlocks: {}, gameStats: new GameStats(), getFormAttr: GameData.prototype.getFormAttr,
+  const deferredData = (owner: number | null = null) => ({ ...identity, unlocks: {}, voucherCounts:{0:0,1:0,2:0,3:0}, gameStats: new GameStats(), getFormAttr: GameData.prototype.getFormAttr,
     setPokemonSeen: (p, incrementCount = true) => intents.push({ kind: 'seen', pokemonId: p.id,
       factVersion:1, owner, pokemon:capturePokemonState(p),
       speciesId: p.species.speciesId, dexAttr: p.getDexAttr().toString(), incrementCount }),
@@ -590,9 +592,9 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       check(c.battle.battleType === BattleType.TRAINER
         && (p as any).moneyMultiplier === c.battle.trainer.config.moneyMultiplier,'UNSUPPORTED_NATIVE_MONEY_REWARD');
       check(root.phaseQueuePrependSpliceIndex === -1,'UNSAFE_MONEY_QUEUE_SPLIT');
-      // One original award becomes two owned original phases. Their persisted
-      // scopes prevent either share from being reapplied after restoration.
-      return views.map(view => new MoneyRewardPhase(view,(p as any).moneyMultiplier));
+      // Freeze the doubled rate into BOTH persisted personal phases before
+      // either is paid. Legacy owned phases retain their old rate on recovery.
+      return views.map(view => new MoneyRewardPhase(view,(p as any).moneyMultiplier * 2));
     });
     for (const key of ['phaseQueue', 'phaseQueuePrepend', 'nextCommandPhaseQueue']) c.continuation[key] = root[key].map(p => {
       const scope = bindPhase(p);
@@ -669,7 +671,8 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
       }
       if (p instanceof MoneyRewardPhase) check((scope === 0 || scope === 1)
         && c.battle.battleType === BattleType.TRAINER
-        && (p as any).moneyMultiplier === c.battle.trainer.config.moneyMultiplier,'INVALID_TRAINER_MONEY_SCOPE');
+        && [(c.battle.trainer.config.moneyMultiplier),(c.battle.trainer.config.moneyMultiplier * 2)]
+          .includes((p as any).moneyMultiplier),'INVALID_TRAINER_MONEY_SCOPE');
       const changes = [];
       const patch = (object, key, value) => { changes.push([object, key, Object.getOwnPropertyDescriptor(object, key)]);
         Object.defineProperty(object, key, { value, writable: true, configurable: true }); };
@@ -693,9 +696,16 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
         patch(p,'doReward',() => observeRulePromise((p as any).scene,reward.call(p)));
       }
       if (p instanceof MoneyRewardPhase) patch((p as any).scene,'getWaveMoneyAmount',multiplier => {
-        const total = BattleScene.prototype.getWaveMoneyAmount.call(root,multiplier);
+        const trainerRate=c.battle.trainer.config.moneyMultiplier;
+        check(multiplier===(p as any).moneyMultiplier,'INVALID_TRAINER_MONEY_TOTAL');
+        const total = BattleScene.prototype.getWaveMoneyAmount.call(root,trainerRate);
         check(Number.isSafeInteger(total) && total >= 0 && total % 2 === 0,'INVALID_TRAINER_MONEY_TOTAL');
-        return total / 2;
+        // Apply the persisted rate AFTER the original rounding, then split.
+        // Global wave-money changes would also inflate shop prices. Old owned
+        // phases use rate 1 so a half-paid legacy award remains equal.
+        const rewardPool = total * (multiplier===trainerRate?1:2);
+        check(Number.isSafeInteger(rewardPool),'INVALID_TRAINER_MONEY_TOTAL');
+        return rewardPool / 2;
       });
       if (p instanceof SwitchPhase) {
         const battle = Object.create(c.battle); battle.getBattlerCount = () => 1;
@@ -785,7 +795,31 @@ function bindNativeScene(c: any, identity: any, inputs: any = {}) {
           } else if (p instanceof EggLapsePhase) {
             // Same original phase once per personal inventory, in the room's
             // established order. Its original hatch phases retain their owner.
-            for (const scene of views) { ended = 0; new EggLapsePhase(scene).start(); }
+            for (const [seat,scene] of views.entries()) {
+              ended = 0;
+              if(!identity.deferCoopEggs){new EggLapsePhase(scene).start();continue;}
+              const inventory=scene.gameData.eggs;
+              const before=originalOwnedEggStateCodec.capture({players:[inventory,[]]}).players[0];
+              const unshift=scene.unshiftPhase,message=scene.queueMessage;
+              // Run the original one-wave decrement only on unfinished eggs.
+              // Full eggs stay in inventory; no hatch Phase or in-battle text.
+              scene.gameData.eggs=inventory.filter(e=>e.hatchWaves>0);
+              scene.unshiftPhase=phase=>check(phase instanceof EggHatchPhase,'UNEXPECTED_EGG_PHASE');
+              scene.queueMessage=()=>{};
+              try{new EggLapsePhase(scene).start();}
+              finally{scene.gameData.eggs=inventory;scene.unshiftPhase=unshift;scene.queueMessage=message;}
+              const after=originalOwnedEggStateCodec.capture({players:[inventory,[]]}).players[0];
+              intents.push({kind:'egg-progress',factVersion:1,owner:seat,waveIndex:c.battle.waveIndex,before,after});
+            }
+          } else if(p instanceof FormChangePhase){
+            observeRulePromise((p as any).scene,(async()=>{
+              const pokemon=(p as any).pokemon,preName=pokemon.name;
+              await p.applyFormChange();p.validateFormChangeAchievements();
+              events.push({kind:'form-change',scope:'shared',pokemonId:pokemon.id,view:root.nativePublicPokemon(pokemon)});
+              const text=getSpeciesFormChangeMessage(pokemon,(p as any).formChange,preName);
+              events.push({kind:'message',scope:scope,text,presentation:presentationText(text)});
+              Phase.prototype.end.call(p);
+            })());
           } else if (p instanceof EnemyCommandPhase && !root.getEnemyField()[(p as any).fieldIndex]?.isActive(true)) {
             c.battle.turnCommands[(p as any).fieldIndex + 2] = null; Phase.prototype.end.call(p);
           } else p.start();
@@ -1047,7 +1081,7 @@ export async function stepNativeEntry(runtime, checkpoint) {
     supports: (_c, p) => supportsPhase(p),
     async execute(c, p) {
       const binding = bindNativeScene(c, runtime.scene.gameData);
-      if (p instanceof EvolutionPhase) {
+      if (p instanceof EvolutionPhase && !(p instanceof FormChangePhase)) {
         binding.bindPhase(p); binding.dispose();
         return {completed:false, suspended:true, pendingTasks:0, events:[], grants:[]};
       }
@@ -1055,7 +1089,7 @@ export async function stepNativeEntry(runtime, checkpoint) {
       finally { binding.dispose(); }
     },
     suspendBoundary(c, p, id) {
-      if (p instanceof EvolutionPhase) return evolutionBoundary(c, p, id);
+      if (p instanceof EvolutionPhase && !(p instanceof FormChangePhase)) return evolutionBoundary(c, p, id);
       return { remaining: switchKind(p), decision: switchDecision(id, c, p) };
     },
     finishBoundary(c, p, id) {
@@ -1167,13 +1201,13 @@ function evolutionBoundary(c, p, id) {
 
 function nativePreparationGrowthDriver(runtime,intents) {
   return {...nativeProgressionDriver(runtime,intents),
-    supports:(_c,p)=>[LevelUpPhase,LearnMovePhase,EvolutionPhase,EndEvolutionPhase].some(ctor=>Object.getPrototypeOf(p)===ctor.prototype),
+    supports:(_c,p)=>[LevelUpPhase,LearnMovePhase,EvolutionPhase,EndEvolutionPhase,FormChangePhase,QuietFormChangePhase].some(ctor=>Object.getPrototypeOf(p)===ctor.prototype),
     async execute(c,p) {
       const binding=bindNativeScene(c,runtime.scene.gameData);
       try {
         const seat=binding.bindPhase(p);
-        if (p instanceof EvolutionPhase || p instanceof LearnMovePhase
-          && inspectLearnMove(binding.views[seat].getParty()[(p as any).partyMemberIndex],(p as any).moveId).kind==='choose') {
+        if ((p instanceof EvolutionPhase && !(p instanceof FormChangePhase)) || (p instanceof LearnMovePhase
+          && inspectLearnMove(binding.views[seat].getParty()[(p as any).partyMemberIndex],(p as any).moveId).kind==='choose')) {
           phases.capture(p,c,seat);
           return {completed:false,suspended:true,pendingTasks:0,events:[],grants:[]};
         }
@@ -1181,7 +1215,7 @@ function nativePreparationGrowthDriver(runtime,intents) {
       } finally {binding.dispose();}
     },
     suspendBoundary(c,p,id) {
-      if (p instanceof EvolutionPhase) return evolutionBoundary(c,p,id);
+      if (p instanceof EvolutionPhase && !(p instanceof FormChangePhase)) return evolutionBoundary(c,p,id);
       const seat=phases.capture(p,c).scope;
       const pokemon=c.roster.entries.find(e=>e.owner===seat&&e.group==='party'&&e.index===(p as any).partyMemberIndex).pokemon;
       return {remaining:'learn-apply',decision:createLearnDecision(id,c,seat,pokemon.id,(p as any).moveId,id=>!!allMoves[id])};
@@ -1201,7 +1235,7 @@ export async function runNativeUntilBoundary(runtime, checkpoint) {
       if (next instanceof SelectModifierPhase) return { checkpoint: codec.capture(c), events: binding.events, intents: binding.intents };
       if(next instanceof NewBattlePhase){c.decision={...c.decision,reason:'next-battle'};return {checkpoint:codec.capture(c),events:binding.events,intents:binding.intents};}
       const p = selectNextPhase(binding.root, () => populatePhaseQueue(binding.root, () => new TurnInitPhase(binding.root))).phase;
-      if (p instanceof EvolutionPhase) {
+      if (p instanceof EvolutionPhase && !(p instanceof FormChangePhase)) {
         binding.bindPhase(p); binding.sync();
         const stop = evolutionBoundary(c,p,nextSafeDecisionId(c.decision.id));
         c.continuation.currentPhase = {kind:'original-phase',phaseId:Math.max(-1,
@@ -1423,7 +1457,7 @@ async function openNativePersonalMenu(candidate, runtime, seat, rerolledPhase = 
   const phase = rerolledPhase ?? new SelectModifierPhase(scene);
   phase.scene = scene;
   let menu;
-  (phase as any).getExcludedModifierIds = () => preparationRewardExclusions();
+  (phase as any).getExcludedModifierIds = () => preparationRewardExclusions(runtime.scene.gameData.deferCoopEggs===true);
   scene.ui = { setMode: (mode, _player, options, callback, cost) => {
     check(mode === Mode.MODIFIER_SELECT, 'NATIVE_UI_DECISION_REQUIRED'); menu = { options, callback, cost };
   } };
@@ -1468,7 +1502,8 @@ function preparationEffectDriver(runtime, intents = []) {
       const options = action.operation === 'buy' ? row.shop : row.rewards;
       const option = options.find(o => o.id === action.optionId);
       check(option, 'INVALID_PREPARATION_OPTION');
-      check(!option.type.catalogId.startsWith('VOUCHER'), 'COOP_VOUCHER_RULE_UNCONFIRMED');
+      check(!option.type.catalogId.startsWith('VOUCHER')||runtime.scene.gameData.deferCoopEggs===true,
+        'COOP_VOUCHER_RULE_UNCONFIRMED');
       if (action.operation === 'buy') {
         const shop = getPlayerShopModifierTypeOptionsForWave(c.battle.waveIndex,
           BattleScene.prototype.getWaveMoneyAmount.call({ currentBattle: c.battle }, 1));
@@ -1568,6 +1603,12 @@ function preparationEffectDriver(runtime, intents = []) {
       view.addModifier = (...args) => {
         const modifier = args[0];
         check(isPreparationModifier(modifier), 'PREPARATION_EFFECT_UNAVAILABLE');
+        if(modifier instanceof AddVoucherModifier){
+          check(runtime.scene.gameData.deferCoopEggs===true,'PREPARATION_EFFECT_UNAVAILABLE');
+          const type=modifier.type.id;
+          check(Object.hasOwn(modifierTypes,type),'INVALID_VOUCHER_ITEM');
+          binding.intents.push({kind:'voucher-item',factVersion:1,owner:seat,id:`${c.decision.id}:${action.optionId}`,catalogId:type});
+        }
         return observeRulePromise(view, BattleScene.prototype.addModifier.apply(view, args));
       };
       try {
@@ -1634,9 +1675,49 @@ function preparationEffectDriver(runtime, intents = []) {
   };
 }
 
+// Free owned configuration update. The same original item trigger and form
+// phases run in preparation and at a clean battle-input boundary. No turn,
+// money, PP, reward claim or permanent inventory is fabricated here.
+function validateFormToggle(c,seat,action){
+  check([0,1].includes(seat)&&action&&Object.keys(action).sort().join(',')==='active,item,kind,pokemonId'
+    &&action.kind==='form-toggle'&&Number.isSafeInteger(action.item)&&typeof action.active==='boolean','INVALID_FORM_TOGGLE');
+  check(['wait-actions','preparation'].includes(c.decision.kind)&&c.decision.requiredSeats.includes(seat),'INVALID_FORM_TOGGLE');
+  if(c.decision.kind==='preparation')check(!c.decision.players[seat].selection&&!c.decision.players[seat].subdecision,'INVALID_FORM_TOGGLE');
+  const entry=c.roster.entries.find(e=>e.owner===seat&&e.group==='party'&&e.pokemon.id===action.pokemonId);
+  check(entry,'INVALID_FORM_OWNER');
+  const view=Object.create(entry.pokemon.scene??{});
+  view.findModifiers=filter=>c.players[seat].modifiers.filter(filter);
+  const target=Object.create(entry.pokemon);target.scene=view;
+  check(getPokemonFormChangeItems(target).some(m=>m.formChangeItem===action.item&&m.active!==action.active),'STALE_FORM_ITEM');
+  return entry.pokemon;
+}
+async function chooseNativeFormToggle(runtime,c,seat,action){
+  const pokemon=validateFormToggle(c,seat,action),binding=bindNativeScene(c,runtime.scene.gameData),view=binding.views[seat],queued=[];
+  const unshift=view.unshiftPhase;
+  view.unshiftPhase=phase=>{check(phase instanceof FormChangePhase||phase instanceof QuietFormChangePhase,'UNEXPECTED_FORM_PHASE');queued.push(phase);};
+  try{
+    check(setPokemonFormChangeItemActive(pokemon,action.item,action.active),'STALE_FORM_ITEM');
+    for(let count=0;queued.length;count++){
+      check(count<20,'FORM_CHANGE_LIMIT');await binding.execute(queued.shift());
+    }
+    await binding.drainTasks();binding.sync();
+    const id=nextSafeDecisionId(c.decision.id);
+    const text=i18next.t(c.decision.kind==='wait-actions'?'coop:formToggleBattleSaved':'coop:formToggleSaved');
+    binding.events.push({kind:'message',scope:'shared',text,presentation:presentationText(text)});
+    if(c.decision.kind==='wait-actions')c.decision=actionDecision(c,binding.root,id);else c.decision.id=id;
+    return {checkpoint:codec.capture(c),events:binding.events,intents:binding.intents};
+  }finally{view.unshiftPhase=unshift;binding.dispose();}
+}
+
 export async function chooseNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
+  if(payload.action?.kind==='form-toggle')return chooseNativeFormToggle(runtime,c,payload.seat,payload.action);
+  if(['reserve-item','cancel-selection'].includes(payload.action?.operation)){
+    originalSafeDecisionCodec.validateAction(c,payload.seat,payload.action);
+    applyPreparationReservation(c,payload.seat,payload.action);c.decision.id=nextSafeDecisionId(c.decision.id);
+    return {checkpoint:codec.capture(c),events:[],intents:[]};
+  }
   if (c.decision.kind==='preparation' && c.decision.players[payload.seat]?.subdecision) {
     const intents=[];
     const result=await advancePreparationGrowth(c,payload.seat,payload.action,codec,originalSafeDecisionCodec,nativePreparationGrowthDriver(runtime,intents));
@@ -1862,6 +1943,10 @@ function validateEvolutionResume(c,seat,action){
 export function validateNativePreparation(runtime, payload) {
   check(payload && Object.keys(payload).sort().join(',') === 'action,checkpoint,seat', 'INVALID_NATIVE_ACTION');
   const c = codec.restore(payload.checkpoint);
+  if(payload.action?.kind==='form-toggle'){validateFormToggle(c,payload.seat,payload.action);return true;}
+  if(['reserve-item','cancel-selection'].includes(payload.action?.operation)){
+    originalSafeDecisionCodec.validateAction(c,payload.seat,payload.action);return true;
+  }
   if (c.decision.kind==='preparation' && c.decision.players[payload.seat]?.subdecision) {
     codec.validateAction(c,payload.seat,payload.action);return true;
   }
@@ -1927,6 +2012,9 @@ export function projectNativeSnapshot(runtime, payload) {
     : c.roster.entries.find(entry => entry.pokemon.id === id) ?? null);
   const shared = {
     format: 1,
+    activities:[0,1].map(seat=>c.decision.kind==='preparation'?(c.decision.players[seat].subdecision?.kind
+      ??(c.decision.players[seat].selection?'item-target':c.decision.players[seat].rewardResolved?'finished':'shopping'))
+      :c.decision.requiredSeats?.includes(seat)?c.decision.kind:'waiting'),
     stage: 'battle',
     waveIndex: c.battle.waveIndex,
     turn: c.battle.turn,
@@ -1992,7 +2080,8 @@ export function projectNativeSnapshot(runtime, payload) {
       ...(c.decision.kind==='ended'?{reason:c.decision.reason,victory:c.decision.victory}:{}),
       players: c.decision.kind === 'preparation' ? c.decision.players[payload.seat] : null,
       ...(c.decision.kind === 'preparation' && c.decision.shared ? {sharedMarket: {...c.decision.shared,
-        finished:c.decision.players.map(p=>p.ready),rerollLocked:c.decision.players.some(p=>p.rewardResolved)}} : {}),
+        reservations:c.decision.players.flatMap((p,seat)=>p.selection?[{optionId:p.selection.optionId,seat}]:[]),
+        finished:c.decision.players.map(p=>p.ready),rerollLocked:c.decision.players.some(p=>p.rewardResolved||p.selection)}} : {}),
       learn: c.decision.kind === 'learn-move' && c.decision.requiredSeats.includes(payload.seat) ? c.decision.learn : null,
       ...(c.decision.kind === 'evolution' && c.decision.requiredSeats.includes(payload.seat)
         ? {evolution:{pokemonId:c.decision.pokemonId,stage:c.decision.stage}} : {}),

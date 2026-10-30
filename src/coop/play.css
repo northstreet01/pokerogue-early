@@ -45,6 +45,11 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #coop-play-overlay.selecting-team .coop-team-slot{min-height:36px}
 #coop-play-overlay.selecting-team .coop-team-slot>span:not(.coop-atlas-icon),#coop-play-overlay.selecting-team .coop-team-slot small{display:none}
 #coop-play-overlay.selecting-team .coop-team-preview{margin:0}
+/* Reserve the same header space throughout a cooperative session. Header
+   wrapping/selection/inventory changes must never resize Phaser's viewport. */
+body:has(#coop-play-overlay){padding-top:112px;box-sizing:border-box}
+#coop-play-overlay.selecting-team,#coop-play-overlay:not(.room-lobby){position:fixed;inset:0 0 auto;height:112px}
+#coop-play-overlay.selecting-team .panel,#coop-play-overlay:not(.room-lobby) .panel{height:112px;box-sizing:border-box;overflow:auto;align-content:flex-start}
 #coop-play-overlay .coop-progress{font-size:13px;color:#cde1f5;overflow-wrap:anywhere}
 #coop-play-overlay.room-lobby .coop-progress{color:#334b66}
 #coop-play-overlay.selecting-team .coop-progress{color:#cde1f5}

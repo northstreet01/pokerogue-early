@@ -4,7 +4,9 @@ import {recordSharedPreparationEffect} from './shared-preparation.mjs';
 
 export function validatePreparationEffect(c,seat,action,safe,driver){
   safe.validateAction(c,seat,action);
-  check(c.decision.kind==='preparation'&&c.decision.players[seat].subdecision===null&&c.decision.players[seat].selection===null,'PREPARATION_EFFECT_UNAVAILABLE');
+  check(c.decision.kind==='preparation'&&c.decision.players[seat].subdecision===null
+    &&(c.decision.players[seat].selection===null||['reward','buy'].includes(action.operation)
+      &&c.decision.players[seat].selection.optionId===action.optionId),'PREPARATION_EFFECT_UNAVAILABLE');
   if(['skip-reward','ready','unready'].includes(action.operation))return;
   check(['reward','buy','reroll'].includes(action.operation)&&typeof driver?.validate==='function','PREPARATION_EFFECT_UNAVAILABLE');
   driver.validate(c,seat,action);

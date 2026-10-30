@@ -25,7 +25,7 @@ export function createPlayStorage(factory = globalThis.indexedDB) {
         tx.oncomplete = () => resolve(result);
         tx.onabort = () => reject(tx.error ?? new Error('LOCAL_TRANSACTION_ABORTED'));
         tx.onerror = () => reject(tx.error ?? new Error('LOCAL_TRANSACTION_FAILED'));
-        operation(tx.objectStore(store), value => { result = value; });
+        operation(Array.isArray(store)?Object.fromEntries(store.map(name=>[name,tx.objectStore(name)])):tx.objectStore(store), value => { result = value; });
       });
     } finally { db.close(); }
   }
@@ -52,8 +52,24 @@ export function createPlayStorage(factory = globalThis.indexedDB) {
           if (String(cursor.key).startsWith(origin + '|') && /^[A-Z0-9]{6}$/i.test(value?.roomId)
             && [0, 1].includes(value.seat) && typeof value.token === 'string' && value.token)
             out.push({ roomId: value.roomId, seat: value.seat, ...(value.profileId ? {profileId:value.profileId} : {}),
-              ...(value.hostId?{hostId:value.hostId,endpoint:value.endpoint}: {}) });
+              ...(typeof value.runId==='string'?{runId:value.runId}:{}),
+              ...(value.hostId?{hostId:value.hostId,endpoint:value.endpoint}: {}),...(value.summary?{summary:value.summary}: {}),
+              ...(typeof value.displayName==='string'?{displayName:value.displayName}: {}) });
           cursor.continue();
+        };
+      });
+    },
+    deleteSeat(origin, roomId, seat) {
+      const key=seatKey(origin,roomId,seat);
+      return transact([SEATS,OUTBOX],'readwrite',(stores,done)=>{
+        stores[SEATS].get(`active:${origin}`).onsuccess=event=>{
+          const active=event.target.result;
+          if(active===key||active?.key===key)stores[SEATS].put({key:null,paused:true},`active:${origin}`);
+          stores[SEATS].delete(key);
+          stores[OUTBOX].openCursor().onsuccess=entry=>{
+            const cursor=entry.target.result;if(!cursor){done(true);return;}
+            if(String(cursor.key).startsWith(key+'|'))cursor.delete();cursor.continue();
+          };
         };
       });
     },

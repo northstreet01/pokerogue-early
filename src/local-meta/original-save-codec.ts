@@ -17,6 +17,7 @@ import * as modifiers from '../modifier/modifier';
 import { getModifierTypeFuncById } from '../modifier/modifier-type';
 import { check, exact, json, uint } from './codec.mjs';
 import { AES, enc } from 'crypto-js';
+import {restorePokemonState} from '../field/pokemon';
 
 const SYSTEM_KEYS = ['trainerId','secretId','gender','dexData','starterMoveData','starterEggMoveData','gameStats','unlocks',
   'achvUnlocks','voucherUnlocks','voucherCounts','eggs','gameVersion','timestamp'];
@@ -39,6 +40,12 @@ function dexAttr(value: number | string, max: bigint) {
   check((BigInt(value) & ~max) === 0n, 'INVALID_DEX_ATTRIBUTE');
 }
 export const originalSaveCodec = Object.freeze({
+  hatchResult(result:any){
+    originalOwnedEggStateCodec.restore({players:[[result.egg],[]]});
+    const pokemon=restorePokemonState(result.pokemon);
+    check(pokemon instanceof Object&&pokemon.isPlayer()&&pokemon.level===5&&!pokemon.fusionSpecies,'INVALID_HATCH_POKEMON');
+    int(result.eggMoveIndex,0,3);
+  },
   system(input: unknown) {
     initializeCatalogs();
     const s = json(input); exact(s, ['trainerId','secretId','dexData','eggs','gameVersion','timestamp'], SYSTEM_KEYS);

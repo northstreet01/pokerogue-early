@@ -147,7 +147,7 @@ test('real Worker grants new encounter facts to both seats and never backfills r
     }finally{await recipient.data.closeProfile();}
     const saved=await adapter.captureCheckpoint(context);await adapter.closeAll();
     const restored=await adapter.restoreCheckpoint(saved);assert.deepEqual(await adapter.captureCheckpoint(restored),saved);
-    const legacy=structuredClone(saved);delete legacy.provisioning.permanentResults;
+    const legacy=structuredClone(saved);delete legacy.provisioning.permanentResults;delete legacy.provisioning.eggLifecycle;
     await adapter.closeAll();const old=await adapter.restoreCheckpoint(legacy);
     assert.equal(old.provisioning.permanentResults,undefined);
   }finally{await adapter.closeAll();}
@@ -237,4 +237,171 @@ test('SQLite failure emits no ACK; lost ACK and reopen replay do not duplicate p
     await io.applyCoopGrants(message.grants,e.binding,()=>{throw Error('DOUBLE_APPLY');});await io.close();
     assert.deepEqual(await e.repo.read(e.profileId),saved);
   }finally{e.io.invalidate();db.close();}
+});
+
+
+test('profile gacha commits original voucher offers and batch guarantees before exposing eggs',async()=>{
+  for(const [choice,cost,count,type] of [[0,1,1,0],[1,10,10,0],[2,1,5,1],[3,1,10,2],[4,1,25,3]]){
+    const e=await writer();e.data.readonlyView=false;
+    try{
+      const system=structuredClone(e.system);for(const k of [0,1,2,3])system.voucherCounts[k]=50;
+      await e.io.writeSystem(system);await e.data.loadSystem({readOnly:true});
+      const eggs=await e.data.purchaseEggs(choice,choice%3),p=await e.repo.read(e.profileId);
+      assert.equal(eggs.length,count);assert.equal(p.originalSystem.eggs.length,count);
+      assert.equal(p.originalSystem.voucherCounts[type],50-cost);
+      assert.equal(p.originalSystem.gameStats.eggsPulled,count);
+      if(count>=25)assert.ok(eggs.some(egg=>egg.tier>=2));else if(count>=10)assert.ok(eggs.some(egg=>egg.tier>=1));
+      assert.equal(p.grantLedger.filter(g=>g.id.startsWith('egg:')).length,1);
+      const before=structuredClone(p);await assert.rejects(e.data.purchaseEggs(99,0),/INVALID_GACHA_SELECTION/);
+      assert.deepEqual(await e.repo.read(e.profileId),before);
+    }finally{await e.data.closeProfile();}
+  }
+});
+
+test('disk failure leaves gacha inventory and vouchers untouched, retry uses the exact staged draw',async()=>{
+  const store=createMetaStore({indexedDB:new IDBFactory()}),fault={enabled:false};
+  const wrapped={read:store.read,transact:(keys,apply)=>{if(fault.enabled)throw Error('disk');return store.transact(keys,apply);}};
+  const e=await writer(0,wrapped);e.data.readonlyView=false;
+  try{
+    const system=structuredClone(e.system);system.voucherCounts[0]=10;
+    await e.io.writeSystem(system);await e.data.loadSystem({readOnly:true});
+    const before=await e.repo.read(e.profileId);fault.enabled=true;
+    await assert.rejects(e.data.purchaseEggs(1,0),/disk/);
+    const staged=JSON.parse(JSON.stringify(e.data.pendingEggOperation.eggs));
+    assert.deepEqual(await e.repo.read(e.profileId),before);assert.equal(e.data.eggs.length,0);assert.equal(e.data.voucherCounts[0],10);
+    fault.enabled=false;const retry=await e.data.purchaseEggs(1,0);
+    assert.deepEqual(JSON.parse(JSON.stringify(retry)),staged);
+    assert.equal((await e.repo.read(e.profileId)).originalSystem.voucherCounts[0],0);
+  }finally{fault.enabled=false;await e.data.closeProfile();}
+});
+
+test('egg progress reserves at zero, terminal releases, original hatch rewards persist before repeatable playback',async()=>{
+  const e=await writer();e.data.readonlyView=false;
+  try{
+    const egg={id:12345,gachaType:0,hatchWaves:1,timestamp:1700000000000};
+    const system=structuredClone(e.system);system.eggs=[egg];await e.io.writeSystem(system);await e.data.loadSystem({readOnly:true});
+    await e.data.applyCoopResults([{id:'egg-start',seat:0,payload:{version:2,facts:[{kind:'session-start',eggs:[egg],starters:[]}]}}],e.binding);
+    const progress={id:'progress',seat:0,payload:{version:2,facts:[{kind:'egg-progress',owner:0,before:[egg],after:[{...egg,hatchWaves:0}]}]}};
+    await e.data.applyCoopResults([progress],e.binding);
+    let p=await e.repo.read(e.profileId);assert.equal(p.originalSystem.eggs[0].hatchWaves,0);assert.equal(p.deferredHatches[0].state,'waiting-terminal');
+    assert.equal(await api.withOriginalRules(e.runtime.context,()=>e.data.prepareDeferredHatch()),null);
+    const once=structuredClone(p);await e.data.applyCoopResults([progress],e.binding);assert.deepEqual(await e.repo.read(e.profileId),once);
+    const full={...egg,hatchWaves:0};
+    await e.data.applyCoopResults([{id:'stay-full',seat:0,payload:{version:2,facts:[{kind:'egg-progress',owner:0,before:[full],after:[full]}]}}],e.binding);
+    await e.data.applyCoopResults([{id:'terminal',seat:0,payload:{version:2,facts:[{kind:'egg-terminal',owner:0,result:'defeat'}]}}],e.binding);
+    p=await e.repo.read(e.profileId);assert.equal(p.deferredHatches[0].state,'released');
+    const result=await api.withOriginalRules(e.runtime.context,()=>e.data.prepareDeferredHatch());assert.ok(result);p=await e.repo.read(e.profileId);
+    assert.equal(p.schemaVersion,2);assert.equal(p.originalSystem.eggs.length,0);assert.equal(p.deferredHatches.length,0);
+    assert.equal(p.originalSystem.gameStats.pokemonHatched,1);assert.equal(p.hatchResults.length,1);
+    assert.deepEqual(await api.withOriginalRules(e.runtime.context,()=>e.data.prepareDeferredHatch()),result);assert.equal((await e.repo.read(e.profileId)).originalSystem.gameStats.pokemonHatched,1);
+    await e.data.closeProfile();
+    const io=await openGameProfileIO(e.repo,e.profileId,{mode:'home'}),restored=original();restored.data.bindProfileIO(io);
+    try{await restored.data.loadSystem({readOnly:true});assert.deepEqual(await api.withOriginalRules(restored.runtime.context,()=>restored.data.prepareDeferredHatch()),result);
+      await restored.data.acknowledgeHatch(result.id);await restored.data.acknowledgeHatch(result.id);
+      assert.equal((await e.repo.read(e.profileId)).hatchResults.length,0);
+    }finally{await restored.data.closeProfile();}
+  }finally{await e.data.closeProfile();}
+});
+
+
+test('real Host/Worker egg phase defers both owners and survives formal disk failure plus missing grant ACK',async()=>{
+  const players=[await writer(0),await writer(1)];
+  const adapter=createPlayerHostAdapter({seedFactory:()=> 'egg-worker-recovery'});
+  let env;
+  try{
+    for(const [seat,p] of players.entries()){
+      const system=structuredClone(p.system);system.eggs=[{id:12345+seat,gachaType:seat,hatchWaves:1,timestamp:1700000000000}];
+      await p.io.writeSystem(system);await p.data.loadSystem({readOnly:true});
+    }
+    const catalogs=players.map(p=>api.captureRoomCatalog(p.data)),union=api.mergeRoomCatalogs(catalogs);
+    let context=await adapter.createInitialContext({runId:'egg-run'}),startGrants=[];
+    for(const [seat,ids,ready] of [[0,[],false],[1,[],false],[0,[1],false],[1,[4],false],[0,[1],true],[1,[4],true]]){
+      const p=players[seat].data,view=api.roomSelectionData(p,union);
+      const profile=api.captureProfileDraft(view,ids.map(id=>({species:api.getPokemonSpecies(id),dexAttr:149n,nature:view.getNaturesForAttr(view.dexData[id].natureAttr)[0],pokerus:false})),catalogs[seat]);
+      const result=await adapter.advanceToDecision(context,{[seat]:{kind:ready?'profile-ready':'profile-draft',profile,ready}});
+      context=result.context;startGrants.push(...result.grants);
+    }
+    // Explicit synthetic post-victory phase boundary; phase execution itself,
+    // private egg projections and host durable grants use production rules.
+    const c=api.originalDecisionStateCodec.restore(context.checkpoint);
+    c.continuation={phaseQueue:[{kind:'original-phase',phaseId:0,phase:new api.EggLapsePhase({}),remaining:'start'}],
+      phaseQueuePrepend:[],nextCommandPhaseQueue:[],currentPhase:null,standbyPhase:null,phaseQueuePrependSpliceIndex:-1};
+    c.decision={id:'egg-boundary',kind:'continuing',requiredSeats:[],reason:'effects'};
+    context.checkpoint=api.originalDecisionStateCodec.capture(c);
+    const initial=structuredClone(context),wrapped={...adapter,createInitialContext:({runId})=>({...structuredClone(initial),runId})};
+    const store={data:new Map(),fail:true,async load(){return [...this.data.values()].map(v=>structuredClone(v));},async save(room){if(this.fail&&room.revision===1)throw Error('disk');this.data.set(room.roomId,structuredClone(room));}};
+    env=await formalFixture(wrapped,store);let pair=[await env.client(),await env.client()];
+    pair[0].send({type:'createRoom',name:'A'});let a=await pair[0].wait(m=>m.type==='welcome');
+    pair[1].send({type:'joinRoom',roomId:a.roomId,name:'B'});let b=await pair[1].wait(m=>m.type==='welcome');
+    const identities=[a,b];let snapshots=await Promise.all(pair.map(p=>p.wait(m=>m.type==='snapshot')));
+    for(const [seat,p] of players.entries())await p.data.applyCoopResults(startGrants.filter(g=>g.seat===seat),{...p.binding,runId:snapshots[seat].runId,roomId:a.roomId,token:identities[seat].resumeToken});
+    // Use the real snapshot consumer to compute the projection digest.
+    let drop=true;
+    const consume=()=>pair.map((client,seat)=>{const model=api.createOriginalClientModel(api);return createSnapshotConsumer({versions:env.versions,isCurrent:()=>true,
+      send:m=>{if(!(drop&&seat===1&&m.type==='grantAck'))client.send(m);},adapter:{applySnapshot:s=>model.applySnapshot(s),captureAppliedState:()=>model.captureAppliedState(),
+        applyGrantsTransaction:g=>players[seat].data.applyCoopResults(g,{...players[seat].binding,runId:snapshots[seat].runId,roomId:a.roomId,token:identities[seat].resumeToken})}});});
+    let consumers=consume();await Promise.all(snapshots.map((s,i)=>consumers[i](s)));
+    await pair[1].wait(m=>m.type==='error'&&m.code==='STORAGE_FAILED');
+    assert.equal(store.data.get(a.roomId).revision,0);assert.equal(store.data.get(a.roomId).checkpoint.nativeCheckpoint.eggState.players[0][0].hatchWaves,1);
+    await env.close();await adapter.closeAll();store.fail=false;env=await formalFixture(wrapped,store);
+    pair=[await env.client(),await env.client()];pair.forEach((p,seat)=>p.send({type:'resumeSeat',roomId:a.roomId,resumeToken:identities[seat].resumeToken}));
+    snapshots=await Promise.all(pair.map(p=>p.wait(m=>m.type==='snapshot')));consumers=consume();
+    await Promise.all(snapshots.map((s,i)=>consumers[i](s)));
+    snapshots=await Promise.all(pair.map(p=>p.wait(m=>m.type==='snapshot'&&m.revision===1)));
+    assert.ok(snapshots.every(s=>s.grants.some(g=>g.payload.facts.some(f=>f.kind==='egg-progress'))));
+    await Promise.all(snapshots.map((s,i)=>consumers[i](s)));
+    const saved=await players[1].repo.read(players[1].profileId);assert.equal(saved.originalSystem.eggs[0].hatchWaves,0);assert.equal(saved.deferredHatches[0].state,'waiting-terminal');
+    drop=false;await consumers[1](snapshots[1]);assert.deepEqual(await players[1].repo.read(players[1].profileId),saved);
+    assert.ok(!JSON.stringify(snapshots[0]).includes('12346'),'peer egg IDs remain private');
+  }finally{await env?.close();await adapter.closeAll();for(const p of players)await p.data.closeProfile();}
+});
+
+
+test('original shared reward voucher is applied only to its claimant through durable personal results',async()=>{
+  const {createOriginalRuleHost}=await import('../server/original-rule-host.mjs');
+  const host=await createOriginalRuleHost({seed:'egg-voucher-reward',identity:{trainerId:1,secretId:2},deferEggs:true}),e=await writer();
+  try{
+    const opened=await host.request('native-open-to-input',{parties:[[1,7,909],[4,7,906]],eggState:{players:[[],[]]}});
+    const c=api.originalDecisionStateCodec.restore(opened.checkpoint);
+    for(const entry of c.roster.entries)if(entry.owner===null){entry.pokemon.hp=0;entry.pokemon.status=new api.Status(api.StatusEffect.FAINT);}
+    c.continuation={phaseQueue:[{kind:'original-phase',phaseId:0,phase:new api.SelectModifierPhase({}),remaining:'start'}],
+      phaseQueuePrepend:[],nextCommandPhaseQueue:[],currentPhase:null,standbyPhase:null,phaseQueuePrependSpliceIndex:-1};
+    c.decision={id:'voucher-boundary',kind:'continuing',requiredSeats:[],reason:'effects'};
+    const checkpoint=(await host.request('native-preparation-shared',api.originalDecisionStateCodec.capture(c))).checkpoint;
+    const type=api.captureModifierTypeState(api.modifierTypes.VOUCHER().withIdFromFunc(api.modifierTypes.VOUCHER));
+    for(const row of checkpoint.decision.players)row.rewards[0].type=structuredClone(type);
+    const optionId=checkpoint.decision.players[0].rewards[0].id;
+    const result=await host.request('native-prepare-action',{checkpoint,seat:0,action:{kind:'preparation',operation:'reward',optionId,pokemonId:null,moveIndex:null,fusionId:null}});
+    const fact=result.intents.find(f=>f.kind==='voucher-item');assert.equal(fact?.owner,0);assert.equal(fact.catalogId,'VOUCHER');
+    assert.ok(result.checkpoint.decision.shared.rewardClaims.some(c=>c.optionId===optionId&&c.seat===0));
+    const g={id:'voucher-item-claim',seat:0,payload:{version:2,facts:[fact]}};
+    await e.data.applyCoopResults([g],e.binding);await e.data.applyCoopResults([g],e.binding);
+    assert.equal((await e.repo.read(e.profileId)).originalSystem.voucherCounts[0],e.system.voucherCounts[0]+1);
+  }finally{await host.close();await e.data.closeProfile();}
+});
+
+
+test('SQLite hatch failure retains the egg and fixed staged result; reopen keeps rewards and interrupted presentation once',async()=>{
+  const root=resolve('build/code-review/egg-sqlite');mkdirSync(root,{recursive:true});const dir=mkdtempSync(join(root,'run-'));let failing=false;
+  let db=openDesktopStorage(dir,{beforeCommit:op=>{if(failing&&op==='commit')throw Error('INJECTED_EGG_DISK_FAILURE');}});
+  const empty=Object.fromEntries(STORAGE_SCOPES.map(scope=>[scope,{}]));db.initialize(empty,bundleDigest(empty));
+  const wrap=fn=>{try{return {ok:true,value:fn()};}catch(e){return {ok:false,code:e.message};}};
+  const bridge={storageVersion:1,storageStatus:()=>wrap(()=>db.status()),storageSnapshot:r=>wrap(()=>db.snapshot(r.scope,r.keys)),storageCommit:r=>wrap(()=>db.commit(r))};
+  const e=await writer(0,createNativeStore('meta',bridge));
+  try{
+    const egg={id:12346,gachaType:2,hatchWaves:1,timestamp:1700000000001},system=structuredClone(e.system);system.eggs=[egg];
+    await e.io.writeSystem(system);await e.data.loadSystem({readOnly:true});
+    await e.data.applyCoopResults([{id:'sql-start',seat:0,payload:{version:2,facts:[{kind:'session-start',starters:[],eggs:[egg]}]}}],e.binding);
+    await assert.rejects(openGameProfileIO(e.repo,e.profileId,{mode:'solo'}),/LOCAL_EGGS_RESERVED/);
+    await assert.rejects(e.io.writeSystem({...system,eggs:[]}),/LOCAL_EGGS_RESERVED/);
+    await e.data.applyCoopResults([{id:'sql-end',seat:0,payload:{version:2,facts:[{kind:'egg-progress',owner:0,before:[egg],after:[{...egg,hatchWaves:0}]},{kind:'egg-terminal',owner:0,result:'victory'}]}}],e.binding);
+    const before=await e.repo.read(e.profileId);failing=true;
+    await assert.rejects(api.withOriginalRules(e.runtime.context,()=>e.data.prepareDeferredHatch()),/INJECTED_EGG_DISK_FAILURE/);
+    assert.deepEqual(await e.repo.read(e.profileId),before);const staged=structuredClone(e.data.pendingEggOperation.result);
+    failing=false;const result=await api.withOriginalRules(e.runtime.context,()=>e.data.prepareDeferredHatch());assert.deepEqual(result,staged);
+    const committed=await e.repo.read(e.profileId);assert.equal(committed.originalSystem.gameStats.pokemonHatched,1);
+    await e.data.closeProfile();db.close();db=openDesktopStorage(dir);
+    const io=await openGameProfileIO(e.repo,e.profileId,{mode:'home'});assert.deepEqual(io.profile.hatchResults,[staged]);
+    await io.acknowledgeHatch(staged.id);await io.close();assert.equal((await e.repo.read(e.profileId)).originalSystem.gameStats.pokemonHatched,1);
+  }finally{failing=false;e.io.invalidate();db.close();}
 });

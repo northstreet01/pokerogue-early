@@ -4,7 +4,7 @@ import {createRequire} from 'node:module';
 import {buildCoopRuntime} from '../scripts/build-coop-runtime.mjs';
 import {originalPreparationFixture,member,reward} from './helpers/growth-items-fixture.mjs';
 import {progressDefault} from './helpers/native-default-trainer.mjs';
-import {openPreparationRoom,request,until} from './helpers/native-preparation-ws.mjs';
+import {openPreparationRoom,request,until,advance,raw} from './helpers/native-preparation-ws.mjs';
 import {FormalRoomStore} from '../server/formal-coop-service.mjs';
 import {mkdtemp,mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -20,6 +20,107 @@ function option(c,id,type=typeFor(id)){
 const act=(c,seat,action)=>route.h.request('native-prepare-action',{checkpoint:c,seat,action});
 const modifiers=(c,seat)=>c.players[seat].modifiers.map(index=>api.restoreModifierState(c.components[index].state));
 function attach(c,seat,modifier){c.players[seat].modifiers.push(c.components.length);c.components.push({kind:'modifier',state:api.captureModifierState(modifier)});}
+
+// Explicit original-catalog fixtures, not natural item drops or player saves.
+function formFixture(source=base,{species=6,item=14,index=0,active=false}={}){
+ const c=copy(source),runtime=api.createOriginalRuntime(c.scene.seed,{trainerId:1,secretId:2}),entry=member(c,0,index);
+ const p=api.constructOriginalPokemon(runtime,species,5);p.id=entry.pokemon.fields.id;p.resetSummonData();p.resetTurnData();entry.pokemon=api.capturePokemonState(p);
+ const factory=api.modifierTypes.FORM_CHANGE_ITEM,type=factory().withIdFromFunc(factory).generateType([p],[item]);
+ const modifier=type.newModifier(p);modifier.active=active;attach(c,0,modifier);
+ return {c,id:p.id,item,action:{kind:'form-toggle',pokemonId:p.id,item,active:!active}};
+}
+
+test('owned form toggles use original phases, preserve resources and restore Mega/Gmax after disabling',async()=>{
+ for(const item of [14,57])for(const index of [0,1]){
+  let {c,action}=formFixture(base,{item,index}),before=copy(c);
+  const changed=await act(c,0,action);c=changed.checkpoint;
+  assert.match(api.restorePokemonState(member(c,0,index).pokemon).getFormKey(),item===14?/mega-x/:/gigantamax/);
+  assert.deepEqual(c.decision.players,before.decision.players);assert.deepEqual(c.decision.shared,before.decision.shared);
+  for(const key of ['sceneRandom','battle','eggState','continuation'])assert.deepEqual(c[key],before[key],key);
+  assert.deepEqual(c.players,before.players);assert.deepEqual(member(c,1),member(before,1));
+  assert.equal(modifiers(c,0).find(m=>m.formChangeItem===item).active,true);
+  assert.ok(changed.events.some(e=>e.kind==='form-change'&&e.pokemonId===action.pokemonId));
+  assert.ok(changed.intents.some(e=>e.kind==='evolution-pending'&&e.owner===0));
+  await route.h.request('native-validate-checkpoint',c);
+  const restored=(await act(JSON.parse(JSON.stringify(c)),0,{...action,active:false})).checkpoint;
+  assert.equal(member(restored,0,index).pokemon.fields.formIndex,0);
+  assert.deepEqual(member(restored,0,index).pokemon.fields.moveset,member(before,0,index).pokemon.fields.moveset);
+  assert.deepEqual(c,changed.checkpoint);assert.deepEqual(before,formFixture(base,{item,index}).c);
+ }
+});
+
+test('form toggle rejects foreign, stale, unavailable and selected-item requests without changing its source',async()=>{
+ const {c,action}=formFixture(),before=copy(c);
+ for(const bad of [{...action,pokemonId:member(c,1).pokemon.fields.id},{...action,item:15},{...action,active:false},{...action,item:-1},{...action,extra:true}])
+  await assert.rejects(()=>act(c,0,bad),/INVALID_FORM|STALE_FORM/);
+ assert.deepEqual(c,before);
+ const next=(await act(c,0,action)).checkpoint;
+ await assert.rejects(()=>act(next,0,action),/STALE_FORM_ITEM/);
+ // Another held form item is invisible until the active one is disabled.
+ const runtime=api.createOriginalRuntime(c.scene.seed,{trainerId:1,secretId:2}),p=api.restorePokemonState(member(next,0).pokemon);p.scene=runtime.scene;
+ const f=api.modifierTypes.FORM_CHANGE_ITEM,other=f().withIdFromFunc(f).generateType([p],[15]).newModifier(p);other.active=false;attach(next,0,other);
+ await assert.rejects(()=>act(next,0,{...action,item:15}),/STALE_FORM_ITEM/);
+ const off=(await act(next,0,{...action,active:false})).checkpoint;
+ const y=(await act(off,0,{...action,item:15})).checkpoint;
+ assert.match(api.restorePokemonState(member(y,0).pokemon).getFormKey(),/mega-y/);
+});
+
+test('Rayquaza item alone cannot bypass the original Dragon Ascent condition',async()=>{
+ const {c,action}=formFixture(base,{species:384,item:38});
+ const r=await act(c,0,action);
+ assert.equal(member(r.checkpoint,0).pokemon.fields.formIndex,0);
+ assert.equal(r.events.some(e=>e.kind==='form-change'),false);
+ assert.equal(modifiers(r.checkpoint,0).find(m=>m.formChangeItem===38).active,true);
+ const learned=copy(c),p=api.restorePokemonState(member(learned,0).pokemon);
+ p.moveset=[new p.moveset[0].constructor(620)];member(learned,0).pokemon=api.capturePokemonState(p);
+ const transformed=await act(learned,0,action);
+ assert.match(api.restorePokemonState(member(transformed.checkpoint,0).pokemon).getFormKey(),/mega/);
+});
+
+test('Gigantamax Toxtricity returns to its nature form and learned Secret Sword changes Keldeo without an evolution prompt',async()=>{
+ for(const nature of [0,1]){
+  const {c,action}=formFixture(base,{species:849,item:57}),p=api.restorePokemonState(member(c,0).pokemon);
+  p.nature=nature;p.formIndex=nature===1?1:0;member(c,0).pokemon=api.capturePokemonState(p);
+  const changed=(await act(c,0,action)).checkpoint;
+  assert.match(api.restorePokemonState(member(changed,0).pokemon).getFormKey(),/gigantamax/);
+  const restored=(await act(changed,0,{...action,active:false})).checkpoint;
+  assert.equal(member(restored,0).pokemon.fields.formIndex,nature===1?1:0);
+ }
+ const c=copy(base),runtime=api.createOriginalRuntime(c.scene.seed,{trainerId:1,secretId:2}),p=api.constructOriginalPokemon(runtime,647,5);
+ p.id=member(c,0).pokemon.fields.id;p.moveset=[];member(c,0).pokemon=api.capturePokemonState(p);
+ const item=option(c,'MEMORY_MUSHROOM'),moveIndex=p.getLearnableLevelMoves().indexOf(548);assert.ok(moveIndex>=0);
+ const result=await act(c,0,{...reward(item,p.id),moveIndex});
+ assert.equal(api.restorePokemonState(member(result.checkpoint,0).pokemon).getFormKey(),'resolute');
+ assert.equal(result.checkpoint.decision.players[0].subdecision,null);
+ assert.ok(result.events.some(e=>e.kind==='form-change'));
+ await route.h.request('native-validate-checkpoint',result.checkpoint);
+});
+
+test('battle form updates commit immediately, clear earlier peer choices and survive failed disk writes/restart/replay',async()=>{
+ const {c,action}=formFixture(route.initial),expected=await act(c,0,action);
+ await mkdir('build/code-review/form-ws',{recursive:true});const directory=await mkdtemp(resolve('build/code-review/form-ws/run-'));
+ const disk=new FormalRoomStore(directory);let fail=true;
+ const store={load:()=>disk.load(),save:room=>{if(fail&&room.revision===1)throw Error('injected form write failure');return disk.save(room);}};
+ let env=await openPreparationRoom({api,checkpoint:c,store,stage:'battle'});
+ try{
+  let pair=env.pair;const tokens=pair.map(p=>p.identity),roomId=tokens[0].roomId;
+  const prior=await raw(pair[1],pair[1].latest.personal.decision.options.find(o=>o.kind==='fight'));
+  const input=await raw(pair[0],action);
+  await pair[0].wait(m=>m.type==='syncStatus'&&m.reason==='STORAGE_FAILED');
+  assert.deepEqual(env.server.rooms.get(roomId).checkpoint.nativeCheckpoint,c);
+  await env.close();fail=false;env=await openPreparationRoom({api,checkpoint:c,store:new FormalRoomStore(directory),old:tokens,stage:'battle'});pair=env.pair;
+  await until(()=>pair.every(p=>p.ready&&p.latest.revision===1),'immediate form after durable retry');
+  const saved=copy(env.server.rooms.get(roomId));assert.deepEqual(saved.checkpoint.nativeCheckpoint,expected.checkpoint);
+  assert.deepEqual(saved.inputs,{});assert.equal(saved.checkpoint.nativeCheckpoint.battle.turn,c.battle.turn);
+  assert.ok(saved.events.some(e=>e.presentation?.key==='coop:formToggleBattleSaved'));
+  for(const [seat,message] of [[0,input],[1,prior]]){
+   pair[seat].send(message);assert.equal((await pair[seat].wait(m=>m.type==='actionReceipt'&&m.actionId===message.actionId)).accepted,true);
+   assert.deepEqual(env.server.rooms.get(roomId).checkpoint,saved.checkpoint);
+  }
+  await advance(pair,0,{...action,active:false});
+  assert.equal(member(env.server.rooms.get(roomId).checkpoint.nativeCheckpoint,0).pokemon.fields.formIndex,0);
+ }finally{await env.close();}
+});
 
 test('original persistent item rewards retain ownership, checkpoint roundtrip and exactly one shared claim',async()=>{
  const held=['FOCUS_BAND','KINGS_ROCK','LEFTOVERS','SHELL_BELL','REVIVER_SEED','SOOTHE_BELL','GOLDEN_PUNCH'];

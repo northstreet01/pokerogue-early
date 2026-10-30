@@ -20,6 +20,9 @@ export class RuleContainer {
   getIndex(child) { return this.list.indexOf(child); }
   add(child) { this.list.push(...(Array.isArray(child) ? child : [child])); return this; }
   remove(child) { const index = this.getIndex(child); if (index >= 0) this.list.splice(index, 1); return this; }
+  // Detached original constructors allocate no renderer resources. Their normal
+  // destroy() chain may still release this explicit ownership list.
+  destroy() { this.list.length = 0; }
 }
 class RuleScene { constructor(key) { this.headlessKey = key; } }
 

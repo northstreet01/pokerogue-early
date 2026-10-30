@@ -42,7 +42,7 @@ function home(t){
   const runtime=api.createOriginalRuntime('local-meta-ui',{trainerId:1,secretId:2}),modes=[],texts=[],assigned=[];
   const scene={game:{config:{gameVersion:'1.0.0'}},gameData:{untouched:true},events:{once(){}},fadeOutBgm(){},playBgm(){},
     executeWithSeedOffset:(fn,offset,seed)=>api.withOriginalRules(runtime.context,()=>runtime.scene.executeWithSeedOffset(fn,offset,seed)),
-    ui:{fadeIn(){},clearText(){},showText(text){texts.push(text);},setMode:async(...args)=>{modes.push(args);}}};
+    ui:{fadeIn(){},clearText(){},getMode:()=>modes.at(-1)?.[0],showText(text){texts.push(text);},setMode:async(...args)=>{modes.push(args);}}};
   location.assign=url=>assigned.push(url);
   const p=new api.HomePhase(scene);p.start();t.after(()=>p.dispose());
   return {p,scene,modes,texts,assigned,last:()=>modes.at(-1),options:()=>modes.at(-1)?.[1]?.options};
@@ -237,7 +237,7 @@ test('coop capture, solo capture and home dex reopen the same personal System in
 test('home routes dex and original personal screens directly; profile slots use original view-only cards',async t=>{
   const {r,p}=await created();await r.setActive(p.profileId);const h=home(t);
   await h.p.showHome();assert.ok(h.options().some(o=>o.label==='宝可梦图鉴'));
-  await h.p.showPersonal();assert.deepEqual(h.options().slice(0,4).map(o=>o.label),['我的未孵化蛋','我的蛋券','成就','游戏统计']);
+  await h.p.showPersonal();assert.deepEqual(h.options().slice(0,5).map(o=>o.label),['我的未孵化蛋','蛋扭蛋机','领取已完成孵化','成就','游戏统计']);
   for(const mode of [api.Mode.ACHIEVEMENTS,api.Mode.GAME_STATS]){
     await h.p.browse(mode);assert.equal(h.last()[0],mode);assert.equal(typeof h.last()[1].onCancel,'function');
     h.last()[1].onCancel();await h.p.transitions;

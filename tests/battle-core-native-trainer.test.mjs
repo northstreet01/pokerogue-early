@@ -5,13 +5,35 @@ import {createOriginalRuleHost} from '../server/original-rule-host.mjs';
 import {defaultTrainerRoute,defaultTrainerVictory,progressDefault} from './helpers/native-default-trainer.mjs';
 import {owned} from './helpers/native-natural-learning.mjs';
 import {trainerReserveFixture} from './helpers/native-trainer-reserve.mjs';
+import {createRequire} from 'node:module';
 
 before(()=>buildCoopRuntime());
+
+test('doubled equal trainer shares retain personal Amulet Coin boosts and original shop prices',async()=>{
+ const route=await defaultTrainerVictory(),h=route.h;
+ const api=createRequire(import.meta.url)('../build/coop-runtime/original-runtime.cjs');
+ try{for(const owner of [0,1]){
+  let c=structuredClone(route.beforeVictory);
+  const factory=api.modifierTypes.AMULET_COIN,type=factory().withIdFromFunc(factory),modifier=type.newModifier();
+  c.players[owner].modifiers.push(c.components.length);c.components.push({kind:'modifier',state:api.captureModifierState(modifier)});
+  const starting=c.players.map(p=>p.money);
+  for(let n=0;n<180;n++){
+   const next=c.continuation.phaseQueuePrepend.at(-1)??c.continuation.phaseQueue[0];
+   if(next?.phase.type==='SelectModifierPhase')break;
+   c=(await progressDefault(h,c)).checkpoint;
+  }
+  assert.deepEqual(c.players.map((p,seat)=>p.money-starting[seat]),[0,1].map(seat=>seat===owner?132:110));
+  const menu=(await h.request('native-preparation-shared',c)).checkpoint;
+  const base=api.BattleScene.prototype.getWaveMoneyAmount.call({currentBattle:c.battle},1);
+  const expected=api.getPlayerShopModifierTypeOptionsForWave(c.battle.waveIndex,base).map(o=>o.cost);
+  for(const p of menu.decision.players)assert.deepEqual(p.shop.map(o=>o.cost),expected,'reward multiplier must not inflate the shop');
+ }}finally{await h.close();}
+});
 
 test('natural trainer prize persists owned original phases and cannot regrant seat zero after a phase restart',async()=>{
   const route=await defaultTrainerVictory();let h=route.h;
   try{
-    const startingMoney=route.beforeVictory.players.map(p=>p.money),awardedMoney=startingMoney.map(money=>money+55);
+    const startingMoney=route.beforeVictory.players.map(p=>p.money),awardedMoney=startingMoney.map(money=>money+110);
     assert.deepEqual(route.c.players.map(p=>p.money),awardedMoney);
     let c=(await progressDefault(h,route.beforeVictory)).checkpoint,sawHalf=false,events=[];
     for(let n=0;n<160;n++){
@@ -31,6 +53,30 @@ test('natural trainer prize persists owned original phases and cannot regrant se
     const normalize=value=>{const s=structuredClone(value);for(const key of ['phaseQueue','phaseQueuePrepend','nextCommandPhaseQueue'])for(const d of s.continuation[key])delete d.phaseId;return s;};
     assert.deepEqual(normalize(c),normalize(route.c));
   }finally{await h.close();}
+});
+
+test('half-paid legacy trainer award finishes both old shares without upgrading only the remaining player',async()=>{
+ const route=await defaultTrainerVictory(),h=route.h,starting=route.beforeVictory.players.map(p=>p.money);
+ try{
+  let c=(await progressDefault(h,route.beforeVictory)).checkpoint,found=false;
+  for(let n=0;n<180;n++){
+   const next=c.continuation.phaseQueuePrepend.at(-1)??c.continuation.phaseQueue[0];
+   if(next?.phase.type==='MoneyRewardPhase'){found=true;break;}
+   c=(await h.request('native-step',c)).checkpoint;
+  }
+  assert.ok(found);
+  const remaining=[...c.continuation.phaseQueue,...c.continuation.phaseQueuePrepend].filter(d=>d.phase.type==='MoneyRewardPhase');
+  assert.equal(remaining.length,2);
+  for(const d of remaining)d.phase.fields.moneyMultiplier.value/=2;
+  c=(await h.request('native-step',c)).checkpoint;
+  assert.deepEqual(c.players.map(p=>p.money),[starting[0]+55,starting[1]]);
+  c=JSON.parse(JSON.stringify(c));
+  for(let n=0;n<180;n++){
+   const next=c.continuation.phaseQueuePrepend.at(-1)??c.continuation.phaseQueue[0];if(next?.phase.type==='SelectModifierPhase')break;
+   c=(await h.request('native-step',c)).checkpoint;
+  }
+  assert.deepEqual(c.players.map(p=>p.money),starting.map(m=>m+55));
+ }finally{await h.close();}
 });
 
 test('synthetic original boss victory defers one owned voucher entitlement per player without gacha balances',async()=>{
@@ -216,10 +262,10 @@ test('default route resumes after a real trainer enemy faint without committing 
   }finally{await h.close();}
 });
 
-test('default route splits the original trainer prize, prepares and naturally fights the following wild encounter',async()=>{
+test('default route doubles the shared trainer prize before splitting, then naturally fights the following wild encounter',async()=>{
   const {h,c:source}=await defaultTrainerRoute();
   try{
-    const awardedMoney=source.players.map(p=>p.money+55);
+    const awardedMoney=source.players.map(p=>p.money+110);
     let c=(await h.request('native-next',source)).checkpoint;
     c=(await h.request('native-run-to-boundary',c)).checkpoint;
     const events=[];

@@ -205,6 +205,8 @@ npm run test:desktop
 
 提交 Issue 时附上版本、复现步骤和脱敏后的错误信息。不要附带真实存档、数据库、恢复凭据或私人诊断目录；漏洞请按 [安全说明](SECURITY.md) 私下报告。依赖与安全扫描通过 GitHub Actions 和 Dependabot 持续维护。
 
+依赖更新以 `package-lock.json` 和 `npm ci --ignore-scripts` 为准。Phaser 保留 3.x；Vite、TypeScript、Node 类型与 Vitest 的主版本升级需要先做兼容迁移。Vitest 与 `@vitest/*` 成组更新，覆盖率插件必须与 Vitest 版本一致；GitHub Actions 也成组更新并保留提交 SHA 锁定。已被当前交付替代的旧依赖或 CI 修复 PR 应关闭，避免重复维护旧基线。
+
 ## 许可证与致谢
 
 源码遵循 [GNU AGPL-3.0](LICENSE)，基于 [pagefaultgames/pokerogue](https://github.com/pagefaultgames/pokerogue)。Pokémon 及相关素材的权利归各自权利人所有，本项目与其无隶属关系。

@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      vitest:
+        patterns: ['vitest', '@vitest/*']
+      runtime-utilities:
+        patterns: ['i18next', 'json-stable-stringify']
+        update-types: [minor, patch]
     # These upgrades require explicit compiler/bundler migration. Keep receiving
     # patches and minor updates for the tested toolchain and Node 24 types.
     ignore:
@@ -14,8 +20,19 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: '@types/node'
         update-types: [version-update:semver-major]
+      # Phaser 4 removes APIs used by the game and rex plugins. Vitest 5 needs
+      # a coordinated test-toolchain migration; coverage must match Vitest.
+      - dependency-name: phaser
+        update-types: [version-update:semver-major]
+      - dependency-name: vitest
+        update-types: [version-update:semver-major]
+      - dependency-name: '@vitest/*'
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ['*']

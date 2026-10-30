@@ -371,10 +371,10 @@ export class ConsolidateDataPhase extends Phase {
                         if (error)
                           console.error(error);
 
-                        window.location = window.location;
+                        window.location.reload();
                       });
                   } else
-                    window.location = window.location;
+                    window.location.reload();
                 });
             });
           } else

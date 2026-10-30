@@ -1153,7 +1153,7 @@ export class GameData {
                             console.error(error);
                             return displayError((i18next.resolvedLanguage??i18next.language)==='zh-Hans'?i18next.t('earlyBattle:dataUpdateFailed',{dataName:i18next.t(`earlyBattle:dataName.${dataName}`)}):`An error occurred while updating ${dataName} data. Please contact the administrator.`);
                           }
-                          window.location = window.location;
+                          window.location.reload();
                         });
                     });
                   } else {
